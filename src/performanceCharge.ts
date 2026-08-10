@@ -6,7 +6,7 @@
 
 export const TARGET_WR_PCT = 45;
 export const TARGET_ARMED_SHARE = 0.7;
-export const LATE_CHASE_SOFT_CAP = 0.05;
+export const LATE_CHASE_SOFT_CAP = 0.08;
 
 export const CHARGE_WEIGHTS = {
   wr: 0.35,

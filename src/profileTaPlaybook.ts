@@ -312,7 +312,7 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
     entryTools: tools({ volumeExpansion: true }),
     exitTools: tools({ volumeExpansion: true, macd: true }),
     timeframes: ['5m', '15m'],
-    minConfluenceScore: 25,
+    minConfluenceScore: 40,
     whaleMode: 'soft',
     learningEnabled: true,
   }),

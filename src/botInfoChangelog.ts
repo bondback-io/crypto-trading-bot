@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.257',
+    title: 'Master performance · late-chase disable · MS tighten · PCL harvest',
+    sections: ['microbots', 'tradecraft', 'overview', 'knobs', 'risk', 'learning'],
+    items: [
+      'Late-chase: close flag-only Entry Skill bypass; 125-close force-disable countdown; 8% last-50 share cap; LC_* reason codes; MB+MS hardLateChase; detect ext 8%. Sticky restricted during countdown — never loosened.',
+      'Migration Sniper: conviction 36 / WQ 35 / fire ≥92% / H1 $2.5k / buy $400 / size ×0.55 ≤0.10 SOL; PTA confluence 40; disc hard-skip when migration_hold_reclaim down_ranked/restricted unless Grad-armed; size habit ×0.65/×0.55.',
+      'Entry Skill disc permission floor 42; PCL earlier arm (55%/52%) + tighter giveback (38%/35%) + higher early partial; post-partial giveback ×0.92; MFE chip floor 0; performanceRegimeMarker v1.2.257-perf for clean Last-50. Hard SL/anti-rug/Scalper untouched.',
+    ],
+  },
+  {
     version: '1.2.256',
     title: 'HWR/Steady soft-allow · insider soft-pass · Steady med/maj arms',
     sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs'],

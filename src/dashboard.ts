@@ -17049,9 +17049,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         const lateOk =
           mix.lateChaseShare != null &&
-          mix.lateChaseShare <= (targets.lateChaseShareMax || 0.05);
+          mix.lateChaseShare <= (targets.lateChaseShareMax || 0.08);
         const lateWarn =
-          mix.lateChaseShare != null && mix.lateChaseShare <= 0.08;
+          mix.lateChaseShare != null && mix.lateChaseShare <= 0.1;
         if (lateEl) {
           lateEl.textContent = 'Late-chase ' + elFmtPct(mix.lateChaseShare, 1);
           lateEl.className = elChipClass(lateOk, lateWarn && !lateOk);

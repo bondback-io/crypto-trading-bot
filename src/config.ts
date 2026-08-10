@@ -5643,6 +5643,16 @@ export function initWallets(): void {
       err instanceof Error ? err.message : err
     );
   }
+  try {
+    const { migrateMigSniperPerfTightenV257 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migrateMigSniperPerfTightenV257();
+  } catch (err) {
+    console.warn(
+      '[config] migSniperPerfTighten_v257 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
   // Auto-pause OFF ⇒ Daily Loss Off — survive backup restores / bake that
   // reintroduced filters.dailyLossLimitSol=0.5 and silently blocked all buys.
   try {

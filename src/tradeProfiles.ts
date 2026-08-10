@@ -625,7 +625,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
         'structured_pullback',
       ],
       patternSensitivity: 'medium',
-      minConviction: 36,
+      minConviction: 40,
       minWalletQuality: 35,
       minWalletCount: 1,
       requireCluster: false,
@@ -715,7 +715,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       secondaryPatternIds: ['volume_dryup_return'],
       avoidBearishPatterns: true,
       patternSensitivity: 'medium',
-      minConviction: 38,
+      minConviction: 42,
       minWalletQuality: 40,
       minWalletCount: 1,
       requireCluster: false,
@@ -764,12 +764,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     recommendedRisk: 'High / Medium',
     style: 'Event / Momentum',
     rulesSummary: [
-      'Watch ~80% curve · fire / enter from ~88% when armed (no TA setup)',
+      'Watch ~80% curve · fire / enter from ~92% when armed (no TA setup)',
       'Hold through migration · exit on first spike + volume step-up',
       'SL ~15% · post-mig max hold ~4 min · total safety ~12 min',
       'Soft quality: holders / buy pressure / volume (not chart patterns)',
       'Fallback: ultra-fresh post-grad ≤180s if curve window missed',
       'MC cap ~$150k — microcap event lane (not mid-band Scalper)',
+      'Lane floors: conviction ≥36 · WQ ≥35 · H1 vol ≥$2.5k · buy ≥$400 · size ×0.55 / ≤0.10 SOL',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 92,
@@ -781,13 +782,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferHolderGrowth: true,
       primaryPatternIds: [],
       patternSensitivity: 'high',
-      minVolumeH1Usd: 1_000,
-      minBuyPressureUsd: 200,
-      minConviction: 22,
-      minWalletQuality: 25,
+      minVolumeH1Usd: 2_500,
+      minBuyPressureUsd: 400,
+      minConviction: 36,
+      minWalletQuality: 35,
       minWalletCount: 1,
       requireCluster: false,
-      minCurveProgressPct: 88,
+      minCurveProgressPct: 92,
       maxCurveProgressPct: 99,
       gradWatchPct: 80,
       maxMigrationAgeSec: 180,
@@ -801,7 +802,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
         'scalp_reclaim_burst',
       ],
       forbiddenEntryStyles: ['late_chase', 'support_dip_reclaim'],
-      hardLateChase: false,
+      hardLateChase: true,
     },
     exitRules: {
       takeProfitPctMin: 10,
@@ -816,8 +817,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forceScalp: true,
       shortTermStrategyId: 'migration_event',
       overrideScalpParams: true,
-      sizeMultiplier: 0.7,
-      maxTradeOverrideSol: 0.15,
+      sizeMultiplier: 0.55,
+      maxTradeOverrideSol: 0.1,
       turboMode: true,
     },
     modules: {
@@ -984,8 +985,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
         'scalp_reclaim_burst',
         'migration_hold_reclaim',
       ],
-      forbiddenEntryStyles: ['support_dip_reclaim'],
-      hardLateChase: false,
+      forbiddenEntryStyles: ['support_dip_reclaim', 'late_chase'],
+      hardLateChase: true,
     },
     exitRules: {
       forceScalp: true,
@@ -3737,10 +3738,11 @@ function scoreProfile(
     buyPressureUsd != null &&
     buyPressureUsd < m.minBuyPressureUsd
   ) {
-    // Migration Sniper event lane: soft-fail low pressure on grad-watch / prefer path
+    // Migration Sniper: soft-fail only when Grad-armed; disc prefer path hard-fails
     if (
       def.id === 'migration_sniper' &&
-      (feedPrefer || ctx.preferProfileId === 'migration_sniper')
+      (ctx.armedWatch === true ||
+        String(ctx.setupWatchFamily || '').toLowerCase() === 'grad')
     ) {
       bits.push(
         `buy pressure soft $${Math.round(buyPressureUsd)}<$${m.minBuyPressureUsd}`
@@ -7146,6 +7148,52 @@ export function migrateMigSniperWidenMaxMcV2(): boolean {
     needsBump
       ? `[trade-profiles] Applied ${MIGRATION_ID} — Migration Sniper max MC → $${TARGET_MAX_MC}`
       : `[trade-profiles] Applied ${MIGRATION_ID} — max MC already ≥ $${TARGET_MAX_MC}`
+  );
+  return true;
+}
+
+/**
+ * 1.2.257: tighten Migration Sniper entry floors + size (overrides that still
+ * carry soft event-lane conviction/size from migSniperEventLane_v1).
+ */
+export function migrateMigSniperPerfTightenV257(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'migSniperPerfTighten_v257';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const state = ensureState();
+  if (!state.overrides) state.overrides = {};
+  const prev = state.overrides.migration_sniper || {};
+  state.overrides.migration_sniper = {
+    ...prev,
+    exitRules: {
+      ...(prev.exitRules || {}),
+      sizeMultiplier: 0.55,
+      maxTradeOverrideSol: 0.1,
+    },
+    match: {
+      ...(prev.match || {}),
+      minConviction: 36,
+      minWalletQuality: 35,
+      minCurveProgressPct: 92,
+      minBuyPressureUsd: 400,
+      minVolumeH1Usd: 2_500,
+      hardLateChase: true,
+    },
+  };
+  writeTradeProfilesState(state);
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    `[trade-profiles] Applied ${MIGRATION_ID} — MS conviction/WQ/fire/vol/size tightened`
   );
   return true;
 }

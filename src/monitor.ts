@@ -7310,9 +7310,13 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         }
         if (!sel.admit) {
           const why = sel.reasons[0] || 'Entry Skill blocked';
+          const codes =
+            sel.reasonCodes && sel.reasonCodes.length
+              ? ` code=${sel.reasonCodes.join(',')}`
+              : '';
           govFails.push(`${passer.name}: ${why}`);
           console.log(
-            `[monitor] expectancy skip passer=${passer.name}: ${why}`
+            `[monitor] expectancy skip passer=${passer.name}:${codes} ${why}`
           );
           continue;
         }
@@ -7323,6 +7327,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             sel.governorInfluenced;
           (signal as { entrySkillChips?: string[] }).entrySkillChips =
             sel.chips;
+          if (sel.reasonCodes?.length) {
+            (signal as { entrySkillReasonCodes?: string[] }).entrySkillReasonCodes =
+              sel.reasonCodes;
+          }
           if (armedWatch && signal.mint) {
             mintOneSetupProfileLock(
               signal.mint,

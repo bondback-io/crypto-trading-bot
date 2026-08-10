@@ -59,20 +59,20 @@ export const PCL_PPP_BY_FAMILY: Record<
   }
 > = {
   fast: {
-    armOfTpPct: 60,
-    givebackOfPeakPct: 40,
+    armOfTpPct: 52,
+    givebackOfPeakPct: 35,
     minOpenSec: 25,
     minProfitFloorPct: 4,
   },
   dip_trend: {
-    armOfTpPct: 65,
-    givebackOfPeakPct: 45,
+    armOfTpPct: 55,
+    givebackOfPeakPct: 38,
     minOpenSec: 60,
     minProfitFloorPct: 6,
   },
   quality: {
-    armOfTpPct: 65,
-    givebackOfPeakPct: 45,
+    armOfTpPct: 55,
+    givebackOfPeakPct: 38,
     minOpenSec: 45,
     minProfitFloorPct: 5,
   },
@@ -84,8 +84,8 @@ export const PCL_PARTIAL_BY_FAMILY: Record<
   { earlyPartialTpPct: number; earlyPartialFraction: number }
 > = {
   fast: { earlyPartialTpPct: 15, earlyPartialFraction: 0.55 },
-  dip_trend: { earlyPartialTpPct: 25, earlyPartialFraction: 0.4 },
-  quality: { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 },
+  dip_trend: { earlyPartialTpPct: 25, earlyPartialFraction: 0.45 },
+  quality: { earlyPartialTpPct: 22, earlyPartialFraction: 0.42 },
 };
 
 /** Tiny green scratch threshold (%). */
@@ -544,7 +544,7 @@ export function qualityPppArmBonusPts(
 }
 
 /** Post-partial runner: tighten giveback (×0.85). */
-export const PCL_POST_PARTIAL_GIVEBACK_MULT = 0.85;
+export const PCL_POST_PARTIAL_GIVEBACK_MULT = 0.92;
 
 /**
  * Trail activation nudge after partial — breakeven-ish (small green).

@@ -61,7 +61,12 @@ export type FamilyGovernorState =
   | 'restricted';
 
 const MIN_SAMPLES = 18;
-const LATE_CHASE_MAX_SHARE = 0.05;
+/** Hard portfolio late-chase share ceiling (8% of last-50). */
+const LATE_CHASE_MAX_SHARE = 0.08;
+/** One-shot disable window after 1.2.257 ship. */
+const LATE_CHASE_DISABLE_CLOSES = 125;
+/** Late-chase permission floor after −18 penalty (quality gate). */
+const LATE_CHASE_PERM_FLOOR = 55;
 /** Default armed mix target (80%) — overridable via entrySkillArmedTargetPct. */
 const DEFAULT_ARMED_TARGET_PCT = 80;
 const ARMED_TARGET_PCT_LO = 60;
@@ -76,7 +81,8 @@ const STUCK_OPEN_RATE = 0.2;
 const STUCK_VERY_THIN_OPEN_COUNT = 8;
 const LOSS_STREAK_N = 8;
 const LOSS_STREAK_K = 5;
-const PERM_FLOOR_DISC = 35;
+/** Disc soft-skip permission floor (quality-first; raised 1.2.257). */
+const PERM_FLOOR_DISC = 42;
 const PERM_FLOOR_ARMED = 25;
 const SIZE_MULT_LO = 0.7;
 const SIZE_MULT_HI = 1.15;
@@ -178,6 +184,17 @@ interface ExpectancyLiftPersist {
   repairedV239?: boolean;
   /** One-shot: clear sticky governors when Admission Baseline ships as v235. */
   clearedGovernorsForV235Baseline?: boolean;
+  /** Remaining closes while late_chase is force-disabled (1.2.257). */
+  lateChaseDisableRemainingCloses?: number;
+  /** One-shot seed for late-chase disable countdown. */
+  lateChaseDisableSeededV257?: boolean;
+  /** Trade count snapshot for decrementing disable countdown. */
+  lateChaseDisableLastTradeCount?: number;
+  /** Performance regime marker — Last-N windows filter closes after this. */
+  performanceRegimeMarkerAt?: number;
+  performanceRegimeLabel?: string;
+  /** One-shot: seed regime marker + late_chase sticky for 1.2.257. */
+  seededPerfV257?: boolean;
 }
 
 const FAST_DISC_PROFILES = new Set([
@@ -329,6 +346,12 @@ export interface ExpectancyLiftStatus {
     armedTargetPct?: number;
     liveArmedShare?: number | null;
   };
+  /** 1.2.257 performance regime — Last-N filters closes after marker. */
+  performanceRegime?: {
+    at: number | null;
+    label: string | null;
+    lateChaseDisableRemaining: number;
+  };
   /** Per-profile Entry Skill funnel + lock diagnostics. */
   entrySkillByProfile?: Record<
     string,
@@ -390,6 +413,8 @@ export interface EntrySelectivityResult {
   sizeMult: number;
   family: ExpectancyFamily;
   chips: string[];
+  /** Structured Entry Skill / late-chase reason codes. */
+  reasonCodes?: string[];
   governorState: FamilyGovernorState;
   softPassNative?: boolean;
   governorInfluenced: boolean;
@@ -593,7 +618,8 @@ function tradeKey(t: {
 function mfeCaptureFrom(pnlPct: number, maxRunupPct: number): number | null {
   const mfe = Math.max(0, Number(maxRunupPct) || 0);
   if (!(mfe > 0)) return null;
-  return clamp((Number(pnlPct) || 0) / mfe, -0.5, 1.5) * 100;
+  // Floor at 0 for Expectancy chips (avoid −25% “cap” noise); learning still sees wins/losses via pnl.
+  return clamp((Number(pnlPct) || 0) / mfe, 0, 1.5) * 100;
 }
 
 function readEntryMcStamp(src: Record<string, unknown> | object): {
@@ -876,7 +902,100 @@ function emptyPersist(): ExpectancyLiftPersist {
     repairedV238: true,
     repairedV239: true,
     clearedGovernorsForV235Baseline: true,
+    lateChaseDisableRemainingCloses: LATE_CHASE_DISABLE_CLOSES,
+    lateChaseDisableSeededV257: true,
+    lateChaseDisableLastTradeCount: 0,
+    seededPerfV257: true,
+    performanceRegimeMarkerAt: Date.now(),
+    performanceRegimeLabel: 'v1.2.257-perf',
   };
+}
+
+/** Seed 1.2.257 late-chase disable + performance regime marker (one-shot). */
+function applyPerfV257Seed(p: ExpectancyLiftPersist): boolean {
+  if (p.seededPerfV257 === true) return false;
+  p.seededPerfV257 = true;
+  if (p.lateChaseDisableSeededV257 !== true) {
+    p.lateChaseDisableSeededV257 = true;
+    p.lateChaseDisableRemainingCloses = LATE_CHASE_DISABLE_CLOSES;
+    p.lateChaseDisableLastTradeCount = 0;
+  }
+  if (p.performanceRegimeMarkerAt == null) {
+    p.performanceRegimeMarkerAt = Date.now();
+    p.performanceRegimeLabel = 'v1.2.257-perf';
+  }
+  // Keep late_chase sticky restricted during disable window
+  const now = Date.now();
+  const lc = p.governors?.late_chase;
+  if (!lc || lc.state !== 'restricted') {
+    p.governors = p.governors || {};
+    p.governors.late_chase = {
+      state: 'restricted',
+      negWindows: Math.max(2, lc?.negWindows || 2),
+      lastFingerprint: lc?.lastFingerprint,
+      updatedAt: now,
+    };
+  }
+  return true;
+}
+
+/** Decrement late-chase disable countdown as new closes appear. */
+function syncLateChaseDisableCountdown(): number {
+  const p = loadPersist();
+  let rem =
+    p.lateChaseDisableRemainingCloses != null &&
+    Number.isFinite(p.lateChaseDisableRemainingCloses)
+      ? Math.max(0, Math.floor(Number(p.lateChaseDisableRemainingCloses)))
+      : 0;
+  try {
+    const n = collectExpectancyTrades().length;
+    const last = p.lateChaseDisableLastTradeCount ?? n;
+    const delta = n - last;
+    if (delta > 0 && rem > 0) {
+      rem = Math.max(0, rem - delta);
+      p.lateChaseDisableRemainingCloses = rem;
+      p.lateChaseDisableLastTradeCount = n;
+      persistCache = p;
+      try {
+        savePersist();
+      } catch {
+        /* soft */
+      }
+    } else if (p.lateChaseDisableLastTradeCount == null) {
+      p.lateChaseDisableLastTradeCount = n;
+      persistCache = p;
+    }
+  } catch {
+    /* soft */
+  }
+  return rem;
+}
+
+export function getLateChaseDisableRemainingCloses(): number {
+  try {
+    return syncLateChaseDisableCountdown();
+  } catch {
+    return 0;
+  }
+}
+
+export function getPerformanceRegimeMarker(): {
+  at: number | null;
+  label: string | null;
+} {
+  try {
+    const p = loadPersist();
+    return {
+      at:
+        p.performanceRegimeMarkerAt != null &&
+        Number.isFinite(p.performanceRegimeMarkerAt)
+          ? Number(p.performanceRegimeMarkerAt)
+          : null,
+      label: p.performanceRegimeLabel ? String(p.performanceRegimeLabel) : null,
+    };
+  } catch {
+    return { at: null, label: null };
+  }
 }
 
 /** One-shot: clear sticky governors when shipping default v235 baseline. */
@@ -945,11 +1064,29 @@ function loadPersist(): ExpectancyLiftPersist {
       repairedV239: raw?.repairedV239 === true,
       clearedGovernorsForV235Baseline:
         raw?.clearedGovernorsForV235Baseline === true,
+      lateChaseDisableRemainingCloses:
+        raw?.lateChaseDisableRemainingCloses != null
+          ? Number(raw.lateChaseDisableRemainingCloses)
+          : undefined,
+      lateChaseDisableSeededV257: raw?.lateChaseDisableSeededV257 === true,
+      lateChaseDisableLastTradeCount:
+        raw?.lateChaseDisableLastTradeCount != null
+          ? Number(raw.lateChaseDisableLastTradeCount)
+          : undefined,
+      performanceRegimeMarkerAt:
+        raw?.performanceRegimeMarkerAt != null
+          ? Number(raw.performanceRegimeMarkerAt)
+          : undefined,
+      performanceRegimeLabel: raw?.performanceRegimeLabel
+        ? String(raw.performanceRegimeLabel)
+        : undefined,
+      seededPerfV257: raw?.seededPerfV257 === true,
     };
     let repaired = false;
     if (applyPollInflationRepair(persistCache)) repaired = true;
     if (applyMigrationHoldReclaimRepair(persistCache)) repaired = true;
     if (applyV235BaselineGovernorClear(persistCache)) repaired = true;
+    if (applyPerfV257Seed(persistCache)) repaired = true;
     if (repaired) {
       try {
         persistCache.updatedAt = Date.now();
@@ -1045,8 +1182,13 @@ function updateGovernorForFamily(
           state = 'down_ranked';
         }
       } else {
-        // Restore after improved window
-        if (state === 'restricted' || state === 'down_ranked') {
+        // Restore after improved window — never auto-promote late_chase during disable countdown
+        const lcDisable =
+          family === 'late_chase' ? syncLateChaseDisableCountdown() : 0;
+        if (family === 'late_chase' && lcDisable > 0) {
+          state = 'restricted';
+          negWindows = Math.max(2, negWindows);
+        } else if (state === 'restricted' || state === 'down_ranked') {
           if (exp > 0 && (expAlt == null || expAlt >= 0)) {
             state = exp >= 0.5 ? 'promoted' : 'neutral';
             negWindows = 0;
@@ -1263,6 +1405,7 @@ export function shouldSkipFamilyGovernor(input: {
   state: FamilyGovernorState;
   softPassNative?: boolean;
   family?: ExpectancyFamily;
+  reasonCode?: string;
 } {
   const family = admitFamilyForGovernor({
     profileId: input.profileId,
@@ -1280,6 +1423,29 @@ export function shouldSkipFamilyGovernor(input: {
     input.setupWatchFamily == null
       ? normalizeExpectancyFamily(input.family)
       : family;
+  const pid = String(input.profileId || '');
+  const armed =
+    input.armedWatch === true ||
+    String(input.entryPath || '').toLowerCase() === 'armed_trigger' ||
+    String(input.setupWatchFamily || '').toLowerCase() === 'grad';
+
+  // MS disc harden: when migration_hold_reclaim is down_ranked/restricted,
+  // only Grad/armed MS soft-passes — unarmed disc hard-skips.
+  if (pid === 'migration_sniper') {
+    const migGov = getFamilyGovernorState('migration_hold_reclaim');
+    if (migGov === 'down_ranked' || migGov === 'restricted') {
+      if (!armed) {
+        return {
+          skip: true,
+          reason: `MS disc hard-skip: migration_hold_reclaim ${migGov} (Grad-armed only)`,
+          state: migGov,
+          family: 'migration_hold_reclaim',
+          reasonCode: 'MS_DISC_GOV_HARD',
+        };
+      }
+    }
+  }
+
   const state = getFamilyGovernorState(effective);
   if (state === 'restricted') {
     // Hard-skip late_chase when restricted
@@ -1289,13 +1455,15 @@ export function shouldSkipFamilyGovernor(input: {
         reason: `Expectancy governor: late_chase restricted`,
         state,
         family: effective,
+        reasonCode: 'LC_GOV_RESTRICTED',
       };
     }
     // Armed reclaim may still pass soft restrict except late_chase
-    if (input.armedWatch === true) {
+    if (input.armedWatch === true || armed) {
       return { skip: false, state, family: effective };
     }
     // Native-style soft-pass: primary/allowed DNA — down-rank via permission/size only
+    // MS unarmed already handled above when family gov is weak.
     if (profileMatchesFamilyNative(input.profileId, effective)) {
       return {
         skip: false,
@@ -1344,8 +1512,9 @@ export function getRecentMixShares(
   lateChaseShare: number;
   total: number;
 } {
+  // Late-chase portfolio cap uses last-50; other mix calls honor limit.
   const window = opts?.lateChaseCeilingWindow
-    ? Math.max(20, Math.min(limit, 20))
+    ? Math.max(20, Math.min(Math.max(limit, 50), 50))
     : Math.max(8, limit);
   const trades = collectExpectancyTrades().slice(-window);
   const total = trades.length || 1;
@@ -1370,7 +1539,7 @@ export function getRecentMixShares(
   };
 }
 
-/** Hard late_chase share ceiling (5%). Require ≥20 closes; fresher last-20 window. */
+/** Hard late_chase share ceiling (8% last-50). Require ≥20 closes. */
 export function shouldLimitLateChaseShare(input: {
   lateChase?: boolean;
   family?: string | null;
@@ -1378,7 +1547,7 @@ export function shouldLimitLateChaseShare(input: {
   armedWatch?: boolean;
   extensionFromLevelPct?: number | null;
   profileId?: string | null;
-}): { limit: boolean; reason?: string } {
+}): { limit: boolean; reason?: string; reasonCode?: string } {
   // Armed reclaim does not hard-skip and does not count toward ceiling
   if (
     isArmedReclaimRelief({
@@ -1387,13 +1556,25 @@ export function shouldLimitLateChaseShare(input: {
       extensionFromLevelPct: input.extensionFromLevelPct,
     })
   ) {
-    return { limit: false };
+    return { limit: false, reasonCode: 'LC_ARMED_RECLAIM_RELIEF' };
   }
   const isLate =
     input.lateChase === true ||
+    String(input.entryStyle || '').toLowerCase() === 'late_chase' ||
     normalizeExpectancyFamily(input.family || input.entryStyle) ===
       'late_chase';
   if (!isLate) return { limit: false };
+
+  // Temporary disable countdown (1.2.257)
+  const rem = syncLateChaseDisableCountdown();
+  if (rem > 0 && !isAdmissionBaselineV235()) {
+    return {
+      limit: true,
+      reason: `Entry Skill: late_chase disabled (${rem} closes left)`,
+      reasonCode: 'LC_DISABLE_COUNTDOWN',
+    };
+  }
+
   // Entry Skill: hard-skip late_chase primary even below sample floor
   if (
     !isAdmissionBaselineV235() &&
@@ -1403,13 +1584,15 @@ export function shouldLimitLateChaseShare(input: {
     return {
       limit: true,
       reason: `Entry Skill: hard-skip late_chase primary (${input.profileId || 'any'})`,
+      reasonCode: 'LC_HARD_SKIP_ALL',
     };
   }
-  const mix = getRecentMixShares(20, { lateChaseCeilingWindow: true });
+  const mix = getRecentMixShares(50, { lateChaseCeilingWindow: true });
   if (mix.total >= 20 && mix.lateChaseShare > LATE_CHASE_MAX_SHARE) {
     return {
       limit: true,
       reason: `Late-chase share ${(mix.lateChaseShare * 100).toFixed(0)}% > ${(LATE_CHASE_MAX_SHARE * 100).toFixed(0)}% ceiling`,
+      reasonCode: 'LC_SHARE_CAP',
     };
   }
   return { limit: false };
@@ -1759,7 +1942,7 @@ export function expectancySizeMultiplier(input: {
     if (pid === 'migration_sniper') {
       const migGov = getFamilyGovernorState('migration_hold_reclaim');
       if (migGov === 'down_ranked' || migGov === 'restricted') {
-        mult = clamp(mult * (migGov === 'restricted' ? 0.7 : 0.8), HABIT_SIZE_LO, SIZE_MULT_HI);
+        mult = clamp(mult * (migGov === 'restricted' ? 0.55 : 0.65), HABIT_SIZE_LO, SIZE_MULT_HI);
         notes.push(`MS habit size↓ (${migGov} migration_hold_reclaim)`);
       }
     }
@@ -2152,6 +2335,7 @@ export function evaluateEntrySelectivity(
     ctx.entryPath || (armedWatch ? 'armed_trigger' : 'discretionary');
   const reasons: string[] = [];
   const chips: string[] = [];
+  const reasonCodes: string[] = [];
 
   const family = admitFamilyForGovernor({
     entryStyle,
@@ -2162,12 +2346,15 @@ export function evaluateEntrySelectivity(
     setupWatchFamily: ctx.setupWatchFamily,
   });
   const passerLate = family === 'late_chase';
+  // Broad late (boolean OR family) — closes flag-only bypass of Entry Skill hard-skip
+  const broadLate = lateChase || passerLate;
+  if (lateChase && !passerLate) reasonCodes.push('LC_FLAG_ONLY');
 
   if (!baselineV235) {
     const lateLim = shouldLimitLateChaseShare({
-      lateChase: passerLate,
-      family,
-      entryStyle: passerLate ? 'late_chase' : entryStyle,
+      lateChase: broadLate,
+      family: broadLate ? 'late_chase' : family,
+      entryStyle: broadLate ? 'late_chase' : entryStyle,
       armedWatch,
       extensionFromLevelPct: ctx.extensionFromLevelPct,
       profileId: ctx.profileId,
@@ -2175,14 +2362,21 @@ export function evaluateEntrySelectivity(
     if (lateLim.limit) {
       reasons.push(lateLim.reason || 'Late-chase share ceiling');
       chips.push('late_chase');
+      if (lateLim.reasonCode) {
+        reasonCodes.push(lateLim.reasonCode);
+        chips.push(lateLim.reasonCode);
+      }
       return {
         admit: false,
         reasons,
         permission: 0,
         sizeMult: 1,
-        family,
+        family: broadLate ? 'late_chase' : family,
         chips,
-        governorState: getFamilyGovernorState(family),
+        reasonCodes,
+        governorState: getFamilyGovernorState(
+          broadLate ? 'late_chase' : family
+        ),
         governorInfluenced: true,
       };
     }
@@ -2190,8 +2384,8 @@ export function evaluateEntrySelectivity(
 
   const gov = shouldSkipFamilyGovernor({
     family,
-    entryStyle: passerLate ? 'late_chase' : entryStyle,
-    lateChase: passerLate,
+    entryStyle: broadLate ? 'late_chase' : entryStyle,
+    lateChase: broadLate,
     armedWatch,
     profileId: ctx.profileId,
     entryPath,
@@ -2206,6 +2400,12 @@ export function evaluateEntrySelectivity(
   if (!baselineV235 && gov.skip) {
     reasons.push(gov.reason || 'Family governor restrict');
     chips.push('governor');
+    if (gov.reasonCode) {
+      reasonCodes.push(gov.reasonCode);
+      chips.push(gov.reasonCode);
+    } else if (gov.family === 'late_chase') {
+      reasonCodes.push('LC_GOV_RESTRICTED');
+    }
     return {
       admit: false,
       reasons,
@@ -2213,6 +2413,7 @@ export function evaluateEntrySelectivity(
       sizeMult: 1,
       family: gov.family || family,
       chips,
+      reasonCodes,
       governorState: gov.state,
       governorInfluenced: true,
     };
@@ -2226,6 +2427,7 @@ export function evaluateEntrySelectivity(
     if (discMix.limit) {
       reasons.push(discMix.reason || 'Armed mix disc cap');
       chips.push('disc_mix');
+      reasonCodes.push('ES_DISC_MIX');
       return {
         admit: false,
         reasons,
@@ -2233,6 +2435,7 @@ export function evaluateEntrySelectivity(
         sizeMult: 1,
         family: gov.family || family,
         chips,
+        reasonCodes,
         governorState: gov.state,
         governorInfluenced: true,
       };
@@ -2252,6 +2455,7 @@ export function evaluateEntrySelectivity(
         sizeMult: 1,
         family: gov.family || family,
         chips,
+        reasonCodes,
         governorState: gov.state,
         governorInfluenced: true,
       };
@@ -2274,18 +2478,44 @@ export function evaluateEntrySelectivity(
     triggerConfirm: ctx.triggerConfirm === true,
     family: effectiveFamily,
     entryStyle,
-    lateChase,
+    lateChase: broadLate,
     extensionFromLevelPct: ctx.extensionFromLevelPct,
     dnaMatch,
     profileId: ctx.profileId,
     tradeProfileScore: ctx.tradeProfileScore,
   });
 
+  // Late-chase quality floor (defense if hard-skip somehow off / Baseline edge)
+  if (
+    !baselineV235 &&
+    broadLate &&
+    permission < LATE_CHASE_PERM_FLOOR
+  ) {
+    reasons.push(
+      `Entry Skill: late_chase permission ${permission} < ${LATE_CHASE_PERM_FLOOR}`
+    );
+    chips.push('late_chase');
+    reasonCodes.push('LC_QUALITY_FLOOR');
+    chips.push('LC_QUALITY_FLOOR');
+    return {
+      admit: false,
+      reasons,
+      permission,
+      sizeMult: 1,
+      family: 'late_chase',
+      chips,
+      reasonCodes,
+      governorState: gov.state,
+      governorInfluenced: true,
+    };
+  }
+
   if (!baselineV235) {
     const softPerm = shouldSoftSkipPermissionScore(permission, armedWatch);
     if (softPerm.skip) {
       reasons.push(softPerm.reason || 'Permission score');
       chips.push('permission');
+      reasonCodes.push('ES_PERM_FLOOR');
       return {
         admit: false,
         reasons,
@@ -2293,6 +2523,7 @@ export function evaluateEntrySelectivity(
         sizeMult: 1,
         family: effectiveFamily,
         chips,
+        reasonCodes,
         governorState: gov.state,
         governorInfluenced: true,
       };
@@ -2308,7 +2539,6 @@ export function evaluateEntrySelectivity(
   else chips.push('entry_skill');
   if (armedWatch) chips.push('armed');
   if (ctx.triggerConfirm === true) chips.push('trigger_confirm');
-  // Habit diagnostic chips (1.2.248)
   try {
     const pid = String(ctx.profileId || '');
     if (
@@ -2319,7 +2549,7 @@ export function evaluateEntrySelectivity(
       chips.push('habit_fast');
     }
     if (pid === 'migration_sniper') chips.push('habit_ms');
-    if (passerLate) chips.push('habit_late_chase');
+    if (broadLate) chips.push('habit_late_chase');
   } catch {
     /* soft */
   }
@@ -2331,6 +2561,7 @@ export function evaluateEntrySelectivity(
     sizeMult: sz.mult,
     family: effectiveFamily,
     chips,
+    reasonCodes: reasonCodes.length ? reasonCodes : undefined,
     governorState: gov.state,
     softPassNative: gov.softPassNative,
     governorInfluenced:
@@ -2502,10 +2733,22 @@ export function getExpectancyLiftStatus(
   } catch {
     /* soft */
   }
-  const all = collectExpectancyTrades();
-  const windowTrades = all.slice(-window);
+  try {
+    syncLateChaseDisableCountdown();
+  } catch {
+    /* soft */
+  }
+  const allRaw = collectExpectancyTrades();
+  const regime = getPerformanceRegimeMarker();
+  const all =
+    regime.at != null
+      ? allRaw.filter((t) => t.closedAt >= Number(regime.at))
+      : allRaw;
+  // If regime filter empties the window, fall back to all (cold start)
+  const tradesForWindow = all.length >= 5 ? all : allRaw;
+  const windowTrades = tradesForWindow.slice(-window);
   const altN = window === 20 ? 50 : window === 50 ? 100 : 50;
-  const altTrades = all.slice(-altN);
+  const altTrades = tradesForWindow.slice(-altN);
 
   const mixTrades = windowTrades;
   const armedN = mixTrades.filter((t) => t.armed).length;
@@ -2768,6 +3011,11 @@ export function getExpectancyLiftStatus(
       fallbackDiscAllowed: baselineActive ? true : fallbackDiscAllowed,
       armedTargetPct,
       liveArmedShare: mix.armedShare,
+    },
+    performanceRegime: {
+      at: regime.at,
+      label: regime.label,
+      lateChaseDisableRemaining: getLateChaseDisableRemainingCloses(),
     },
     admissionBaseline,
     baselineActive,
