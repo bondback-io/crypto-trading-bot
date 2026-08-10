@@ -153,15 +153,15 @@ export function isMatureSpecialtyPumpFunBypass(opts?: {
   const armed =
     opts?.armedWatch === true || opts?.dipWatchTriggered === true;
 
-  // Steady Compounder: majors|medium|jupiter|kolscan — armed / dip-trigger only
-  if (
-    pid === 'steady_compounder' &&
-    (feed === 'jupiter' ||
-      feed === 'kolscan' ||
-      feed === 'majors' ||
-      feed === 'medium')
-  ) {
-    return armed;
+  // Steady Compounder: majors|medium organic parks bypass without armed gate;
+  // jupiter|kolscan Steady still requires armed / dip-trigger.
+  if (pid === 'steady_compounder') {
+    if (feed === 'majors' || feed === 'medium') {
+      return true;
+    }
+    if (feed === 'jupiter' || feed === 'kolscan') {
+      return armed;
+    }
   }
 
   // Trend Rider: same specialty feeds (existing park path; no armed gate here)

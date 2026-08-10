@@ -744,7 +744,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       stopLossPctMin: 7,
       stopLossPctMax: 10,
       trailingStopPct: 6,
-      trailingActivationProfit: 6,
+      trailingActivationProfit: 10,
       sizeMultiplier: 1.0,
       exitPolicy: {
         heikinAshiExitEnabled: true,
@@ -1033,7 +1033,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Quality holder gate: known high insider still hard-skip; unknown insider soft-pass; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
       'Specialty Jupiter/KOL/majors/medium can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
       'Medium $50–200M + Majors ≥$200M dips soft-prefer Steady quality reclaim; Dip Buyer remains for true reclaim DNA on minors',
-      'Armed-only / near-zero discretionary · maxConcurrent 1 · PCL ~25%/50% · RL Shadow until proven',
+      'Armed-only / near-zero discretionary · maxConcurrent 1 · PCL ~28%/40% · RL Shadow until proven',
     ],
     priority: 70,
     defaultEnabled: true,
@@ -1075,8 +1075,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       takeProfitPctMax: 10,
       stopLossPctMin: 4,
       stopLossPctMax: 7,
-      trailingStopPct: 4,
-      trailingActivationProfit: 4,
+      trailingStopPct: 5,
+      trailingActivationProfit: 9,
       sizeMultiplier: 1.0,
       exitPolicy: {
         heikinAshiExitEnabled: true,
@@ -4363,21 +4363,28 @@ function scoreProfile(
   }
 
   if (m.preferSteadyCompounder) {
-    // Armed-only doctrine (1.2.248): near-zero discretionary Steady
+    // Armed-only doctrine softened for Medium/Majors specialty parks (1.2.258)
+    const qualityParkFeed =
+      ctx.specialtyFeed === 'majors' || ctx.specialtyFeed === 'medium';
     const steadyArmed =
       ctx.armedWatch === true ||
       String(ctx.setupWatchFamily || '').toLowerCase() === 'dip' ||
       /dip-watch:triggered|quality_structure_reclaim/i.test(
         String(ctx.detectedEntryStyle || '')
       ) ||
-      feedPrefer;
-    if (!steadyArmed && !feedPrefer) {
+      feedPrefer ||
+      qualityParkFeed;
+    if (!steadyArmed) {
+      console.log(
+        `[STEADY-COMPOUNDER] deny armed_only ${ctx.symbol || '?'} ` +
+          `feed=${ctx.specialtyFeed || 'none'}`
+      );
       return {
         score: 0,
         reason: 'steady habit: armed quality reclaim only (near-zero disc)',
       };
     }
-    if (hostileArmed && !feedPrefer) {
+    if (hostileArmed && !feedPrefer && !qualityParkFeed) {
       return { score: 0, reason: 'not a compounder setup' };
     }
     if (conv != null && conv < (minConviction ?? 45)) {
@@ -4996,6 +5003,29 @@ function finalizeExitRulesForWinner(
     exitRules.forceScalp = true;
     exitRules.overrideScalpParams = true;
     exitRules.shortTermStrategyId = 'reversal_scalp';
+  }
+
+  // 1.2.258: Soft size bump on high-conviction Medium/Major Steady reclaim
+  if (def.id === 'steady_compounder') {
+    const feed =
+      ctx.specialtyFeed === 'majors' || ctx.specialtyFeed === 'medium';
+    const armed =
+      ctx.armedWatch === true ||
+      ctx.dipWatchTriggered === true ||
+      String(ctx.setupWatchFamily || '').toLowerCase() === 'dip';
+    const conv =
+      ctx.convictionScore != null && Number.isFinite(Number(ctx.convictionScore))
+        ? Number(ctx.convictionScore)
+        : null;
+    if (feed && armed && conv != null && conv >= 55) {
+      const base =
+        exitRules.sizeMultiplier != null &&
+        Number.isFinite(Number(exitRules.sizeMultiplier)) &&
+        Number(exitRules.sizeMultiplier) > 0
+          ? Number(exitRules.sizeMultiplier)
+          : 1;
+      exitRules.sizeMultiplier = Math.min(1.15, Number((base * 1.15).toFixed(4)));
+    }
   }
 
   return exitRules;

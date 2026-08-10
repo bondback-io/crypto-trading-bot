@@ -64,6 +64,9 @@ export interface DipWatchEntry {
   sizePlanSol?: number | null;
   /** Live peak price for drop-from-peak refresh */
   peakPriceSol?: number | null;
+  /** Real token/pool birth (Jupiter firstPool) — never watch createdAt */
+  pairCreatedAtMs?: number;
+  tokenAgeHours?: number;
 }
 
 /**
@@ -77,6 +80,10 @@ const MAX_MINORS_WATCHES = 16;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 /** High-MC majors/medium wait longer for Fib/S setups (8–12h band → 10h) */
 const MAJORS_TTL_MS = 10 * 60 * 60_000;
+/** Min gap between H1-vol rotations per mint (quality buckets) */
+const ROTATION_DEBOUNCE_MS = 10 * 60_000;
+/** Incoming must beat weakest by this factor to rotate at cap */
+const ROTATION_VOL_EDGE = 1.25;
 
 type DipWatchBucket = 'majors' | 'medium' | 'minors';
 const ARM_NEAR_DROP_MIN = 6;
@@ -91,6 +98,8 @@ const watches = new Map<string, DipWatchEntry>();
 let lastMcRefreshAt = new Map<string, number>();
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
+/** mint → last H1-vol rotation eviction/admit (debounce) */
+const lastRotationAt = new Map<string, number>();
 
 /** Rolling Dip admit / fire funnel (session counters). */
 const dipFunnel = {
@@ -243,18 +252,74 @@ function enforceBucketCap(bucket: DipWatchBucket, max: number): void {
   }
 }
 
+function qualityWatchScore(w: DipWatchEntry): number {
+  const vol = Math.max(0, Number(w.volumeH1Usd) || 0);
+  const ageDays =
+    w.tokenAgeHours != null && Number.isFinite(w.tokenAgeHours)
+      ? Number(w.tokenAgeHours) / 24
+      : w.pairCreatedAtMs != null &&
+          Number.isFinite(w.pairCreatedAtMs) &&
+          w.pairCreatedAtMs > 0
+        ? Math.max(0, (Date.now() - Number(w.pairCreatedAtMs)) / 86_400_000)
+        : 0;
+  const liqProxy =
+    w.marketCapUsd != null && Number.isFinite(w.marketCapUsd)
+      ? Math.min(Number(w.marketCapUsd) / 1_000_000, 50)
+      : 0;
+  // Primary: H1 vol; soft age + MC proxy
+  return vol + ageDays * 50 + liqProxy * 20;
+}
+
 /**
- * True if a new admit for this bucket is allowed. When at cap, drop the
- * oldest same-bucket watch so fresh candidates can rotate in.
+ * True if a new admit for this bucket is allowed. Minors: drop oldest.
+ * Medium/Majors: rotate lowest H1-vol score when incoming beats by ≥1.25×.
  */
-function reserveAdmitSlot(bucket: DipWatchBucket): boolean {
+function reserveAdmitSlot(
+  bucket: DipWatchBucket,
+  incoming?: { mint?: string; volumeH1Usd?: number }
+): boolean {
   const max = bucketCap(bucket);
   const active = activeWatches(bucket);
   if (active.length < max) return true;
-  const oldest = active[0];
-  if (!oldest) return true;
-  watches.delete(oldest.mint);
-  lastMcRefreshAt.delete(oldest.mint);
+
+  if (bucket === 'minors') {
+    const oldest = active[0];
+    if (!oldest) return true;
+    watches.delete(oldest.mint);
+    lastMcRefreshAt.delete(oldest.mint);
+    return true;
+  }
+
+  const now = Date.now();
+  const ranked = [...active]
+    .map((w) => ({ w, score: qualityWatchScore(w) }))
+    .sort((a, b) => a.score - b.score);
+  const weakest = ranked[0];
+  if (!weakest) return true;
+
+  const inVol = Math.max(0, Number(incoming?.volumeH1Usd) || 0);
+  const weakVol = Math.max(1, Number(weakest.w.volumeH1Usd) || 0);
+  if (!(inVol >= weakVol * ROTATION_VOL_EDGE)) {
+    return false;
+  }
+
+  const outMint = weakest.w.mint;
+  const inMint = String(incoming?.mint || '').trim();
+  const lastOut = lastRotationAt.get(outMint) ?? 0;
+  const lastIn = inMint ? lastRotationAt.get(inMint) ?? 0 : 0;
+  if (now - lastOut < ROTATION_DEBOUNCE_MS || now - lastIn < ROTATION_DEBOUNCE_MS) {
+    return false;
+  }
+
+  watches.delete(outMint);
+  lastMcRefreshAt.delete(outMint);
+  lastRotationAt.set(outMint, now);
+  if (inMint) lastRotationAt.set(inMint, now);
+  console.log(
+    `[ROTATION] ${bucket} out=${weakest.w.symbol}(${outMint.slice(0, 6)}…) ` +
+      `volH1=$${Math.round(weakVol)} score=${Math.round(weakest.score)} → ` +
+      `in=${inMint ? inMint.slice(0, 6) + '…' : '?'} volH1=$${Math.round(inVol)}`
+  );
   return true;
 }
 
@@ -641,6 +706,8 @@ export function considerDipWatchSetup(input: {
   source?: string;
   majorsBand?: string;
   preferredProfileId?: string;
+  pairCreatedAtMs?: number;
+  tokenAgeHours?: number;
 }): DipWatchEntry | null {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
@@ -734,6 +801,20 @@ export function considerDipWatchSetup(input: {
     existing.volumeH1Usd = input.volumeH1Usd ?? existing.volumeH1Usd;
     existing.holderCount = input.holderCount ?? existing.holderCount;
     existing.kolCount = input.kolCount ?? existing.kolCount;
+    if (
+      input.pairCreatedAtMs != null &&
+      Number.isFinite(input.pairCreatedAtMs) &&
+      input.pairCreatedAtMs > 0
+    ) {
+      existing.pairCreatedAtMs = input.pairCreatedAtMs;
+    }
+    if (
+      input.tokenAgeHours != null &&
+      Number.isFinite(input.tokenAgeHours) &&
+      input.tokenAgeHours >= 0
+    ) {
+      existing.tokenAgeHours = input.tokenAgeHours;
+    }
     if (isQuality) {
       existing.source = isMedium ? 'medium' : 'majors';
       existing.majorsBand = input.majorsBand ?? existing.majorsBand;
@@ -801,7 +882,15 @@ export function considerDipWatchSetup(input: {
   if (activeBefore >= bucketCap(bucket)) {
     noteDipFunnel('at_cap');
   }
-  reserveAdmitSlot(bucket);
+  if (
+    !reserveAdmitSlot(bucket, {
+      mint: input.mint,
+      volumeH1Usd: input.volumeH1Usd,
+    })
+  ) {
+    noteDipFunnel('at_cap');
+    return null;
+  }
 
   const now = Date.now();
   // Arm on Fib/S proximity; drop is soft preference (not forever AND-gated)
@@ -809,6 +898,21 @@ export function considerDipWatchSetup(input: {
   const prefer =
     input.preferredProfileId ||
     (isQuality ? 'steady_compounder' : 'dip_buyer');
+  // Soft-gate: Medium/Majors only → Dip/Steady (never Scalper)
+  const preferSafe =
+    prefer === 'steady_compounder' || prefer === 'dip_buyer'
+      ? prefer
+      : isQuality
+        ? 'steady_compounder'
+        : 'dip_buyer';
+  const ageHours =
+    input.tokenAgeHours != null && Number.isFinite(input.tokenAgeHours)
+      ? Number(input.tokenAgeHours)
+      : input.pairCreatedAtMs != null &&
+          Number.isFinite(input.pairCreatedAtMs) &&
+          input.pairCreatedAtMs > 0
+        ? Math.max(0, (now - Number(input.pairCreatedAtMs)) / 3_600_000)
+        : undefined;
   const entry: DipWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
@@ -836,7 +940,14 @@ export function considerDipWatchSetup(input: {
         ? 'medium'
         : input.source || 'scanner',
     majorsBand: isQuality ? input.majorsBand : undefined,
-    preferredProfileId: prefer,
+    preferredProfileId: preferSafe,
+    pairCreatedAtMs:
+      input.pairCreatedAtMs != null &&
+      Number.isFinite(input.pairCreatedAtMs) &&
+      input.pairCreatedAtMs > 0
+        ? Number(input.pairCreatedAtMs)
+        : undefined,
+    tokenAgeHours: ageHours,
     lastReason: armed
       ? dropStarted
         ? 'near Fib/S + dip'
@@ -862,6 +973,26 @@ export function considerDipWatchSetup(input: {
         : '') +
       ` MC=${mc != null ? `$${Math.round(mc)}` : '?'} drop=${drop != null ? `${drop.toFixed(0)}%` : '?'}`
   );
+  if (isQuality) {
+    const ageDays =
+      ageHours != null ? (ageHours / 24).toFixed(0) : '?';
+    const pfx =
+      isMajors ? '[WATCHLIST-MAJOR]' : '[WATCHLIST-MEDIUM]';
+    console.log(
+      `${pfx} soft-gate pass ${entry.symbol} ageDays=${ageDays} ` +
+        `MC=${mc != null ? `$${Math.round(mc)}` : '?'} ` +
+        `volH1=$${Math.round(input.volumeH1Usd || 0)} ` +
+        `reason=admit_${entry.status}` +
+        (preferSafe === 'steady_compounder' ? ' prefer:steady' : ' prefer:dip')
+    );
+    if (preferSafe === 'steady_compounder') {
+      console.log(
+        `[STEADY-COMPOUNDER] watch ${entry.symbol}` +
+          (armed ? ' · arm' : '') +
+          ` [${entry.source}]`
+      );
+    }
+  }
   if (armed) {
     try {
       const { recordSetupWatchEvent } =
@@ -871,7 +1002,7 @@ export function considerDipWatchSetup(input: {
         family: 'dip',
         mint: entry.mint,
         symbol: entry.symbol,
-        profileId: prefer,
+        profileId: preferSafe,
         reason: entry.lastReason,
         qualityScore: entry.qualityScore,
         entryStyle: entry.entryStyle,
@@ -894,11 +1025,22 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
       ? 'steady_compounder'
       : 'dip_buyer';
   const feed = isMajors ? 'majors' : isMedium ? 'medium' : 'kolscan';
+  // Real token/pool birth — never watch createdAt (watch age contaminated Steady floors)
+  const tokenBirthMs =
+    w.pairCreatedAtMs != null &&
+    Number.isFinite(w.pairCreatedAtMs) &&
+    w.pairCreatedAtMs > 0
+      ? Number(w.pairCreatedAtMs)
+      : w.tokenAgeHours != null &&
+          Number.isFinite(w.tokenAgeHours) &&
+          w.tokenAgeHours >= 0
+        ? now - Number(w.tokenAgeHours) * 3_600_000
+        : undefined;
   const launch: LaunchEvent = {
     mint: w.mint,
     symbol: w.symbol,
     name: w.name,
-    launchedAt: w.createdAt,
+    launchedAt: tokenBirthMs != null && tokenBirthMs > 0 ? tokenBirthMs : 0,
     migrated: true,
     entryPriceSol: w.lastPriceSol || 0,
     lastPriceSol: w.lastPriceSol || 0,
@@ -1088,6 +1230,14 @@ export async function tickDipSetupWatches(opts?: {
       noteDipFunnel('armed');
       noteQualityBandFunnel(w.source, 'armed');
       console.log(`[dip-watch] ARMED ${w.symbol}`);
+      if (
+        isQualityBandSource(w.source) &&
+        w.preferredProfileId === 'steady_compounder'
+      ) {
+        console.log(
+          `[STEADY-COMPOUNDER] arm ${w.symbol} [${w.source}]`
+        );
+      }
       try {
         const { recordSetupWatchEvent } =
           require('./setupWatchEvents') as typeof import('./setupWatchEvents');
@@ -1096,7 +1246,7 @@ export async function tickDipSetupWatches(opts?: {
           family: 'dip',
           mint: w.mint,
           symbol: w.symbol,
-          profileId: 'dip_buyer',
+          profileId: w.preferredProfileId || 'dip_buyer',
           reason: w.lastReason,
           qualityScore: w.qualityScore,
           entryStyle: w.entryStyle,
@@ -1210,9 +1360,18 @@ export async function tickDipSetupWatches(opts?: {
         noteDipFunnel('triggered');
         noteQualityBandFunnel(w.source, 'triggered');
         noteQualityBandFunnel(w.source, 'opened');
+        const prefer =
+          w.preferredProfileId === 'steady_compounder'
+            ? 'steady_compounder'
+            : 'dip_buyer';
         console.log(
-          `[dip-watch] TRIGGERED ${w.symbol} → dip_buyer (${w.lastReason})`
+          `[dip-watch] TRIGGERED ${w.symbol} → ${prefer} (${w.lastReason})`
         );
+        if (prefer === 'steady_compounder' && isQualityBandSource(w.source)) {
+          console.log(
+            `[STEADY-COMPOUNDER] trigger ${w.symbol} [${w.source}] → open`
+          );
+        }
         try {
           const { clearOneSetupProfileLock } =
             require('./expectancyLift') as typeof import('./expectancyLift');
@@ -1228,7 +1387,7 @@ export async function tickDipSetupWatches(opts?: {
             family: 'dip',
             mint: w.mint,
             symbol: w.symbol,
-            profileId: 'dip_buyer',
+            profileId: prefer,
             reason: w.lastReason,
             qualityScore: w.qualityScore,
             entryStyle: w.entryStyle,
@@ -1380,6 +1539,8 @@ export function offerDipWatchFromCandidate(c: {
   specialtyFeed?: string;
   preferredProfileId?: string;
   majorsBand?: string;
+  pairCreatedAtMs?: number;
+  tokenAgeHours?: number;
 }): void {
   if (
     c.preferredProfileId &&
@@ -1420,5 +1581,7 @@ export function offerDipWatchFromCandidate(c: {
     source: src,
     majorsBand: c.majorsBand,
     preferredProfileId: c.preferredProfileId,
+    pairCreatedAtMs: c.pairCreatedAtMs,
+    tokenAgeHours: c.tokenAgeHours,
   });
 }

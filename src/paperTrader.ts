@@ -3732,6 +3732,9 @@ export class PaperTrader {
             applyPclPartialRunnerNudge(position, {
               markPnlPct,
               nowMs,
+              profileId: position.tradeProfileId,
+              qualityTier: position.qualityTier,
+              lateChaseAtEntry: position.lateChaseAtEntry === true,
             });
             position.pclRunnerFraction = Math.max(
               0,
@@ -4863,6 +4866,9 @@ export class PaperTrader {
                     position.entryPriceSol) *
                   100,
                 nowMs: Date.now(),
+                profileId: position.tradeProfileId,
+                qualityTier: position.qualityTier,
+                lateChaseAtEntry: position.lateChaseAtEntry === true,
               });
               position.pclRunnerFraction = Math.max(
                 0,

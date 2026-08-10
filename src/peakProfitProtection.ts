@@ -198,11 +198,13 @@ export function resolvePeakProtectParams(input: {
   let pclMinFloor = 0;
   let pclArmFallback: number | null = null;
   let pclGiveFallback: number | null = null;
+  let pclWinsOverCatalog = false;
   try {
     const {
       isProfitCaptureLayerEnabled,
       resolvePclPppDefaults,
       qualityPppArmBonusPts,
+      resolvePclProfileFamily,
     } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
     if (isProfitCaptureLayerEnabled()) {
       const pcl = resolvePclPppDefaults(input.profileId);
@@ -210,16 +212,34 @@ export function resolvePeakProtectParams(input: {
       pclMinFloor = pcl.minProfitFloorPct;
       pclArmFallback = pcl.armOfTpPct;
       pclGiveFallback = pcl.givebackOfPeakPct;
+      const family = resolvePclProfileFamily(input.profileId);
+      // 1.2.258: PCL family tables win over catalog 65/45 for harvest families
+      // when not in recovery and not late-chase (keep high-risk BE tight).
+      pclWinsOverCatalog =
+        !recoveryActive &&
+        input.lateChaseAtEntry !== true &&
+        (family === 'fast' ||
+          family === 'dip_trend' ||
+          family === 'quality' ||
+          family === 'default');
       if (!recoveryActive) {
         const bonus = qualityPppArmBonusPts(input.entryQualityScore, {
           entryStyle: input.entryStyle,
           lateChaseAtEntry: input.lateChaseAtEntry,
           armedWatch: input.armedWatch === true,
         });
-        if (bonus > 0 && policyArm != null && Number(policyArm) > 0) {
+        if (pclWinsOverCatalog) {
+          if (bonus > 0 && pclArmFallback != null) {
+            pclArmFallback = clamp(pclArmFallback + bonus, 10, 95);
+          }
+        } else if (bonus > 0 && policyArm != null && Number(policyArm) > 0) {
           policyArm = clamp(Number(policyArm) + bonus, 10, 95);
         } else if (bonus > 0) {
-          pclArmFallback = clamp(pclArmFallback + bonus, 10, 95);
+          pclArmFallback = clamp(
+            (pclArmFallback ?? pcl.armOfTpPct) + bonus,
+            10,
+            95
+          );
         }
       }
     }
@@ -228,25 +248,29 @@ export function resolvePeakProtectParams(input: {
   }
 
   const armOfTp =
-    policyArm != null &&
-    Number.isFinite(Number(policyArm)) &&
-    Number(policyArm) > 0
-      ? clamp(Number(policyArm), 10, 95)
-      : pclArmFallback != null
-        ? pclArmFallback
-        : fast
-          ? cfg.scalperArmOfTpPct
-          : cfg.armOfTpPct;
+    pclWinsOverCatalog && pclArmFallback != null
+      ? pclArmFallback
+      : policyArm != null &&
+          Number.isFinite(Number(policyArm)) &&
+          Number(policyArm) > 0
+        ? clamp(Number(policyArm), 10, 95)
+        : pclArmFallback != null
+          ? pclArmFallback
+          : fast
+            ? cfg.scalperArmOfTpPct
+            : cfg.armOfTpPct;
   const giveback =
-    policyGiveback != null &&
-    Number.isFinite(Number(policyGiveback)) &&
-    Number(policyGiveback) > 0
-      ? clamp(Number(policyGiveback), 10, 80)
-      : pclGiveFallback != null
-        ? pclGiveFallback
-        : fast
-          ? cfg.scalperGivebackOfPeakPct
-          : cfg.givebackOfPeakPct;
+    pclWinsOverCatalog && pclGiveFallback != null
+      ? pclGiveFallback
+      : policyGiveback != null &&
+          Number.isFinite(Number(policyGiveback)) &&
+          Number(policyGiveback) > 0
+        ? clamp(Number(policyGiveback), 10, 80)
+        : pclGiveFallback != null
+          ? pclGiveFallback
+          : fast
+            ? cfg.scalperGivebackOfPeakPct
+            : cfg.givebackOfPeakPct;
   const tp = Math.max(0, Number(input.takeProfitPct) || 0);
   return {
     enabled: cfg.enabled && tp > 0,
@@ -313,6 +337,7 @@ export function evaluatePeakProfitProtection(
     entryQualityScore: input.entryQualityScore,
     entryStyle: input.entryStyle,
     lateChaseAtEntry: input.lateChaseAtEntry,
+    armedWatch: input.armedWatch === true,
   });
   const peak = Math.max(0, Number(input.peakUnrealizedPct) || 0);
   const pnl = Number(input.pnlPct) || 0;

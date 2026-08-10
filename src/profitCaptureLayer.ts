@@ -65,14 +65,14 @@ export const PCL_PPP_BY_FAMILY: Record<
     minProfitFloorPct: 4,
   },
   dip_trend: {
-    armOfTpPct: 55,
-    givebackOfPeakPct: 38,
+    armOfTpPct: 50,
+    givebackOfPeakPct: 42,
     minOpenSec: 60,
     minProfitFloorPct: 6,
   },
   quality: {
-    armOfTpPct: 55,
-    givebackOfPeakPct: 38,
+    armOfTpPct: 50,
+    givebackOfPeakPct: 42,
     minOpenSec: 45,
     minProfitFloorPct: 5,
   },
@@ -84,8 +84,8 @@ export const PCL_PARTIAL_BY_FAMILY: Record<
   { earlyPartialTpPct: number; earlyPartialFraction: number }
 > = {
   fast: { earlyPartialTpPct: 15, earlyPartialFraction: 0.55 },
-  dip_trend: { earlyPartialTpPct: 25, earlyPartialFraction: 0.45 },
-  quality: { earlyPartialTpPct: 22, earlyPartialFraction: 0.42 },
+  dip_trend: { earlyPartialTpPct: 25, earlyPartialFraction: 0.35 },
+  quality: { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 },
 };
 
 /** Tiny green scratch threshold (%). */
@@ -374,14 +374,14 @@ export function resolvePclPartialDefaults(
   } else if (id === 'migration_sniper') {
     base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.5 };
   } else if (id === 'trend_rider') {
-    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.4 };
+    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.35 };
   } else if (id === 'dip_buyer') {
-    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.4 };
+    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.35 };
   } else if (id === 'high_win_rate') {
     base = { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 };
   } else if (id === 'steady_compounder') {
-    // Steady doctrine 1.2.248: PCL ~25% TP / ~50% fraction
-    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.5 };
+    // Steady harvest 1.2.258: PCL ~28% TP / ~40% fraction (larger runner)
+    base = { earlyPartialTpPct: 28, earlyPartialFraction: 0.4 };
   } else if (id === 'smart_money_mirror') {
     base = { earlyPartialTpPct: 20, earlyPartialFraction: 0.4 };
   }
@@ -399,6 +399,9 @@ export function resolvePclPartialDefaults(
     opts?.qualityTier === 'high' ||
     (q != null && q >= 55) ||
     /scalp_reclaim|support_dip_reclaim|reclaim/i.test(style);
+  const isLowRiskHarvest =
+    opts?.qualityTier !== 'low' &&
+    !/late_chase/i.test(style);
   // Fast family: earlier PCL partial ONLY when armed (1.2.248) — not disc mediumHigh
   const isFastFamily =
     id === 'scalper' ||
@@ -412,9 +415,15 @@ export function resolvePclPartialDefaults(
     }
     // else keep base (15–18%) — do not pull forward on discretionary mediumHigh
   } else if (id === 'steady_compounder') {
-    // Keep Steady doctrine 25%/50% — do not pull to early bank
+    // Keep Steady harvest 28%/40% — do not pull to micro early bank
+  } else if ((armed || mediumHigh) && isLowRiskHarvest) {
+    // Quality / dip-trend: bank later, keep larger runner (1.2.258)
+    base = {
+      earlyPartialTpPct: 14,
+      earlyPartialFraction: 0.35,
+    };
   } else if (armed || mediumHigh) {
-    // Quality / dip-trend: earlier bank, keep more runner
+    // Low-tier / unusual: keep earlier bank
     base = {
       earlyPartialTpPct: clamp(base.earlyPartialTpPct, 8, 10),
       earlyPartialFraction: clamp(base.earlyPartialFraction, 0.4, 0.5),
@@ -543,11 +552,12 @@ export function qualityPppArmBonusPts(
   return 0;
 }
 
-/** Post-partial runner: tighten giveback (×0.85). */
-export const PCL_POST_PARTIAL_GIVEBACK_MULT = 0.92;
+/** Post-partial runner: mild giveback tighten (1.2.258 harvest breath). */
+export const PCL_POST_PARTIAL_GIVEBACK_MULT = 0.95;
 
 /**
  * Trail activation nudge after partial — breakeven-ish (small green).
+ * Gated to fast / low-tier / late-chase only — Steady/quality runners keep room.
  * Does not remove hard SL.
  */
 export function applyPclPartialRunnerNudge(
@@ -561,12 +571,21 @@ export function applyPclPartialRunnerNudge(
     pclPartialAtMs?: number;
     entryPriceSol?: number;
     highWaterMarkSol?: number;
+    tradeProfileId?: string | null;
+    qualityTier?: 'low' | 'medium' | 'high' | null;
+    lateChaseAtEntry?: boolean;
     /** Expectancy Lift — runner still managed after first partial */
     postPartialSurvival?: boolean;
     /** Peak MFE % observed after partial (low-touch track) */
     postPartialPeakMfePct?: number;
   },
-  opts?: { markPnlPct?: number; nowMs?: number }
+  opts?: {
+    markPnlPct?: number;
+    nowMs?: number;
+    profileId?: string | null;
+    qualityTier?: 'low' | 'medium' | 'high' | null;
+    lateChaseAtEntry?: boolean;
+  }
 ): void {
   if (!isProfitCaptureLayerEnabled()) return;
   const already = position.pclPartialTaken === true;
@@ -588,10 +607,22 @@ export function applyPclPartialRunnerNudge(
       }
     }
   }
+  const pid = String(
+    opts?.profileId || position.tradeProfileId || ''
+  );
+  const family = resolvePclProfileFamily(pid);
+  const tier =
+    opts?.qualityTier ?? position.qualityTier ?? null;
+  const late =
+    opts?.lateChaseAtEntry === true ||
+    position.lateChaseAtEntry === true;
+  const allowBeNudge =
+    family === 'fast' || tier === 'low' || late;
   if (
-    position.trailingActivationProfit == null ||
-    !Number.isFinite(Number(position.trailingActivationProfit)) ||
-    Number(position.trailingActivationProfit) > 2
+    allowBeNudge &&
+    (position.trailingActivationProfit == null ||
+      !Number.isFinite(Number(position.trailingActivationProfit)) ||
+      Number(position.trailingActivationProfit) > 2)
   ) {
     position.trailingActivationProfit = 1.5;
   }

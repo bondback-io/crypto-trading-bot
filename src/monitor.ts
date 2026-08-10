@@ -250,6 +250,25 @@ function buildTradeProfileMatchContext(
       );
       return Number.isFinite(created) && created > 0 ? created : null;
     })(),
+    launchedAt: (() => {
+      const created = Number(
+        (signal.metrics as { pairCreatedAtMs?: number | null } | undefined)
+          ?.pairCreatedAtMs
+      );
+      if (Number.isFinite(created) && created > 0) return created;
+      const fromSignal = Number(
+        (signal as { launchedAt?: number | null }).launchedAt
+      );
+      if (Number.isFinite(fromSignal) && fromSignal > 0) return fromSignal;
+      if (
+        signal.tokenAgeHours != null &&
+        Number.isFinite(signal.tokenAgeHours) &&
+        signal.tokenAgeHours >= 0
+      ) {
+        return Date.now() - Number(signal.tokenAgeHours) * 3_600_000;
+      }
+      return null;
+    })(),
     priceChange24hPct: signal.metrics?.priceChange24hPct ?? null,
     priceChangeH1Pct: signal.metrics?.priceChangeH1Pct ?? null,
     smartMoneyScore: signal.birdeye?.smartMoneyScore ?? null,

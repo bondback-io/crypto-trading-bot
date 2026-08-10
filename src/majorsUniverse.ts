@@ -6,10 +6,12 @@
 
 import { config } from './config';
 import { isDeniedCopyMint } from './deniedMints';
+import { isPumpFunMintSuffix } from './deadTokenFilters';
 import { readJupiterMarketCapUsd } from './marketData';
 import {
   fetchJupiterTopTokens,
   hasJupiterApiKey,
+  isJupiterPumpFunToken,
   jupiterTokenToLaunchEvent,
   type JupiterTokenInfo,
 } from './jupiterTokens';
@@ -36,6 +38,9 @@ export interface MajorsCandidate {
   /** medium = $50–200M; majors = ≥$200M */
   watchBand: UniverseWatchBand;
   reasons: string[];
+  /** Jupiter firstPool / createdAt ms — real token age (never watch birth) */
+  pairCreatedAtMs?: number;
+  tokenAgeHours?: number;
 }
 
 /** Medium floor (Steady quality band) */
@@ -46,12 +51,16 @@ export const MAJORS_MIN_MC_USD = 200_000_000;
 export const UNIVERSE_MIN_MC_USD = MEDIUM_MIN_MC_USD;
 /** Min liquidity — mid of ~$50k–$100k band */
 export const MAJORS_MIN_LIQ_USD = 75_000;
-/** Soft H1 volume floor for Medium Steady quality */
-export const MEDIUM_MIN_VOL_H1_USD = 15_000;
-/** Soft H1 volume floor for Majors Steady quality */
-export const MAJORS_MIN_VOL_H1_USD = 25_000;
+/** Soft H1 volume floor for Medium Steady quality (1.2.258: $12k) */
+export const MEDIUM_MIN_VOL_H1_USD = 12_000;
+/** Soft H1 volume floor for Majors Steady quality (1.2.258: $20k) */
+export const MAJORS_MIN_VOL_H1_USD = 20_000;
 /** @deprecated Use MEDIUM_MIN_VOL_H1_USD / MAJORS_MIN_VOL_H1_USD */
 export const MEDIUM_MAJORS_MIN_VOL_H1_USD = MAJORS_MIN_VOL_H1_USD;
+/** Hard min age for Medium/Majors universe — 60 days */
+export const MEDIUM_MAJORS_MIN_AGE_HOURS = 60 * 24;
+/** Soft prefer ranking bonus ≥ 90 days */
+export const MEDIUM_MAJORS_PREFER_AGE_HOURS = 90 * 24;
 const FETCH_LIMIT = 100;
 /** Separate caps so majors do not starve medium */
 const CYCLE_CAP_MEDIUM = 25;
@@ -74,6 +83,24 @@ const noLevelsStreak = new Map<
   string,
   { streak: number; lastTickAt: number }
 >();
+
+function watchlistLogPrefix(band: UniverseWatchBand): string {
+  return band === 'majors' ? '[WATCHLIST-MAJOR]' : '[WATCHLIST-MEDIUM]';
+}
+
+/** Resolve Jupiter pool/token created age in hours; null if unknown. */
+export function resolveJupiterTokenAgeHours(
+  token: JupiterTokenInfo
+): { ageHours: number; pairCreatedAtMs: number } | null {
+  const raw = token.firstPool?.createdAt || token.createdAt;
+  if (!raw) return null;
+  const ms = Date.parse(String(raw));
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return {
+    pairCreatedAtMs: ms,
+    ageHours: Math.max(0, (Date.now() - ms) / 3_600_000),
+  };
+}
 
 export function majorsMcBand(mc: number): MajorsMcBand {
   if (mc >= 1_000_000_000) return '1b+';
@@ -98,10 +125,13 @@ function solUsd(): number {
 function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   const mint = String(token.id || '').trim();
   if (!mint) return null;
+  const sym = String(token.symbol || mint.slice(0, 6)).slice(0, 24);
   // Stables / quote assets never enter Medium/Majors CYCLE_CAP
   try {
     const solMint = String(config.solMint || '').trim() || undefined;
-    if (isDeniedCopyMint(mint, solMint)) return null;
+    if (isDeniedCopyMint(mint, solMint)) {
+      return null;
+    }
   } catch {
     if (isDeniedCopyMint(mint)) return null;
   }
@@ -110,8 +140,36 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   if (mc == null || mc < MEDIUM_MIN_MC_USD) return null;
   const watchBand = universeWatchBand(mc);
   if (!watchBand) return null;
+  const logPfx = watchlistLogPrefix(watchBand);
+
+  // Hard reject pump.fun / launchpad for quality parks (Steady is organic majors)
+  if (isPumpFunMintSuffix(mint) || isJupiterPumpFunToken(token)) {
+    console.log(
+      `${logPfx} reject pump ${sym} MC=$${Math.round(mc)}`
+    );
+    return null;
+  }
+
+  const age = resolveJupiterTokenAgeHours(token);
+  if (!age) {
+    console.log(`${logPfx} reject age_unknown ${sym} MC=$${Math.round(mc)}`);
+    return null;
+  }
+  if (age.ageHours < MEDIUM_MAJORS_MIN_AGE_HOURS) {
+    console.log(
+      `${logPfx} reject too_young ${sym} ageDays=${(age.ageHours / 24).toFixed(1)} ` +
+        `MC=$${Math.round(mc)}`
+    );
+    return null;
+  }
+
   const liq = Number(token.liquidity ?? 0);
-  if (!Number.isFinite(liq) || liq < MAJORS_MIN_LIQ_USD) return null;
+  if (!Number.isFinite(liq) || liq < MAJORS_MIN_LIQ_USD) {
+    console.log(
+      `${logPfx} reject liq_low ${sym} liq=$${Math.round(liq || 0)}`
+    );
+    return null;
+  }
 
   const ev = jupiterTokenToLaunchEvent(token, solUsd(), {
     preferOrganicVolume: config.marketScanner?.preferOrganicVolume !== false,
@@ -126,10 +184,15 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   const minVolH1 =
     wb === 'medium' ? MEDIUM_MIN_VOL_H1_USD : MAJORS_MIN_VOL_H1_USD;
   if (Number.isFinite(volH1) && volH1 > 0 && volH1 < minVolH1) {
+    console.log(
+      `${watchlistLogPrefix(wb)} reject vol_low ${sym} volH1=$${Math.round(volH1)} ` +
+        `min=$${minVolH1}`
+    );
     return null;
   }
 
   const band = majorsMcBand(circ);
+  const preferAged = age.ageHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS;
   return {
     mint,
     symbol: ev.symbol,
@@ -142,10 +205,14 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     lastPriceSol: ev.lastPriceSol > 0 ? ev.lastPriceSol : undefined,
     band,
     watchBand: wb,
+    pairCreatedAtMs: age.pairCreatedAtMs,
+    tokenAgeHours: age.ageHours,
     reasons: [
       `${wb}:${band}`,
       `circMC:$${Math.round(circ)}`,
       `liq:$${Math.round(liq)}`,
+      `ageDays:${(age.ageHours / 24).toFixed(0)}`,
+      ...(preferAged ? ['age≥90d'] : []),
     ],
   };
 }
@@ -305,9 +372,15 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
   const scored = list.map((c) => ({
     c,
     near: candidateNearKnownLevels(c) ? 1 : 0,
+    aged:
+      c.tokenAgeHours != null &&
+      c.tokenAgeHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS
+        ? 1
+        : 0,
   }));
   scored.sort((a, b) => {
     if (b.near !== a.near) return b.near - a.near;
+    if (b.aged !== a.aged) return b.aged - a.aged;
     return b.c.marketCapUsd - a.c.marketCapUsd;
   });
   return scored.map((x) => x.c);
@@ -425,6 +498,8 @@ export async function runMajorsUniversePass(): Promise<number> {
         preferredProfileId: prefer,
         specialtyFeed: c.watchBand === 'medium' ? 'medium' : 'majors',
         majorsBand: c.band,
+        pairCreatedAtMs: c.pairCreatedAtMs,
+        tokenAgeHours: c.tokenAgeHours,
       });
       offered += 1;
     }

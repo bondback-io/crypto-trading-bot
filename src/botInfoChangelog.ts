@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.258',
+    title: 'Harvest runners · Medium/Major Steady unlock',
+    sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs', 'risk'],
+    items: [
+      'Quality harvest: Steady/Trend trail room (9%/5% · 10%/6%); PCL PPP wins over catalog when ON (arm 50 / giveback 42); Steady partial 28%/40%; armed quality early partial 14%@0.35; post-partial ×0.95. BE nudge 1.5% stays on fast/low/late only — hard SL / late-chase / Scalper untouched.',
+      'Medium/Majors: hard age ≥60d + pump block (fail-closed unknown); H1 floors $12k/$20k; soft-gate Dip/Steady only; H1-vol rotation at cap 25 (1.25× + 10m debounce). Fix launchedAt≠watch birth so Steady/soft-allow see real pool age.',
+      'Steady unlock: majors/medium pump bypass without armed gate; watch→arm→trigger logs [WATCHLIST-*]/[ROTATION]/[STEADY-COMPOUNDER]; size ×1.15 on high-conviction quality reclaim. maxConcurrent 1 kept.',
+    ],
+  },
+  {
     version: '1.2.257',
     title: 'Master performance · late-chase disable · MS tighten · PCL harvest',
     sections: ['microbots', 'tradecraft', 'overview', 'knobs', 'risk', 'learning'],
