@@ -71,11 +71,10 @@ export interface DipWatchEntry {
 
 /**
  * Separate caps so majors/medium (liberal admit + 10h TTL + frequent refresh)
- * cannot starve memecoin / scanner minors. Medium ≤25 is its own bucket so
- * majors do not starve $50–200M Steady parks.
+ * cannot starve memecoin / scanner minors. Medium/Majors ≤80 (1.2.261).
  */
-const MAX_MAJORS_WATCHES = 25;
-const MAX_MEDIUM_WATCHES = 25;
+const MAX_MAJORS_WATCHES = 80;
+const MAX_MEDIUM_WATCHES = 80;
 const MAX_MINORS_WATCHES = 16;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 /** High-MC majors/medium wait longer for Fib/S setups (8–12h band → 10h) */
@@ -463,6 +462,39 @@ function pruneTerminal(): void {
   enforceBucketCap('minors', MAX_MINORS_WATCHES);
 }
 
+function watchHasFibOrSupportLevels(w: DipWatchEntry): boolean {
+  return (
+    (w.fib05PriceSol != null && w.fib05PriceSol > 0) ||
+    (w.fib618PriceSol != null && w.fib618PriceSol > 0) ||
+    (w.supportPriceSol != null && w.supportPriceSol > 0) ||
+    w.nearKeyFib === true ||
+    w.nearSupport === true
+  );
+}
+
+/** Quality parks use a slightly wider near-band (1.2.261). */
+function qualityNearBands(w: DipWatchEntry): {
+  nearBandPct: number;
+  undercutBandPct: number;
+  nearBand: number;
+  undercut: number;
+} {
+  const quality = isQualityBandSource(w.source);
+  return quality
+    ? {
+        nearBandPct: 5,
+        undercutBandPct: 2,
+        nearBand: 0.05,
+        undercut: 0.02,
+      }
+    : {
+        nearBandPct: 3.5,
+        undercutBandPct: 1.5,
+        nearBand: 0.035,
+        undercut: 0.015,
+      };
+}
+
 /**
  * Recompute nearKeyFib / nearSupport / level prices from stored Fib/S
  * (+ optional multi-TF) vs live price. Fail soft.
@@ -470,6 +502,7 @@ function pruneTerminal(): void {
 function recomputeProximityFromLevels(w: DipWatchEntry): void {
   const px = w.lastPriceSol;
   if (px == null || !Number.isFinite(px) || px <= 0) return;
+  const bands = qualityNearBands(w);
   try {
     const det = detectSupportReclaim({
       priceSol: px,
@@ -479,8 +512,8 @@ function recomputeProximityFromLevels(w: DipWatchEntry): void {
       nearSupport: w.nearSupport,
       nearKeyFib: w.nearKeyFib,
       reclaimTriggerPct: TRIGGER_RECLAIM_PCT,
-      nearBandPct: 3.5,
-      undercutBandPct: 1.5,
+      nearBandPct: bands.nearBandPct,
+      undercutBandPct: bands.undercutBandPct,
     });
     if (det.nearLevel || det.undercut) {
       if (det.levelKind === 'fib') w.nearKeyFib = true;
@@ -493,12 +526,10 @@ function recomputeProximityFromLevels(w: DipWatchEntry): void {
       }
     }
     // Also distance-check each stored level independently (targets may differ)
-    const nearBand = 0.035;
-    const undercut = 0.015;
     const nearPx = (level: number | null | undefined): boolean => {
       if (level == null || !Number.isFinite(level) || level <= 0) return false;
       const d = (px - level) / level;
-      return d >= -undercut && d <= nearBand;
+      return d >= -bands.undercut && d <= bands.nearBand;
     };
     if (nearPx(w.fib05PriceSol) || nearPx(w.fib618PriceSol)) {
       w.nearKeyFib = true;
@@ -509,6 +540,73 @@ function recomputeProximityFromLevels(w: DipWatchEntry): void {
   } catch {
     /* keep prior flags */
   }
+}
+
+/**
+ * Soft-arm Steady parks once Fib/S prices exist (even if not yet near).
+ * Reclaim trigger still required to fire — soft-arm alone does not open.
+ */
+function maybeSoftArmSteadyLevelsReady(
+  w: DipWatchEntry,
+  now: number,
+  dropOk: boolean
+): boolean {
+  if (w.status !== 'watching') return false;
+  if (!isQualityBandSource(w.source)) return false;
+  if (w.preferredProfileId !== 'steady_compounder') return false;
+  if (!watchHasFibOrSupportLevels(w)) return false;
+  const nearTa = w.nearKeyFib === true || w.nearSupport === true;
+  w.status = 'armed';
+  w.armedAt = now;
+  w.updatedAt = now;
+  w.lastReason = nearTa
+    ? dropOk
+      ? 'armed near Fib/S + dip'
+      : 'armed near Fib/S'
+    : 'levels ready · waiting reclaim';
+  stampWatchPlan(w);
+  noteDipFunnel('armed');
+  noteQualityBandFunnel(w.source, 'armed');
+  console.log(
+    `[dip-watch] ARMED ${w.symbol}` +
+      (nearTa ? '' : ' (soft · levels ready)')
+  );
+  console.log(`[STEADY-COMPOUNDER] arm ${w.symbol} [${w.source}]`);
+  try {
+    const { recordSetupWatchEvent } =
+      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+    recordSetupWatchEvent({
+      kind: 'armed',
+      family: 'dip',
+      mint: w.mint,
+      symbol: w.symbol,
+      profileId: 'steady_compounder',
+      reason: w.lastReason,
+      qualityScore: w.qualityScore,
+      entryStyle: w.entryStyle,
+    });
+  } catch {
+    /* optional */
+  }
+  return true;
+}
+
+/** Eager Fib/S seed right after parking so Steady can soft-arm ASAP. */
+function scheduleEagerQualityLevelSeed(w: DipWatchEntry): void {
+  if (!isQualityBandSource(w.source)) return;
+  void (async () => {
+    try {
+      await refreshWatchMarket(w, Date.now(), { force: true });
+      if (w.status !== 'watching' && w.status !== 'armed') return;
+      const dropOk =
+        w.dropFromPeakPct != null &&
+        w.dropFromPeakPct >= ARM_NEAR_DROP_MIN &&
+        w.dropFromPeakPct <= 45;
+      maybeSoftArmSteadyLevelsReady(w, Date.now(), dropOk);
+    } catch {
+      /* fail soft */
+    }
+  })();
 }
 
 function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): void {
@@ -539,9 +637,13 @@ function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): voi
   }
 }
 
-async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> {
+async function refreshWatchMarket(
+  w: DipWatchEntry,
+  now: number,
+  opts?: { force?: boolean }
+): Promise<void> {
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
-  if (now - last < MC_REFRESH_MIN_MS) return;
+  if (!opts?.force && now - last < MC_REFRESH_MIN_MS) return;
   lastMcRefreshAt.set(w.mint, now);
   let h1Change: number | null = null;
   try {
@@ -637,15 +739,11 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
   refreshDropFromPeak(w, h1Change);
   recomputeProximityFromLevels(w);
 
-  const hasLevels =
-    (w.fib05PriceSol != null && w.fib05PriceSol > 0) ||
-    (w.fib618PriceSol != null && w.fib618PriceSol > 0) ||
-    (w.supportPriceSol != null && w.supportPriceSol > 0) ||
-    w.nearKeyFib === true ||
-    w.nearSupport === true;
+  const hasLevels = watchHasFibOrSupportLevels(w);
   if (!hasLevels) noteDipFunnel('no_levels');
 
-  // Medium/Majors: time-gated no-levels rotate (~20m ticks ×4 ≈80m); skip MC≥$500M
+  // Medium/Majors: time-gated no-levels rotate (~20m ticks ×4 ≈80m);
+  // skip MC≥$500M and Steady parks (wait for TTL / levels).
   if (isQualityBandSource(w.source)) {
     try {
       const {
@@ -653,6 +751,8 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
         clearMajorsNoLevelsStreak,
       } = require('./majorsUniverse') as typeof import('./majorsUniverse');
       if (hasLevels) {
+        clearMajorsNoLevelsStreak(w.mint);
+      } else if (w.preferredProfileId === 'steady_compounder') {
         clearMajorsNoLevelsStreak(w.mint);
       } else {
         const { rotate, streak } = noteMajorsLevelsPresence(
@@ -1011,6 +1111,17 @@ export function considerDipWatchSetup(input: {
       /* optional */
     }
   }
+  if (isQuality) {
+    // Soft-arm immediately if Fib/S already known; else eager-seed on tick cadence.
+    if (!armed && preferSafe === 'steady_compounder') {
+      const dropOkAdmit =
+        drop != null &&
+        drop >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
+        drop <= maxDrop;
+      maybeSoftArmSteadyLevelsReady(entry, now, dropOkAdmit);
+    }
+    scheduleEagerQualityLevelSeed(entry);
+  }
   return entry;
 }
 
@@ -1220,7 +1331,8 @@ export async function tickDipSetupWatches(opts?: {
       w.dropFromPeakPct >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
       w.dropFromPeakPct <= maxDrop;
 
-    // Arm on Fib/S proximity (near target band); drop is soft preference
+    // Arm on Fib/S proximity (near target band); drop is soft preference.
+    // Steady soft-arm when Fib/S levels exist even if not yet near.
     if (w.status === 'watching' && nearTa) {
       w.status = 'armed';
       w.armedAt = now;
@@ -1254,6 +1366,8 @@ export async function tickDipSetupWatches(opts?: {
       } catch {
         /* optional */
       }
+    } else if (w.status === 'watching') {
+      maybeSoftArmSteadyLevelsReady(w, now, dropOk);
     }
 
     if (w.status === 'armed') {
@@ -1451,7 +1565,7 @@ export function unwatchDipSetup(mint: string): {
   return { ok: true, cooldownMs: UNWATCH_COOLDOWN_MS };
 }
 
-export function getDipSetupWatchStatus(limit = 32): {
+export function getDipSetupWatchStatus(limit = 200): {
   active: number;
   activeMajors: number;
   activeMedium: number;
@@ -1470,25 +1584,22 @@ export function getDipSetupWatchStatus(limit = 32): {
   const minorsActive = activeWatches('minors').sort(
     (a, b) => b.updatedAt - a.updatedAt
   );
-  // Interleave so a single limit never returns one band only
-  const interleaved: DipWatchEntry[] = [];
-  const maxMaj = Math.min(majorsActive.length, MAX_MAJORS_WATCHES);
-  const maxMed = Math.min(mediumActive.length, MAX_MEDIUM_WATCHES);
-  const maxMin = Math.min(minorsActive.length, MAX_MINORS_WATCHES);
-  let i = 0;
-  let j = 0;
-  let k = 0;
-  while (
-    interleaved.length < limit &&
-    (i < maxMaj || j < maxMed || k < maxMin)
-  ) {
-    if (k < maxMin) interleaved.push(minorsActive[k++]);
-    if (interleaved.length >= limit) break;
-    if (j < maxMed) interleaved.push(mediumActive[j++]);
-    if (interleaved.length >= limit) break;
-    if (i < maxMaj) interleaved.push(majorsActive[i++]);
+  // Band-complete: full medium + majors parks first, then minors fill remaining.
+  // Avoids interleave truncating quality inventory (was limit=28 round-robin).
+  const entries: DipWatchEntry[] = [];
+  for (const e of mediumActive) {
+    if (entries.length >= limit) break;
+    entries.push(e);
   }
-  for (const e of interleaved) {
+  for (const e of majorsActive) {
+    if (entries.length >= limit) break;
+    entries.push(e);
+  }
+  for (const e of minorsActive) {
+    if (entries.length >= limit) break;
+    entries.push(e);
+  }
+  for (const e of entries) {
     e.targetDipEntries = buildTargetDipEntries(e);
   }
   const terminalPool = [...watches.values()]
@@ -1509,7 +1620,7 @@ export function getDipSetupWatchStatus(limit = 32): {
     activeMajors: majorsActive.length,
     activeMedium: mediumActive.length,
     activeMinors: minorsActive.length,
-    entries: interleaved,
+    entries,
     recentTerminal: terminalPool.slice(0, 4),
   };
 }

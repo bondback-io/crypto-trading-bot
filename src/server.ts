@@ -4717,7 +4717,7 @@ export function createServer(): express.Application {
         diagnostics = null;
       }
       res.json({
-        dipWatch: getDipSetupWatchStatus(28),
+        dipWatch: getDipSetupWatchStatus(200),
         gradWatch: getMigrationGradWatchStatus(16),
         scalperWatch: getScalperSetupWatchStatus(16),
         trendWatch: getTrendSetupWatchStatus(16),

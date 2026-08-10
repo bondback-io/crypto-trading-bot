@@ -1,5 +1,5 @@
 /**
- * Mid-MC + high-MC discovery — Jupiter toptraded / toporganicscore without pump filter.
+ * Mid-MC + high-MC discovery — Jupiter multi-category merge without pump filter.
  * Medium $50M–$200M + Majors ≥$200M → Dip/Steady watch (prefer Steady quality reclaim).
  * Never Scalper Mode B. Additive: launch/pump scanner for Scalper-family stays unchanged.
  */
@@ -13,6 +13,8 @@ import {
   hasJupiterApiKey,
   isJupiterPumpFunToken,
   jupiterTokenToLaunchEvent,
+  type JupiterCategory,
+  type JupiterInterval,
   type JupiterTokenInfo,
 } from './jupiterTokens';
 import { isStrategyEnabledGlobal } from './strategies';
@@ -49,22 +51,22 @@ export const MEDIUM_MIN_MC_USD = 50_000_000;
 export const MAJORS_MIN_MC_USD = 200_000_000;
 /** Legacy alias: circulating MC floor for any mid/majors admit */
 export const UNIVERSE_MIN_MC_USD = MEDIUM_MIN_MC_USD;
-/** Min liquidity — mid of ~$50k–$100k band */
-export const MAJORS_MIN_LIQ_USD = 75_000;
-/** Soft H1 volume floor for Medium Steady quality (1.2.258: $12k) */
+/** Watch-list liquidity floor (1.2.261: $40k; trade anti-rug unchanged) */
+export const MAJORS_MIN_LIQ_USD = 40_000;
+/** Soft H1 volume floor for Medium Steady quality */
 export const MEDIUM_MIN_VOL_H1_USD = 12_000;
-/** Soft H1 volume floor for Majors Steady quality (1.2.258: $20k) */
+/** Soft H1 volume floor for Majors Steady quality */
 export const MAJORS_MIN_VOL_H1_USD = 20_000;
 /** @deprecated Use MEDIUM_MIN_VOL_H1_USD / MAJORS_MIN_VOL_H1_USD */
 export const MEDIUM_MAJORS_MIN_VOL_H1_USD = MAJORS_MIN_VOL_H1_USD;
-/** Hard min age for Medium/Majors universe — 60 days */
-export const MEDIUM_MAJORS_MIN_AGE_HOURS = 60 * 24;
+/** Hard min age for Medium/Majors watch list — 30 days (1.2.261; was 60d) */
+export const MEDIUM_MAJORS_MIN_AGE_HOURS = 30 * 24;
 /** Soft prefer ranking bonus ≥ 90 days */
 export const MEDIUM_MAJORS_PREFER_AGE_HOURS = 90 * 24;
 const FETCH_LIMIT = 100;
-/** Separate caps so majors do not starve medium */
-const CYCLE_CAP_MEDIUM = 25;
-const CYCLE_CAP_MAJORS = 25;
+/** Separate caps so majors do not starve medium (1.2.261: 80) */
+const CYCLE_CAP_MEDIUM = 80;
+const CYCLE_CAP_MAJORS = 80;
 const REFRESH_MS = 5 * 60_000;
 /** Time-gated no-levels: +1 streak every 20m without levels; rotate after 4 (~80m) */
 export const NO_LEVELS_ROTATE_AFTER = 4;
@@ -74,10 +76,55 @@ export const NO_LEVELS_SKIP_ROTATE_MC_USD = 500_000_000;
 /** Reserve ~40% of CYCLE seats for mid-MC bands (50m/100m) */
 const MID_BAND_SEAT_FRAC = 0.4;
 
+/** Jupiter feeds to merge (each ≤100). Wider discovery than single toptraded/organic. */
+const DISCOVERY_FEEDS: Array<{
+  category: JupiterCategory;
+  interval: JupiterInterval;
+}> = [
+  { category: 'toptraded', interval: '1h' },
+  { category: 'toptraded', interval: '24h' },
+  { category: 'toptrending', interval: '1h' },
+  { category: 'toptrending', interval: '6h' },
+  { category: 'toporganicscore', interval: '6h' },
+  { category: 'toporganicscore', interval: '24h' },
+];
+
+type RejectKey =
+  | 'denied'
+  | 'mc'
+  | 'pump'
+  | 'age_unknown'
+  | 'age'
+  | 'liq'
+  | 'vol'
+  | 'other';
+
+const rejectCounters: Record<RejectKey, number> = {
+  denied: 0,
+  mc: 0,
+  pump: 0,
+  age_unknown: 0,
+  age: 0,
+  liq: 0,
+  vol: 0,
+  other: 0,
+};
+
+function resetRejectCounters(): void {
+  for (const k of Object.keys(rejectCounters) as RejectKey[]) {
+    rejectCounters[k] = 0;
+  }
+}
+
+function noteReject(key: RejectKey): void {
+  rejectCounters[key] = (rejectCounters[key] || 0) + 1;
+}
+
 let cache: { at: number; list: MajorsCandidate[] } | null = null;
 let lastPassAt = 0;
 let lastPassOffered = 0;
 let lastError: string | null = null;
+let lastRawMerged = 0;
 /** mint → time-gated no-levels streak (+1 per 20m without levels) */
 const noLevelsStreak = new Map<
   string,
@@ -122,68 +169,111 @@ function solUsd(): number {
   return 150;
 }
 
+function mergeJupiterToken(
+  prev: JupiterTokenInfo,
+  t: JupiterTokenInfo
+): JupiterTokenInfo {
+  return {
+    ...prev,
+    ...t,
+    stats5m: t.stats5m ?? prev.stats5m,
+    stats1h: t.stats1h ?? prev.stats1h,
+    stats6h: t.stats6h ?? prev.stats6h,
+    stats24h: t.stats24h ?? prev.stats24h,
+    mcap: Number(t.mcap ?? 0) > Number(prev.mcap ?? 0) ? t.mcap : prev.mcap,
+    liquidity:
+      Number(t.liquidity ?? 0) > Number(prev.liquidity ?? 0)
+        ? t.liquidity
+        : prev.liquidity,
+    firstPool: t.firstPool ?? prev.firstPool,
+    createdAt: t.createdAt ?? prev.createdAt,
+  };
+}
+
 function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   const mint = String(token.id || '').trim();
-  if (!mint) return null;
+  if (!mint) {
+    noteReject('other');
+    return null;
+  }
   const sym = String(token.symbol || mint.slice(0, 6)).slice(0, 24);
   // Stables / quote assets never enter Medium/Majors CYCLE_CAP
   try {
     const solMint = String(config.solMint || '').trim() || undefined;
     if (isDeniedCopyMint(mint, solMint)) {
+      noteReject('denied');
       return null;
     }
   } catch {
-    if (isDeniedCopyMint(mint)) return null;
+    if (isDeniedCopyMint(mint)) {
+      noteReject('denied');
+      return null;
+    }
   }
   // Circulating MC only — never FDV
   const mc = readJupiterMarketCapUsd(token);
-  if (mc == null || mc < MEDIUM_MIN_MC_USD) return null;
+  if (mc == null || mc < MEDIUM_MIN_MC_USD) {
+    noteReject('mc');
+    return null;
+  }
   const watchBand = universeWatchBand(mc);
-  if (!watchBand) return null;
+  if (!watchBand) {
+    noteReject('mc');
+    return null;
+  }
   const logPfx = watchlistLogPrefix(watchBand);
 
   // Hard reject pump.fun / launchpad for quality parks (Steady is organic majors)
   if (isPumpFunMintSuffix(mint) || isJupiterPumpFunToken(token)) {
-    console.log(
-      `${logPfx} reject pump ${sym} MC=$${Math.round(mc)}`
-    );
+    noteReject('pump');
+    console.log(`${logPfx} reject pump ${sym} MC=$${Math.round(mc)}`);
     return null;
   }
 
+  // Age: fail-open when unknown (rank lower). Hard floor 30d when known.
   const age = resolveJupiterTokenAgeHours(token);
-  if (!age) {
-    console.log(`${logPfx} reject age_unknown ${sym} MC=$${Math.round(mc)}`);
-    return null;
-  }
-  if (age.ageHours < MEDIUM_MAJORS_MIN_AGE_HOURS) {
+  if (age && age.ageHours < MEDIUM_MAJORS_MIN_AGE_HOURS) {
+    noteReject('age');
     console.log(
       `${logPfx} reject too_young ${sym} ageDays=${(age.ageHours / 24).toFixed(1)} ` +
         `MC=$${Math.round(mc)}`
     );
     return null;
   }
+  if (!age) {
+    noteReject('age_unknown');
+    // fail-open into watch — do not return null
+  }
 
   const liq = Number(token.liquidity ?? 0);
   if (!Number.isFinite(liq) || liq < MAJORS_MIN_LIQ_USD) {
+    noteReject('liq');
     console.log(
       `${logPfx} reject liq_low ${sym} liq=$${Math.round(liq || 0)}`
     );
     return null;
   }
 
+  // Total H1 for admit floor (avoid organic-only wipe); organic still in raw stats
   const ev = jupiterTokenToLaunchEvent(token, solUsd(), {
-    preferOrganicVolume: config.marketScanner?.preferOrganicVolume !== false,
+    preferOrganicVolume: false,
   });
-  // Guard: launch event must also carry circulating mcap (no FDV fallback)
   const circ = Number(ev.marketCapUsd ?? 0);
-  if (!Number.isFinite(circ) || circ < MEDIUM_MIN_MC_USD) return null;
+  if (!Number.isFinite(circ) || circ < MEDIUM_MIN_MC_USD) {
+    noteReject('mc');
+    return null;
+  }
   const wb = universeWatchBand(circ);
-  if (!wb) return null;
+  if (!wb) {
+    noteReject('mc');
+    return null;
+  }
 
   const volH1 = Number(ev.volumeH1Usd ?? 0);
   const minVolH1 =
     wb === 'medium' ? MEDIUM_MIN_VOL_H1_USD : MAJORS_MIN_VOL_H1_USD;
   if (Number.isFinite(volH1) && volH1 > 0 && volH1 < minVolH1) {
+    noteReject('vol');
     console.log(
       `${watchlistLogPrefix(wb)} reject vol_low ${sym} volH1=$${Math.round(volH1)} ` +
         `min=$${minVolH1}`
@@ -192,7 +282,8 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   }
 
   const band = majorsMcBand(circ);
-  const preferAged = age.ageHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS;
+  const preferAged =
+    age != null && age.ageHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS;
   return {
     mint,
     symbol: ev.symbol,
@@ -205,13 +296,15 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     lastPriceSol: ev.lastPriceSol > 0 ? ev.lastPriceSol : undefined,
     band,
     watchBand: wb,
-    pairCreatedAtMs: age.pairCreatedAtMs,
-    tokenAgeHours: age.ageHours,
+    pairCreatedAtMs: age?.pairCreatedAtMs,
+    tokenAgeHours: age?.ageHours,
     reasons: [
       `${wb}:${band}`,
       `circMC:$${Math.round(circ)}`,
       `liq:$${Math.round(liq)}`,
-      `ageDays:${(age.ageHours / 24).toFixed(0)}`,
+      age
+        ? `ageDays:${(age.ageHours / 24).toFixed(0)}`
+        : 'age:unknown',
       ...(preferAged ? ['age≥90d'] : []),
     ],
   };
@@ -219,7 +312,7 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
 
 /**
  * Refresh medium+majors universe from Jupiter (cached ~5m).
- * No pump-only filter — large-cap Solana names included.
+ * Multi-category merge for wider ≥$50M / ≥$200M coverage.
  */
 export async function refreshMajorsUniverse(
   force = false
@@ -233,31 +326,26 @@ export async function refreshMajorsUniverse(
   }
 
   try {
-    const [traded, organic] = await Promise.all([
-      fetchJupiterTopTokens('toptraded', '1h', FETCH_LIMIT),
-      fetchJupiterTopTokens('toporganicscore', '6h', FETCH_LIMIT),
-    ]);
+    resetRejectCounters();
+    const batches = await Promise.all(
+      DISCOVERY_FEEDS.map((f) =>
+        fetchJupiterTopTokens(f.category, f.interval, FETCH_LIMIT)
+      )
+    );
     const byMint = new Map<string, JupiterTokenInfo>();
-    for (const t of [...traded, ...organic]) {
-      const id = String(t?.id || '').trim();
-      if (!id) continue;
-      const prev = byMint.get(id);
-      if (!prev) {
-        byMint.set(id, t);
-        continue;
+    for (const batch of batches) {
+      for (const t of batch) {
+        const id = String(t?.id || '').trim();
+        if (!id) continue;
+        const prev = byMint.get(id);
+        if (!prev) {
+          byMint.set(id, t);
+          continue;
+        }
+        byMint.set(id, mergeJupiterToken(prev, t));
       }
-      byMint.set(id, {
-        ...prev,
-        ...t,
-        stats5m: t.stats5m ?? prev.stats5m,
-        stats1h: t.stats1h ?? prev.stats1h,
-        stats6h: t.stats6h ?? prev.stats6h,
-        stats24h: t.stats24h ?? prev.stats24h,
-        // Prefer higher circulating mcap when merging
-        mcap:
-          Number(t.mcap ?? 0) > Number(prev.mcap ?? 0) ? t.mcap : prev.mcap,
-      });
     }
+    lastRawMerged = byMint.size;
 
     const list: MajorsCandidate[] = [];
     for (const t of byMint.values()) {
@@ -277,6 +365,13 @@ export async function refreshMajorsUniverse(
     );
     cache = { at: Date.now(), list: capped };
     lastError = null;
+    console.log(
+      `[majors] refresh merged=${lastRawMerged} passed=${list.length} ` +
+        `cycle=${capped.length} (med=${medium.length} maj=${majors.length}) ` +
+        `reject pump=${rejectCounters.pump} age=${rejectCounters.age} ` +
+        `ageUnk=${rejectCounters.age_unknown} liq=${rejectCounters.liq} ` +
+        `vol=${rejectCounters.vol} mc=${rejectCounters.mc}`
+    );
     return capped;
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
@@ -293,6 +388,8 @@ export function getMajorsUniverseStatus(): {
   lastPassAt: number | null;
   lastPassOffered: number;
   lastError: string | null;
+  lastRawMerged: number;
+  rejects: Record<RejectKey, number>;
   bands: Record<MajorsMcBand, number>;
   sample: Array<{
     symbol: string;
@@ -325,6 +422,8 @@ export function getMajorsUniverseStatus(): {
     lastPassAt: lastPassAt || null,
     lastPassOffered,
     lastError,
+    lastRawMerged,
+    rejects: { ...rejectCounters },
     bands,
     sample: list.slice(0, 8).map((c) => ({
       symbol: c.symbol,
@@ -340,7 +439,7 @@ export function getMajorsUniverseStatus(): {
  * Steady-off → Dip Buyer. Never Scalper.
  */
 export function majorsPreferredProfileId(
-  band: MajorsMcBand | UniverseWatchBand
+  _band: MajorsMcBand | UniverseWatchBand
 ): string {
   try {
     if (config.tradeProfiles?.profiles?.steady_compounder !== false) {
@@ -377,10 +476,12 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
       c.tokenAgeHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS
         ? 1
         : 0,
+    knownAge: c.tokenAgeHours != null ? 1 : 0,
   }));
   scored.sort((a, b) => {
     if (b.near !== a.near) return b.near - a.near;
     if (b.aged !== a.aged) return b.aged - a.aged;
+    if (b.knownAge !== a.knownAge) return b.knownAge - a.knownAge;
     return b.c.marketCapUsd - a.c.marketCapUsd;
   });
   return scored.map((x) => x.c);

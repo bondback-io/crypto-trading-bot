@@ -13302,7 +13302,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               if (tab === 'medium') return src === 'medium';
               return src !== 'majors' && src !== 'medium';
             })
-            .slice(0, 16);
+            .slice(0, tab === 'majors' || tab === 'medium' ? 80 : 16);
           const terminal = (dw.recentTerminal || []).filter(function (e) {
             const src = String(e.source || '');
             if (tab === 'majors') return src === 'majors';

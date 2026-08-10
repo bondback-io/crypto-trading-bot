@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.261',
+    title: 'Medium/Majors park inventory · Steady soft-arm',
+    sections: ['scanners', 'microbots', 'tradecraft', 'overview', 'knobs'],
+    items: [
+      'Medium/Majors discovery widens Jupiter merge (toptraded/toptrending/toporganicscore across 1h–24h), watch-only age/vol/liq relax (30d floor, age-unknown fail-open, $40k liq, total H1 vol), caps 80/80, API/UI show full parks (no 16/28 truncate).',
+      'Steady soft-arm when Fib/S levels exist (levels ready · waiting reclaim); eager level seed on park; wider near-band; skip no-levels rotate for steady_compounder until TTL. Reclaim still required to fire.',
+    ],
+  },
+  {
     version: '1.2.260',
     title: 'Scalper armed-primary habit · Steady/HWR majors unlock',
     sections: ['microbots', 'tradecraft', 'risk', 'overview', 'knobs', 'learning'],
