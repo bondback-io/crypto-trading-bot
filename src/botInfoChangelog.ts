@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.265',
+    title: 'Stats Learning Metrics tab',
+    sections: ['overview', 'microbots', 'learning', 'scanners'],
+    items: [
+      'New Stats → Learning Metrics tab: per-profile readiness, EMA, capture, armed quality, funnel mini-stats, and promotion blockers (Last 20/50/100). Read-only join of Expectancy / Profile RL / Trade Craft / Learning diagnostics.',
+      'Zion can summarize Learning Metrics in plain language (healthy / weak / quiet). Existing Learning diagnostics tab unchanged.',
+    ],
+  },
+  {
     version: '1.2.264',
     title: 'Watchlist tabs · Stats nav · quality name gates',
     sections: ['scanners', 'overview', 'microbots'],

@@ -3866,6 +3866,21 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Learning Metrics — per-profile readiness / EMA / capture (read-only join). */
+  app.get('/api/learning-metrics', (req: Request, res: Response) => {
+    try {
+      const { getLearningMetricsPanel } =
+        require('./learningMetricsPanel') as typeof import('./learningMetricsPanel');
+      const panel = getLearningMetricsPanel(req.query.window);
+      res.json(panel);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   /** Admission Baseline — v235 observe-only expectancy vs governed throttles. */
   app.get('/api/config/admission-baseline', (_req: Request, res: Response) => {
     try {

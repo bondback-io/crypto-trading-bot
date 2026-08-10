@@ -3342,6 +3342,105 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
       gap: 0.65rem;
     }
+    .lm-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.65rem;
+    }
+    @media (min-width: 720px) {
+      .lm-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    .lm-card {
+      border: 1px solid #1e293b;
+      border-radius: 0.55rem;
+      background: #0b1220;
+      padding: 0.65rem 0.75rem;
+      min-width: 0;
+    }
+    .lm-card.lm-tone-healthy {
+      border-color: rgba(74, 222, 128, 0.45);
+      box-shadow: inset 3px 0 0 #4ade80;
+    }
+    .lm-card.lm-tone-watch {
+      border-color: rgba(251, 191, 36, 0.4);
+      box-shadow: inset 3px 0 0 #fbbf24;
+    }
+    .lm-card.lm-tone-weak {
+      border-color: rgba(248, 113, 113, 0.45);
+      box-shadow: inset 3px 0 0 #f87171;
+    }
+    .lm-card-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.5rem;
+      margin-bottom: 0.4rem;
+    }
+    .lm-card-name {
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: #e2e8f0;
+    }
+    .lm-tone-chip {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      padding: 0.12rem 0.4rem;
+      border-radius: 999px;
+    }
+    .lm-tone-healthy .lm-tone-chip { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+    .lm-tone-watch .lm-tone-chip { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+    .lm-tone-weak .lm-tone-chip { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+    .lm-mode {
+      font-size: 0.65rem;
+      color: #94a3b8;
+      margin-left: auto;
+    }
+    .lm-section-label {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+      margin: 0.4rem 0 0.2rem;
+    }
+    .lm-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+    }
+    .lm-chip {
+      font-size: 0.65rem;
+      line-height: 1.3;
+      padding: 0.18rem 0.4rem;
+      border-radius: 0.35rem;
+      background: #111827;
+      color: #cbd5e1;
+      border: 1px solid #1e293b;
+    }
+    .lm-chip.is-good { color: #4ade80; border-color: rgba(74, 222, 128, 0.25); }
+    .lm-chip.is-bad { color: #f87171; border-color: rgba(248, 113, 113, 0.25); }
+    .lm-chip.is-warn { color: #fbbf24; border-color: rgba(251, 191, 36, 0.25); }
+    .lm-blocker {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      line-height: 1.4;
+      margin: 0.45rem 0 0;
+    }
+    .lm-summary-line {
+      font-size: 0.72rem;
+      color: #cbd5e1;
+      line-height: 1.4;
+      margin: 0.35rem 0 0;
+    }
+    .lm-funnel {
+      font-size: 0.62rem;
+      color: #64748b;
+      margin-top: 0.35rem;
+      line-height: 1.35;
+    }
     .fpr-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
@@ -10126,7 +10225,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" style="padding-bottom:0.55rem">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, and the agent decision log — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
+            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, Learning Metrics, and the agent decision log — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
             <p class="text-xs text-slate-400 mb-0">Tune bots on <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button>. Recovery stages live under Micro Bots → Learning.</p>
           </div>
         </div>
@@ -10135,6 +10234,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-expectancy" data-botperf-tab="expectancy" aria-selected="false" aria-controls="botperf-panel-expectancy" onclick="setBotPerfTab('expectancy')">Expectancy Lift</button>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-tradecraft" data-botperf-tab="tradecraft" aria-selected="false" aria-controls="botperf-panel-tradecraft" onclick="setBotPerfTab('tradecraft')">Trade Craft</button>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
         </div>
       </div>
@@ -10403,6 +10503,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="mint text-xs">Loading…</p>
         </div>
       </div>
+      </div>
+
+      <div class="botperf-panel space-y-4" id="botperf-panel-learningmetrics" data-botperf-panel="learningmetrics" role="tabpanel" aria-labelledby="botperf-tab-learningmetrics">
+        <div class="card" id="learning-metrics-card">
+          <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+            <div style="min-width:0;flex:1">
+              <div class="section-title">Learning Metrics <span class="tip" tabindex="0" data-tip="Per-profile readiness, EMA, capture, armed quality, and promotion blockers. Joins Expectancy Lift, Profile RL, Trade Craft, and Learning diagnostics. Read-only — does not change admits or modes."></span></div>
+              <p class="text-xs text-slate-400 mb-0" id="lm-summary">Monitor whether each profile is learning and improving, not just trading.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-end">
+              <label class="ctl ctl-fit">
+                <span>Window</span>
+                <select id="lm-window" onchange="syncExpectancyLiftWindow('lm-window');loadLearningMetrics()">
+                  <option value="20">Last 20</option>
+                  <option value="50" selected>Last 50</option>
+                  <option value="100">Last 100</option>
+                </select>
+              </label>
+              <span class="mint text-xs self-center" id="lm-updated-at">—</span>
+            </div>
+          </div>
+          <div class="lm-grid" id="lm-profile-grid">
+            <p class="mint text-xs">Open this tab to load Learning Metrics…</p>
+          </div>
+        </div>
       </div>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-decisions" data-botperf-panel="decisions" role="tabpanel" aria-labelledby="botperf-tab-decisions">
@@ -15239,6 +15364,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             try { loadTradeCraftPerformance(); } catch (_) {}
           } else if (sub === 'learning') {
             try { loadLearningDiagnostics(); } catch (_) {}
+          } else if (sub === 'learningmetrics') {
+            try { loadLearningMetrics(); } catch (_) {}
           } else if (sub === 'decisions') {
             try { loadAgentDecisionLog(); } catch (_) {}
           }
@@ -15763,6 +15890,259 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.loadLearningDiagnostics = loadLearningDiagnostics;
+
+    function lmFmtPct(share, digits) {
+      if (share == null || !isFinite(share)) return '—';
+      return (share * 100).toFixed(digits == null ? 0 : digits) + '%';
+    }
+    function lmFmtNum(n, digits) {
+      if (n == null || !isFinite(n)) return '—';
+      return Number(n).toFixed(digits == null ? 1 : digits);
+    }
+    function lmChipClass(kind, good) {
+      if (good === true) return 'lm-chip is-good';
+      if (good === false) return 'lm-chip is-bad';
+      if (kind === 'warn') return 'lm-chip is-warn';
+      return 'lm-chip';
+    }
+    function renderLearningMetrics(panel) {
+      const grid = document.getElementById('lm-profile-grid');
+      const sum = document.getElementById('lm-summary');
+      const updated = document.getElementById('lm-updated-at');
+      if (sum) {
+        sum.textContent =
+          (panel && panel.plainLanguage) ||
+          'Monitor whether each profile is learning and improving, not just trading.';
+      }
+      if (updated) {
+        const t = panel && panel.updatedAt ? new Date(panel.updatedAt) : null;
+        updated.textContent = t
+          ? 'Updated ' + t.toLocaleTimeString()
+          : '—';
+      }
+      if (!grid) return;
+      const rows = (panel && panel.profiles) || [];
+      if (!rows.length) {
+        grid.innerHTML =
+          '<p class="mint text-xs">No profile learning samples in this window.</p>';
+        return;
+      }
+      grid.innerHTML = rows
+        .map(function (p) {
+          const tone = p.tone === 'healthy' || p.tone === 'weak' ? p.tone : 'watch';
+          const mode =
+            p.rlMode === 'shadow'
+              ? 'Shadow'
+              : p.rlMode === 'hybrid'
+                ? 'Hybrid'
+                : p.rlMode === 'lead'
+                  ? 'Lead'
+                  : '—';
+          const emaDelta =
+            p.rewardEmaDelta != null && isFinite(p.rewardEmaDelta)
+              ? (p.rewardEmaDelta >= 0 ? '+' : '') +
+                lmFmtNum(p.rewardEmaDelta, 3)
+              : '—';
+          const lock = p.modeLocked ? ' · locked' : '';
+          const gov = (p.governorHints || [])
+            .slice(0, 2)
+            .map(function (g) {
+              return escHtml(String(g.family)) + ' ' + escHtml(String(g.state));
+            })
+            .join(' · ');
+          const blockers = (p.blockers || [])
+            .slice(0, 2)
+            .map(function (b) {
+              return '<div class="lm-blocker">' + escHtml(String(b)) + '</div>';
+            })
+            .join('');
+          const f = p.funnel || {};
+          const funnelBits = [
+            f.candidates != null ? 'cand ' + f.candidates : null,
+            f.armed != null ? 'armed ' + f.armed : null,
+            f.triggered != null ? 'trig ' + f.triggered : null,
+            f.opened != null ? 'open ' + f.opened : null,
+            f.closed != null ? 'closed ' + f.closed : null,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          return (
+            '<div class="lm-card lm-tone-' +
+            tone +
+            '">' +
+            '<div class="lm-card-head">' +
+            '<span class="lm-card-name">' +
+            escHtml(p.name || p.profileId) +
+            '</span>' +
+            '<span class="lm-tone-chip">' +
+            tone +
+            '</span>' +
+            '<span class="lm-mode">RL ' +
+            mode +
+            lock +
+            '</span>' +
+            '</div>' +
+            '<div class="lm-section-label">Sample &amp; mode</div>' +
+            '<div class="lm-chips">' +
+            '<span class="' +
+            lmChipClass() +
+            '">n=' +
+            (p.n != null ? p.n : '—') +
+            (p.episodes != null ? ' / ep ' + p.episodes : '') +
+            '</span>' +
+            '<span class="' +
+            lmChipClass(
+              null,
+              p.readinessScore == null
+                ? null
+                : p.readinessScore >= 60
+                  ? true
+                  : p.readinessScore < 40
+                    ? false
+                    : null
+            ) +
+            '">ready ' +
+            (p.readinessScore != null ? p.readinessScore + '/100' : '—') +
+            '</span>' +
+            '<span class="' +
+            lmChipClass(
+              null,
+              p.rewardEma == null
+                ? null
+                : p.rewardEma >= 0
+                  ? true
+                  : false
+            ) +
+            '">EMA ' +
+            lmFmtNum(p.rewardEma, 2) +
+            ' (' +
+            emaDelta +
+            ')</span>' +
+            '</div>' +
+            '<div class="lm-section-label">Performance</div>' +
+            '<div class="lm-chips">' +
+            '<span class="' +
+            lmChipClass(
+              null,
+              p.winRate == null ? null : p.winRate >= 0.45
+            ) +
+            '">WR ' +
+            lmFmtPct(p.winRate, 0) +
+            '</span>' +
+            '<span class="' +
+            lmChipClass(
+              null,
+              p.expectancyPct == null ? null : p.expectancyPct >= 0
+            ) +
+            '">E ' +
+            (p.expectancyPct == null
+              ? '—'
+              : (p.expectancyPct >= 0 ? '+' : '') +
+                lmFmtNum(p.expectancyPct, 2) +
+                '%') +
+            '</span>' +
+            '<span class="lm-chip">avgW ' +
+            lmFmtNum(p.avgWinPct, 1) +
+            '%</span>' +
+            '<span class="lm-chip">avgL ' +
+            lmFmtNum(p.avgLossPct, 1) +
+            '%</span>' +
+            '<span class="lm-chip">PF ' +
+            lmFmtNum(p.profitFactor, 2) +
+            '</span>' +
+            '<span class="' +
+            lmChipClass(
+              null,
+              (p.craftCapturePct != null
+                ? p.craftCapturePct
+                : p.mfeCapturePct) == null
+                ? null
+                : (p.craftCapturePct != null
+                    ? p.craftCapturePct
+                    : p.mfeCapturePct) >= 45
+            ) +
+            '">MFE cap ' +
+            lmFmtNum(
+              p.craftCapturePct != null ? p.craftCapturePct : p.mfeCapturePct,
+              0
+            ) +
+            '%</span>' +
+            '<span class="lm-chip">giveback ' +
+            lmFmtNum(p.givebackPct, 0) +
+            '%</span>' +
+            '<span class="lm-chip">soft-exit ' +
+            lmFmtNum(p.softExitPct, 0) +
+            '%</span>' +
+            '</div>' +
+            '<div class="lm-section-label">Entry skill</div>' +
+            '<div class="lm-chips">' +
+            '<span class="' +
+            lmChipClass(
+              null,
+              p.armedShare == null ? null : p.armedShare >= 0.6
+            ) +
+            '">armed ' +
+            lmFmtPct(p.armedShare, 0) +
+            '</span>' +
+            '<span class="lm-chip">disc ' +
+            lmFmtPct(p.discretionaryShare, 0) +
+            '</span>' +
+            '<span class="' +
+            lmChipClass(
+              null,
+              p.lateChaseShare == null
+                ? null
+                : p.lateChaseShare <= 0.08
+                  ? true
+                  : false
+            ) +
+            '">late ' +
+            lmFmtPct(p.lateChaseShare, 0) +
+            '</span>' +
+            '<span class="lm-chip">family ' +
+            escHtml(p.topEntryFamily || '—') +
+            '</span>' +
+            (gov
+              ? '<span class="lm-chip is-warn">' + gov + '</span>'
+              : '') +
+            '</div>' +
+            '<p class="lm-summary-line">' +
+            escHtml(p.summary || '') +
+            '</p>' +
+            blockers +
+            (funnelBits
+              ? '<div class="lm-funnel">Funnel: ' +
+                escHtml(funnelBits) +
+                '</div>'
+              : '') +
+            '</div>'
+          );
+        })
+        .join('');
+    }
+
+    async function loadLearningMetrics() {
+      try {
+        const win = syncExpectancyLiftWindow('lm-window');
+        const data = await fetchJSON(
+          '/api/learning-metrics?window=' + encodeURIComponent(String(win))
+        );
+        window.__learningMetrics = data;
+        renderLearningMetrics(data);
+      } catch (err) {
+        const grid = document.getElementById('lm-profile-grid');
+        const sum = document.getElementById('lm-summary');
+        if (sum) {
+          sum.textContent =
+            'Learning Metrics unavailable: ' + (err.message || String(err));
+        }
+        if (grid) {
+          grid.innerHTML =
+            '<p class="mint text-xs">Could not load Learning Metrics.</p>';
+        }
+      }
+    }
+    window.loadLearningMetrics = loadLearningMetrics;
 
     let chartScalperTrend = null;
 
@@ -17117,12 +17497,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function syncExpectancyLiftWindow(fromId) {
       const el = document.getElementById('el-window');
       const ppc = document.getElementById('ppc-window');
+      const lm = document.getElementById('lm-window');
       const src =
-        (fromId && document.getElementById(fromId)) || ppc || el;
+        (fromId && document.getElementById(fromId)) || ppc || el || lm;
       const raw = src && src.value != null ? String(src.value) : '50';
       const val = raw === '20' || raw === '100' ? raw : '50';
       if (el) el.value = val;
       if (ppc) ppc.value = val;
+      if (lm) lm.value = val;
       return Number(val) || 50;
     }
     window.syncExpectancyLiftWindow = syncExpectancyLiftWindow;
@@ -18652,6 +19034,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         'expectancy',
         'tradecraft',
         'learning',
+        'learningmetrics',
         'decisions',
       ];
       const next = allowed.indexOf(tab) >= 0 ? tab : 'performance';
@@ -18680,6 +19063,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { loadTradeCraftPerformance(); } catch (_) {}
         } else if (next === 'learning') {
           try { loadLearningDiagnostics(); } catch (_) {}
+        } else if (next === 'learningmetrics') {
+          try { loadLearningMetrics(); } catch (_) {}
         } else if (next === 'decisions') {
           try { loadAgentDecisionLog(); } catch (_) {}
         }
@@ -19920,6 +20305,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             stored === 'expectancy' ||
             stored === 'tradecraft' ||
             stored === 'learning' ||
+            stored === 'learningmetrics' ||
             stored === 'decisions'
           ) {
             sub = stored;
@@ -19933,6 +20319,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { loadExpectancyLift(); } catch (__) {}
           try { loadTradeCraftPerformance(); } catch (__) {}
           try { loadLearningDiagnostics(); } catch (__) {}
+          try { loadLearningMetrics(); } catch (__) {}
           try { loadAgentDecisionLog(); } catch (__) {}
         }
       }

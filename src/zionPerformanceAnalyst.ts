@@ -161,6 +161,19 @@ export function buildZionAnalystBrief(opts?: {
     } catch {
       /* optional */
     }
+    try {
+      const { formatLearningMetricsForZion } =
+        require('./learningMetricsPanel') as typeof import('./learningMetricsPanel');
+      const lmLines = formatLearningMetricsForZion(50, 6);
+      for (const line of lmLines.slice(0, 8)) {
+        explain.push(line.replace(/^\s+/, ''));
+        contextLines.push(
+          line.startsWith('  ') ? line : `  learning-metrics: ${line}`
+        );
+      }
+    } catch {
+      /* optional */
+    }
   } catch {
     observe.push('Learning diagnostics unavailable.');
   }

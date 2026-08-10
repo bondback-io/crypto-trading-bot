@@ -121,6 +121,10 @@ export interface CraftBotRow {
   trend: CraftTrendLabel;
   capturePct: number | null;
   scratchPct: number | null;
+  /** Avg giveback from peak % (harvest KPI). */
+  givebackPct: number | null;
+  /** Soft/scared exit share % (exits KPI). */
+  softExitPct: number | null;
 }
 
 export interface TradeCraftPerformance {
@@ -901,6 +905,7 @@ function botRow(profileId: string, window: number): CraftBotRow {
   const { traits } = buildTraits(eps);
   const craft = blendCraft(traits);
   const harvest = traits.find((t) => t.id === 'harvest');
+  const exits = traits.find((t) => t.id === 'exits');
   const { early, late } = halfSplit(eps);
   const earlyC = blendCraft(buildTraits(early).traits);
   const lateC = blendCraft(buildTraits(late).traits);
@@ -917,7 +922,7 @@ function botRow(profileId: string, window: number): CraftBotRow {
     holdScore: traits.find((t) => t.id === 'hold')?.score ?? null,
     profitTakingScore:
       traits.find((t) => t.id === 'profitTaking')?.score ?? null,
-    exitsScore: traits.find((t) => t.id === 'exits')?.score ?? null,
+    exitsScore: exits?.score ?? null,
     taScore: traits.find((t) => t.id === 'ta')?.score ?? null,
     decisionsScore: traits.find((t) => t.id === 'decisions')?.score ?? null,
     trend: trendFromDelta(delta, eps.length),
@@ -925,6 +930,14 @@ function botRow(profileId: string, window: number): CraftBotRow {
       harvest?.kpis.capturePct != null ? Number(harvest.kpis.capturePct) : null,
     scratchPct:
       harvest?.kpis.scratchPct != null ? Number(harvest.kpis.scratchPct) : null,
+    givebackPct:
+      harvest?.kpis.givebackPct != null
+        ? Number(harvest.kpis.givebackPct)
+        : null,
+    softExitPct:
+      exits?.kpis.softScaredPct != null
+        ? Number(exits.kpis.softScaredPct)
+        : null,
   };
 }
 

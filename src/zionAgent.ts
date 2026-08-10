@@ -248,6 +248,13 @@ function buildContextPack(opts?: { slim?: boolean }): string {
     lines.push('Learning health: unavailable');
   }
   try {
+    const { formatLearningMetricsForZion } =
+      require('./learningMetricsPanel') as typeof import('./learningMetricsPanel');
+    lines.push(...formatLearningMetricsForZion(50, slim ? 4 : 8));
+  } catch {
+    lines.push('Learning Metrics: unavailable');
+  }
+  try {
     const { getProfileRlStatus, formatProfileRlPlainLanguage } =
       require('./profileRlAgent') as typeof import('./profileRlAgent');
     const prl = getProfileRlStatus({
@@ -741,7 +748,7 @@ function localAnalystReply(
     } = require('./zionPerformanceAnalyst') as typeof import('./zionPerformanceAnalyst');
     if (
       wantsPerformanceAnalysis(q) ||
-      /health score|what has .+ learned|learning progress|system health/.test(q)
+      /health score|what has .+ learned|learning progress|system health|learning metrics|is .+ learning|readiness/.test(q)
     ) {
       const brief = buildZionAnalystBrief();
       return formatAnalystReply(brief, {
@@ -1116,7 +1123,7 @@ function localAnalystReply(
   }
 
   if (
-    /learning (progress|health)|system health|what has .+ learned|self-?learn|ml mode|diagnostics/.test(
+    /learning (progress|health|metrics)|system health|what has .+ learned|self-?learn|ml mode|diagnostics|readiness/.test(
       q
     ) ||
     (/learned|learning/.test(q) && /scalper|dip|migration|trend|momentum|burst|steady|high.?win|reversal|bot/.test(q))
@@ -1134,6 +1141,17 @@ function localAnalystReply(
         followUp: 'Another bot, or overall system health?',
       });
     }
+    let lmSummaries: string[] = [];
+    try {
+      const { formatLearningMetricsForZion } =
+        require('./learningMetricsPanel') as typeof import('./learningMetricsPanel');
+      lmSummaries = formatLearningMetricsForZion(50, 6)
+        .filter((l) => /^\s+\S/.test(l) && !/blocker:/i.test(l))
+        .map((l) => l.trim())
+        .slice(0, 5);
+    } catch {
+      lmSummaries = [];
+    }
     const topLearn = facts.learnProfiles.slice(0, 4);
     return formatZionReply({
       greeting: greet,
@@ -1145,13 +1163,14 @@ function localAnalystReply(
         facts.learningWarns.length
           ? `Watch: ${facts.learningWarns.slice(0, 3).join('; ')}.`
           : null,
-        topLearn.length
+        lmSummaries.length ? lmSummaries.join(' ') : null,
+        !lmSummaries.length && topLearn.length
           ? topLearn.map((p) => `${p.name} — ${p.detail.split('—').pop()?.trim() || p.detail}`).join(' ')
           : null,
       ]
         .filter(Boolean)
         .join(' '),
-      followUp: 'Ask what a specific bot has learned, or open Stats.',
+      followUp: 'Ask what a specific bot has learned, or open Stats → Learning Metrics.',
     });
   }
 
