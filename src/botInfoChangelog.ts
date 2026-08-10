@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.260',
+    title: 'Scalper armed-primary habit · Steady/HWR majors unlock',
+    sections: ['microbots', 'tradecraft', 'risk', 'overview', 'knobs', 'learning'],
+    items: [
+      'Scalper habit always-on: discretionary skipped unless expanding vol + near support (armed Mode B reclaim primary). Logs scalper_armed_open / scalper_discretionary_skipped / scalper_size_downrank_active. Disc size↓ also when E<0; RL Shadow while weak/recovery/poor expectancy. Late-chase untouched.',
+      'Steady/HWR soft-allow plumbing: age + vol/liq/holders passed at anti-rug / quality gate / executeBuy so aged majors stay age-known and buys do not re-deny. HWR majors|medium specialty pump bypass (Steady parity). Soft-allow grant/deny counters + HWR quiet chips.',
+    ],
+  },
+  {
     version: '1.2.259',
     title: 'HWR/Steady soft-allow before anti-rug · microcap NAP',
     sections: ['microbots', 'tradecraft', 'risk', 'overview', 'knobs'],

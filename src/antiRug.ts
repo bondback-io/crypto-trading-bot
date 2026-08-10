@@ -744,6 +744,17 @@ async function runAntiRugChecks(
           volumeH1Usd: metrics.volumeH1Usd ?? checks.volumeH1Usd,
           liquidityUsd: metrics.liquidityUsd ?? checks.liquidityUsd,
           holderCount: metrics.holderCountEstimate ?? checks.holderCount,
+          pairCreatedAtMs:
+            (metrics as { pairCreatedAtMs?: number | null }).pairCreatedAtMs ??
+            null,
+          tokenAgeHours: (() => {
+            const pairMs = (metrics as { pairCreatedAtMs?: number | null })
+              .pairCreatedAtMs;
+            if (pairMs != null && Number.isFinite(pairMs) && pairMs > 0) {
+              return Math.max(0, (Date.now() - Number(pairMs)) / 3_600_000);
+            }
+            return null;
+          })(),
           symbol: ctx.symbol,
           hardReason,
         });
@@ -1157,6 +1168,17 @@ async function runAntiRugChecks(
         volumeH1Usd: checks.volumeH1Usd,
         liquidityUsd: checks.liquidityUsd,
         holderCount: checks.holderCount,
+        pairCreatedAtMs:
+          (metrics as { pairCreatedAtMs?: number | null }).pairCreatedAtMs ??
+          null,
+        tokenAgeHours: (() => {
+          const pairMs = (metrics as { pairCreatedAtMs?: number | null })
+            .pairCreatedAtMs;
+          if (pairMs != null && Number.isFinite(pairMs) && pairMs > 0) {
+            return Math.max(0, (Date.now() - Number(pairMs)) / 3_600_000);
+          }
+          return null;
+        })(),
         symbol: ctx.symbol,
         hardReason: reason,
       });

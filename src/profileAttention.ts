@@ -321,9 +321,9 @@ export function shouldThrottleScalperAdmit(input: {
 }
 
 /**
- * Habit (1.2.247): when Scalper WR is weak or Fast Recovery stage ≤1,
- * soft-skip discretionary Scalper unless Mode B armed / watch-triggered,
- * or volume expanding + near support. Does not raise attention caps.
+ * Habit (1.2.260): always prefer armed Mode B reclaim for Scalper.
+ * Soft-skip discretionary (unarmed) unless volume expanding + near support.
+ * Armed Mode B / watch-triggered always bypasses. Does not raise attention caps.
  */
 export function shouldSoftSkipUnarmedScalperHabit(input: {
   profileId?: string | null;
@@ -344,25 +344,20 @@ export function shouldSoftSkipUnarmedScalperHabit(input: {
     );
   if (armed) return { skip: false };
 
-  const wr = scalperRecentWinRate();
-  const recovering = scalperRecoveringStrict();
-  const weak = wr != null && wr < WEAK_WR_PCT;
-  if (!weak && !recovering) return { skip: false };
-
   const volExpanding = String(input.volumeDecayState || '') === 'expanding';
   const nearS =
     input.nearSupport === true || input.nearMultiTfSupport === true;
   if (volExpanding && nearS) return { skip: false };
 
+  const wr = scalperRecentWinRate();
+  const recovering = scalperRecoveringStrict();
   return {
     skip: true,
     reason:
-      `Scalper habit: prefer armed Mode B reclaim` +
+      `scalper_discretionary_skipped · prefer armed Mode B reclaim` +
       (wr != null ? ` · WR ${wr.toFixed(0)}%` : '') +
       (recovering ? ' · recovery stage≤1' : '') +
-      (!(volExpanding && nearS)
-        ? ' · need expanding vol + near support'
-        : ''),
+      ' · need expanding vol + near support',
   };
 }
 
@@ -574,6 +569,10 @@ export function getSetupWatchDiagnostics(): {
   scalperOpenRatePct: number | null;
   modeBFunnel: Record<string, number> | null;
   dipFunnel: Record<string, number> | null;
+  softAllowCounters: Record<
+    string,
+    { granted: number; denied: number; lastDenyKey: string | null }
+  > | null;
   blockReasons: Array<{ reason: string; count: number }>;
   scalperAttentionShare: number | null;
   dipInactiveReason:
@@ -734,6 +733,15 @@ export function getSetupWatchDiagnostics(): {
     scalperOpenRatePct,
     modeBFunnel,
     dipFunnel,
+    softAllowCounters: (() => {
+      try {
+        const { getQualitySoftAllowCounters } =
+          require('./tradeProfiles') as typeof import('./tradeProfiles');
+        return getQualitySoftAllowCounters();
+      } catch {
+        return null;
+      }
+    })(),
     blockReasons,
     scalperAttentionShare,
     dipInactiveReason: describeDipInactiveReason(),

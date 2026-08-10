@@ -509,6 +509,42 @@ function resolveRlModeMax(profileId: string): 'shadow' | 'hybrid' | 'lead' | 'an
       return 'shadow';
     }
   }
+  // Scalper 1.2.260: Shadow while weak — do not promote Lead/Hybrid until healthy
+  if (profileId === 'scalper') {
+    try {
+      const {
+        isFastProfileRecovering,
+        getProfileRecoveryStage,
+        shouldBlockProfileLead,
+      } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      if (isFastProfileRecovering('scalper')) return 'shadow';
+      const stage = getProfileRecoveryStage('scalper');
+      if (stage != null && stage <= 1) return 'shadow';
+      if (shouldBlockProfileLead('scalper')) return 'shadow';
+    } catch {
+      /* optional */
+    }
+    try {
+      const {
+        shouldBlockLeadForPoorExpectancy,
+        collectExpectancyTrades,
+        computeExpectancyMetrics,
+      } = require('./expectancyLift') as typeof import('./expectancyLift');
+      if (shouldBlockLeadForPoorExpectancy('scalper')) return 'shadow';
+      const trades = collectExpectancyTrades()
+        .filter(
+          (t: { profileId?: string }) =>
+            String(t.profileId || '') === 'scalper'
+        )
+        .slice(-20);
+      const m = computeExpectancyMetrics(trades);
+      if (m.tradeCount >= 6 && m.winRate != null && m.winRate < 0.25) {
+        return 'shadow';
+      }
+    } catch {
+      /* fail-soft: do not force shadow on diagnostic errors */
+    }
+  }
   return 'any';
 }
 

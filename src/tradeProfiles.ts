@@ -860,7 +860,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'KOL / specialty feed preferred for scanner entries',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Selective · smaller size — accuracy over volume',
-      'Lane floors: holders ≥150 · top10 ≤32% (soft ≤65% if age≥90d + liq≥$20k; ≤70% age-unknown fallback) · 1h vol ≥$15k',
+      'Lane floors: holders ≥150 · top10 ≤32% (soft ≤65% if age≥90d + liq≥$20k; ≤75% age-unknown fallback) · 1h vol ≥$15k',
     ],
     priority: 72,
     defaultEnabled: true,
@@ -1029,7 +1029,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Small pullbacks 2–20% or volume uptick — deep knives leave to Dip',
       'Patient but disciplined · no hard timer',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
-      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k (prefer ≥$50M medium) · top10 ≤35% (soft ≤68% if age≥90d + liq≥$10k; ≤72% age-unknown fallback)',
+      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k (prefer ≥$50M medium) · top10 ≤35% (soft ≤68% if age≥90d + liq≥$10k; ≤75% age-unknown fallback)',
       'Quality holder gate: known high insider still hard-skip; unknown insider soft-pass; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
       'Specialty Jupiter/KOL/majors/medium can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
       'Medium $50–200M + Majors ≥$200M dips soft-prefer Steady quality reclaim; Dip Buyer remains for true reclaim DNA on minors',
@@ -2765,6 +2765,42 @@ export type QualityTop10SoftAllowGateResult = {
   detail: string;
 };
 
+/** Session soft-allow grant/deny counters for Steady + HWR diagnostics. */
+const qualitySoftAllowCounters: Record<
+  string,
+  { granted: number; denied: number; lastDenyKey: string | null }
+> = {
+  high_win_rate: { granted: 0, denied: 0, lastDenyKey: null },
+  steady_compounder: { granted: 0, denied: 0, lastDenyKey: null },
+};
+
+export function noteQualitySoftAllowOutcome(
+  profileId: string | null | undefined,
+  outcome: 'granted' | 'denied',
+  rejectKey?: string | null
+): void {
+  const id = String(profileId || '');
+  if (!isQualityLaneProfileId(id)) return;
+  const row = qualitySoftAllowCounters[id] || {
+    granted: 0,
+    denied: 0,
+    lastDenyKey: null,
+  };
+  if (outcome === 'granted') row.granted += 1;
+  else {
+    row.denied += 1;
+    if (rejectKey) row.lastDenyKey = String(rejectKey);
+  }
+  qualitySoftAllowCounters[id] = row;
+}
+
+export function getQualitySoftAllowCounters(): typeof qualitySoftAllowCounters {
+  return {
+    high_win_rate: { ...qualitySoftAllowCounters.high_win_rate },
+    steady_compounder: { ...qualitySoftAllowCounters.steady_compounder },
+  };
+}
+
 /**
  * Soft-allow evaluation for anti-rug / monitor / executeBuy gates.
  * Only Steady/HWR; fast bots return applicable=false.
@@ -2830,6 +2866,7 @@ export function evaluateQualityTop10SoftAllowForGates(opts: {
   };
   const soft = resolveTop10SoftAllow(def, ctx, top10, maxTop10);
   if (soft.allow) {
+    noteQualitySoftAllowOutcome(opts.profileId, 'granted');
     return {
       applicable: true,
       granted: true,
@@ -2838,6 +2875,11 @@ export function evaluateQualityTop10SoftAllowForGates(opts: {
       detail: soft.detail,
     };
   }
+  noteQualitySoftAllowOutcome(
+    opts.profileId,
+    'denied',
+    soft.rejectKey || null
+  );
   return {
     applicable: true,
     granted: false,
@@ -3183,6 +3225,7 @@ export function evaluateLaneEntryFloors(
     if (top10 != null && top10 > maxTop10) {
       const soft = resolveTop10SoftAllow(def, ctx, top10, maxTop10);
       if (soft.allow) {
+        noteQualitySoftAllowOutcome(def.id, 'granted');
         const tag = soft.grantTag ?? 'top10_soft_allow_age_known';
         const mult =
           soft.sizeMult ??
@@ -3206,6 +3249,7 @@ export function evaluateLaneEntryFloors(
         };
       }
       if (TOP10_SOFT_CEILING_PCT[def.id] != null) {
+        noteQualitySoftAllowOutcome(def.id, 'denied', soft.rejectKey || null);
         console.log(
           `[trade-profiles] top10_soft_allow REJECT ${ctx.symbol || 'token'} · ${soft.detail}` +
             (soft.rejectKey ? ` · key=${soft.rejectKey}` : '')
@@ -4132,7 +4176,7 @@ function scoreProfile(
       score += 14;
       bits.push('watch prefer scalper@S');
     }
-    // Habit 1.2.247: soft-require Mode B when WR weak / recovery ≤1
+    // Habit 1.2.260: always soft-require Mode B for discretionary Scalper
     // (armed / watch-triggered bypass; expanding vol + near support exception)
     try {
       const armedModeB =
@@ -4150,9 +4194,12 @@ function scoreProfile(
           nearMultiTfSupport: ctx.nearMultiTfSupport === true,
         });
         if (habit.skip) {
+          console.log(
+            `[trade-profiles] scalper_discretionary_skipped · ${ctx.symbol || 'token'} · ${habit.reason}`
+          );
           return {
             score: 0,
-            reason: habit.reason || 'scalper habit: prefer armed Mode B',
+            reason: habit.reason || 'scalper_discretionary_skipped',
           };
         }
       }

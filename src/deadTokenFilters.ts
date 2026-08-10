@@ -175,12 +175,15 @@ export function isMatureSpecialtyPumpFunBypass(opts?: {
     return true;
   }
 
-  // High Win-Rate: jupiter|kolscan specialty only (not majors/medium Steady park)
-  if (
-    pid === 'high_win_rate' &&
-    (feed === 'jupiter' || feed === 'kolscan')
-  ) {
-    return true;
+  // High Win-Rate: majors|medium organic parks bypass without armed gate
+  // (Steady parity 1.2.260); jupiter|kolscan still require armed / dip-trigger.
+  if (pid === 'high_win_rate') {
+    if (feed === 'majors' || feed === 'medium') {
+      return true;
+    }
+    if (feed === 'jupiter' || feed === 'kolscan') {
+      return armed;
+    }
   }
 
   return false;

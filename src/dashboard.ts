@@ -13469,6 +13469,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 (dipDenyBits
                   ? ' · deny ' + dipDenyBits
                   : '') +
+                (function () {
+                  var sa = diag.softAllowCounters;
+                  if (!sa) return '';
+                  var h = sa.high_win_rate || {};
+                  var s = sa.steady_compounder || {};
+                  var hg = h.granted || 0;
+                  var hd = h.denied || 0;
+                  var sg = s.granted || 0;
+                  var sd = s.denied || 0;
+                  if (!(hg || hd || sg || sd)) return '';
+                  return (
+                    ' · soft-allow HWR ' +
+                    hg +
+                    '/' +
+                    hd +
+                    ' Steady ' +
+                    sg +
+                    '/' +
+                    sd
+                  );
+                })() +
                 ' (mxS/mxT=mutual scalper/trend · uw=unwatch_cd · nlRot=no_levels_rotate · vol/liq/mc/noSet/maxD · cap=at_cap)';
             } else {
               dipFunnelEl.textContent = 'Funnel: —';

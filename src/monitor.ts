@@ -519,6 +519,17 @@ function stampEntryStyleOnBuyOpts(
       if (fam) {
         (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
       }
+      const pid =
+        String(
+          (buyOpts as { tradeProfileId?: string }).tradeProfileId ||
+            signal.candidateTradeProfileId ||
+            ''
+        ) || '';
+      if (fam === 'scalper' || pid === 'scalper') {
+        console.log(
+          `[monitor] scalper_armed_open symbol=${signal.symbol || '?'} · Mode B reclaim`
+        );
+      }
     } else {
       (buyOpts as { entryPath?: string }).entryPath = 'discretionary';
     }
@@ -1220,6 +1231,17 @@ function applyProfileTaPlaybookGate(
             : undefined);
       if (fam) {
         (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
+      }
+      const pid =
+        String(
+          (buyOpts as { tradeProfileId?: string }).tradeProfileId ||
+            signal.candidateTradeProfileId ||
+            ''
+        ) || '';
+      if (fam === 'scalper' || pid === 'scalper') {
+        console.log(
+          `[monitor] scalper_armed_open symbol=${signal.symbol || '?'} · Mode B reclaim`
+        );
       }
     }
     if (signal.entryStyleHint) {
@@ -7471,8 +7493,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           nearMultiTfSupport: ctx.nearMultiTfSupport === true,
         });
         if (habit.skip) {
+          console.log(
+            `[monitor] scalper_discretionary_skipped symbol=${signal.symbol} · ${habit.reason}`
+          );
           attFails.push(
-            `${passer.name}: ${habit.reason || 'Scalper habit armed-prefer'}`
+            `${passer.name}: ${habit.reason || 'scalper_discretionary_skipped'}`
           );
           continue;
         }
@@ -7957,6 +7982,15 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
                 volumeH1Usd: report.checks.volumeH1Usd,
                 liquidityUsd: report.checks.liquidityUsd,
                 holderCount: report.checks.holderCount,
+                tokenAgeHours: signal.tokenAgeHours ?? null,
+                pairCreatedAtMs:
+                  (
+                    signal.metrics as
+                      | { pairCreatedAtMs?: number | null }
+                      | undefined
+                  )?.pairCreatedAtMs ?? null,
+                launchedAt:
+                  (signal as { launchedAt?: number | null }).launchedAt ?? null,
                 symbol: signal.symbol,
               });
               if (soft.granted) {

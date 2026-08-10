@@ -988,11 +988,23 @@ export async function executeBuy(
           );
           continue;
         }
+        const cachedMx = getCachedTokenMetrics(mint, { allowStale: true });
         const soft = evaluateQualityTop10SoftAllowForGates({
           profileId: meta?.tradeProfileId,
           top10HoldPct,
           maxTop10HoldPct: catalogMax > 0 ? catalogMax : undefined,
-          marketCapUsd: entryMarketCapUsd ?? null,
+          marketCapUsd: entryMarketCapUsd ?? cachedMx?.marketCapUsd ?? null,
+          volumeH1Usd: cachedMx?.volumeH1Usd ?? null,
+          liquidityUsd: cachedMx?.liquidityUsd ?? null,
+          holderCount: cachedMx?.holderCountEstimate ?? null,
+          pairCreatedAtMs: cachedMx?.pairCreatedAtMs ?? null,
+          tokenAgeHours: (() => {
+            const pairMs = cachedMx?.pairCreatedAtMs;
+            if (pairMs != null && Number.isFinite(pairMs) && pairMs > 0) {
+              return Math.max(0, (Date.now() - Number(pairMs)) / 3_600_000);
+            }
+            return null;
+          })(),
           symbol,
         });
         if (soft.granted) {

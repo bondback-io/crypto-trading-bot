@@ -1921,20 +1921,27 @@ export function expectancySizeMultiplier(input: {
       if (discPen.note) notes.push(discPen.note);
     }
 
-    // Scalper habit: discretionary only — cut size further when WR <25% or PF low
+    // Scalper habit: discretionary only — cut size further when WR <25%, PF low, or E < 0
     if (pid === 'scalper' && input.armedWatch !== true) {
       const wr =
         m.tradeCount >= 6 && m.winRate != null ? m.winRate : null;
       const pf = m.profitFactor;
       const weakWr = wr != null && wr < 0.25;
       const weakPf = pf != null && Number.isFinite(pf) && pf < 0.85;
-      if (weakWr || weakPf) {
+      const negE =
+        m.expectancyPct != null &&
+        Number.isFinite(m.expectancyPct) &&
+        m.expectancyPct < 0;
+      if (weakWr || weakPf || negE) {
         mult = clamp(mult * 0.65, HABIT_SIZE_LO, 0.7);
-        notes.push(
-          `scalper habit size↓ (WR ${
+        const ePct = m.expectancyPct!;
+        const note =
+          `scalper_size_downrank_active (WR ${
             wr != null ? `${(wr * 100).toFixed(0)}%` : 'n/a'
-          }${weakPf && pf != null ? ` · PF ${pf.toFixed(2)}` : ''})`
-        );
+          }${weakPf && pf != null ? ` · PF ${pf.toFixed(2)}` : ''}` +
+          `${negE ? ` · E ${ePct.toFixed(2)}%` : ''})`;
+        notes.push(note);
+        console.log(`[expectancy] ${note}`);
       }
     }
 
@@ -2588,7 +2595,11 @@ function quietReasonForProfile(profileId: string): string | null {
         return 'Suppressed by Scalper attention';
       }
     }
-    if (profileId === 'trend_rider' || profileId === 'steady_compounder') {
+    if (
+      profileId === 'trend_rider' ||
+      profileId === 'steady_compounder' ||
+      profileId === 'high_win_rate'
+    ) {
       const r = describeTrendInactiveReason(profileId);
       if (r === 'profile_off') return 'Profile off';
       if (r === 'recovery') return 'Recovery throttle';
@@ -2599,10 +2610,25 @@ function quietReasonForProfile(profileId: string): string | null {
       if (r === 'no_arms') return 'No armed setups';
       if (r === 'few_trades') return 'Quiet — few recent trades';
     }
+    // HWR soft-allow deny / microcap NAP quiet hints
+    if (profileId === 'high_win_rate' || profileId === 'steady_compounder') {
+      try {
+        const { getQualitySoftAllowCounters } =
+          require('./tradeProfiles') as typeof import('./tradeProfiles');
+        const c = getQualitySoftAllowCounters()[profileId];
+        if (c && c.denied > 0 && c.granted === 0) {
+          return `Soft-allow denies${c.lastDenyKey ? ` (${c.lastDenyKey})` : ''}`;
+        }
+      } catch {
+        /* soft */
+      }
+    }
     const d = getSetupWatchDiagnostics();
     const armed = d.armedByProfile?.[profileId] || 0;
     if (
-      (profileId === 'trend_rider' || profileId === 'steady_compounder') &&
+      (profileId === 'trend_rider' ||
+        profileId === 'steady_compounder' ||
+        profileId === 'high_win_rate') &&
       armed === 0
     ) {
       const recent = collectExpectancyTrades()
@@ -2621,11 +2647,17 @@ export function getQuietProfileChips(): Array<{
   label: string;
   reason: string;
 }> {
-  const ids = ['dip_buyer', 'trend_rider', 'steady_compounder'] as const;
+  const ids = [
+    'dip_buyer',
+    'trend_rider',
+    'steady_compounder',
+    'high_win_rate',
+  ] as const;
   const labels: Record<string, string> = {
     dip_buyer: 'Dip',
     trend_rider: 'Trend',
     steady_compounder: 'Steady',
+    high_win_rate: 'HWR',
   };
   const out: Array<{ profileId: string; label: string; reason: string }> = [];
   for (const id of ids) {
