@@ -1,6 +1,7 @@
 /**
  * Read-only system diagnostics export for AI agents (Grok / Cursor).
- * Aggregates Expectancy Lift, Learning Metrics, Trade Craft, funnel, governors.
+ * Aggregates Expectancy Lift, Learning Metrics, Trade Craft, funnel, governors,
+ * exit/harvest, entry timing, size/risk, lane inventory, and learning mutations.
  * No trading-logic side effects.
  */
 
@@ -13,6 +14,20 @@ import {
 } from './expectancyLift';
 import { getLearningMetricsPanel } from './learningMetricsPanel';
 import { buildTradeCraftPerformance } from './tradeCraftPerformance';
+import {
+  getProfileLearningEpisodes,
+  type ProfileLearningEpisode,
+} from './profileLearningEpisodes';
+import { TRADE_PROFILE_CATALOG } from './tradeProfiles';
+
+/** Near-term / stretch targets for Target Gap panel. */
+const TARGET_WR_NEAR_LO = 40;
+const TARGET_WR_NEAR_HI = 45;
+const TARGET_WR_STRETCH = 60;
+const TARGET_ARMED_PCT = 90;
+const TARGET_LATE_CHASE_PCT = 5;
+const TARGET_CAPTURE_PCT = 35;
+const TARGET_AVG_WL_RATIO = 1.2;
 
 function pad(s: string, n: number): string {
   const t = String(s ?? '');
@@ -36,11 +51,41 @@ function fmtSignedPct(n: number | null | undefined, digits = 2): string {
   return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`;
 }
 
+function fmtGapPp(current: number, target: number): string {
+  const gap = current - target;
+  return `${gap >= 0 ? '+' : ''}${gap.toFixed(1)}pp`;
+}
+
+function median(nums: number[]): number | null {
+  if (!nums.length) return null;
+  const a = [...nums].sort((x, y) => x - y);
+  const mid = Math.floor(a.length / 2);
+  if (a.length % 2 === 0) {
+    return (a[mid - 1]! + a[mid]!) / 2;
+  }
+  return a[mid]!;
+}
+
 function modeLabel(): string {
   const m = String(config.mode || 'paper');
   if (m === 'liveSimulation') return 'live_sim';
   if (m === 'live') return 'live';
   return 'paper';
+}
+
+function collectWindowEpisodes(window: number): ProfileLearningEpisode[] {
+  const all: ProfileLearningEpisode[] = [];
+  for (const p of TRADE_PROFILE_CATALOG) {
+    if (p.id === 'default' || p.id === 'zion') continue;
+    try {
+      const eps = getProfileLearningEpisodes(p.id, Math.max(window * 2, 100));
+      all.push(...eps);
+    } catch {
+      /* soft */
+    }
+  }
+  all.sort((a, b) => Number(a.closedAt || 0) - Number(b.closedAt || 0));
+  return all.slice(-window);
 }
 
 function deriveOperatorFlags(input: {
@@ -55,6 +100,10 @@ function deriveOperatorFlags(input: {
   maxDrawdownPct: number | null;
   quietSteadyHwr: string[];
   restrictedPositiveNative: string[];
+  winRatePct: number | null;
+  capturePct: number | null;
+  zeroMfePct: number | null;
+  greenThenRedPct: number | null;
 }): string[] {
   const flags: string[] = [];
   if (input.expectancyPct != null && input.expectancyPct < 0) {
@@ -99,7 +148,556 @@ function deriveOperatorFlags(input: {
       `weak_open_conversion trig→open=${input.triggerToOpenPct ?? '—'}% arm→open=${input.armToOpenPct ?? '—'}%`
     );
   }
+  if (input.winRatePct != null && input.winRatePct * 100 < TARGET_WR_NEAR_LO) {
+    flags.push(
+      `wr_below_near_target ${(input.winRatePct * 100).toFixed(1)}% < ${TARGET_WR_NEAR_LO}%`
+    );
+  }
+  if (
+    input.capturePct != null &&
+    Number.isFinite(input.capturePct) &&
+    input.capturePct < TARGET_CAPTURE_PCT
+  ) {
+    flags.push(
+      `capture_below_target ${fmtNum(input.capturePct, 0)}% < ${TARGET_CAPTURE_PCT}%`
+    );
+  }
+  if (
+    input.avgWinPct != null &&
+    input.avgLossPct != null &&
+    Math.abs(input.avgLossPct) > 1e-9
+  ) {
+    const ratio = Math.abs(input.avgWinPct) / Math.abs(input.avgLossPct);
+    if (ratio < TARGET_AVG_WL_RATIO) {
+      flags.push(
+        `avgWL_ratio_below_target ${ratio.toFixed(2)} < ${TARGET_AVG_WL_RATIO}`
+      );
+    }
+  }
+  if (input.zeroMfePct != null && input.zeroMfePct >= 0.25) {
+    flags.push(`high_zero_mfe_share ${(input.zeroMfePct * 100).toFixed(0)}%`);
+  }
+  if (input.greenThenRedPct != null && input.greenThenRedPct >= 0.2) {
+    flags.push(
+      `high_green_then_red ${(input.greenThenRedPct * 100).toFixed(0)}%`
+    );
+  }
   return flags;
+}
+
+function buildTargetGapLines(input: {
+  winRate: number | null;
+  armedShare: number | null;
+  lateChaseShare: number | null;
+  capturePct: number | null;
+  avgWinPct: number | null;
+  avgLossPct: number | null;
+}): string[] {
+  const lines: string[] = [];
+  const wr =
+    input.winRate != null && Number.isFinite(input.winRate)
+      ? input.winRate * 100
+      : null;
+  if (wr != null) {
+    lines.push(
+      `WR ${wr.toFixed(1)}% → near-term ${TARGET_WR_NEAR_LO}–${TARGET_WR_NEAR_HI}% (gap ${fmtGapPp(wr, TARGET_WR_NEAR_LO)} to floor) · stretch ${TARGET_WR_STRETCH}% (gap ${fmtGapPp(wr, TARGET_WR_STRETCH)})`
+    );
+  } else {
+    lines.push(`WR — → near-term ${TARGET_WR_NEAR_LO}–${TARGET_WR_NEAR_HI}% · stretch ${TARGET_WR_STRETCH}%`);
+  }
+
+  const armed =
+    input.armedShare != null ? input.armedShare * 100 : null;
+  lines.push(
+    armed != null
+      ? `armed ${armed.toFixed(0)}% → target ${TARGET_ARMED_PCT}% (gap ${fmtGapPp(armed, TARGET_ARMED_PCT)})`
+      : `armed — → target ${TARGET_ARMED_PCT}%`
+  );
+
+  const late =
+    input.lateChaseShare != null ? input.lateChaseShare * 100 : null;
+  lines.push(
+    late != null
+      ? `late-chase ${late.toFixed(0)}% → target ≤${TARGET_LATE_CHASE_PCT}% (gap ${fmtGapPp(late, TARGET_LATE_CHASE_PCT)})`
+      : `late-chase — → target ≤${TARGET_LATE_CHASE_PCT}%`
+  );
+
+  const cap = input.capturePct;
+  lines.push(
+    cap != null && Number.isFinite(cap)
+      ? `capture ${fmtNum(cap, 0)}% → target ≥${TARGET_CAPTURE_PCT}% (gap ${fmtGapPp(cap, TARGET_CAPTURE_PCT)})`
+      : `capture — → target ≥${TARGET_CAPTURE_PCT}%`
+  );
+
+  if (
+    input.avgWinPct != null &&
+    input.avgLossPct != null &&
+    Math.abs(input.avgLossPct) > 1e-9
+  ) {
+    const ratio = Math.abs(input.avgWinPct) / Math.abs(input.avgLossPct);
+    lines.push(
+      `avgW/|avgL| ${ratio.toFixed(2)} (avgW=${fmtNum(input.avgWinPct, 1)}% avgL=${fmtNum(input.avgLossPct, 1)}%) → target ≥${TARGET_AVG_WL_RATIO} (gap ${fmtGapPp(ratio * 100, TARGET_AVG_WL_RATIO * 100)} scaled)`
+    );
+  } else {
+    lines.push(
+      `avgW/|avgL| — → target ≥${TARGET_AVG_WL_RATIO}`
+    );
+  }
+  return lines;
+}
+
+function buildExitHarvestLines(
+  eps: ProfileLearningEpisode[],
+  craft: ReturnType<typeof buildTradeCraftPerformance> | null
+): { lines: string[]; zeroMfePct: number | null; greenThenRedPct: number | null } {
+  const lines: string[] = [];
+  const n = eps.length;
+  if (n <= 0) {
+    lines.push('(no episodes in window)');
+    return { lines, zeroMfePct: null, greenThenRedPct: null };
+  }
+
+  const reasonCounts = new Map<string, number>();
+  for (const e of eps) {
+    const key = String(e.exitKey || e.exitReason || 'unknown')
+      .toLowerCase()
+      .slice(0, 48);
+    reasonCounts.set(key, (reasonCounts.get(key) || 0) + 1);
+  }
+  const ranked = [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const top = ranked.slice(0, 12);
+  const topN = top.reduce((s, [, c]) => s + c, 0);
+  const other = n - topN;
+  lines.push('exitReason % (top 12):');
+  for (const [k, c] of top) {
+    lines.push(`  ${(c / n * 100).toFixed(1)}%  ${c}×  ${k}`);
+  }
+  if (other > 0) {
+    lines.push(`  ${(other / n * 100).toFixed(1)}%  ${other}×  other`);
+  }
+
+  if (craft?.exitMix?.length) {
+    lines.push(
+      `craft exitMix: ${craft.exitMix
+        .slice(0, 8)
+        .map((b) => `${b.key}=${b.n}(${fmtNum(b.pct, 0)}%)`)
+        .join(' · ')}`
+    );
+  }
+
+  const partialSecs: number[] = [];
+  for (const e of eps) {
+    if (e.pclPartialTaken !== true) continue;
+    const at = Number(e.pclPartialAtMs);
+    const opened = Number(e.openedAt);
+    if (Number.isFinite(at) && Number.isFinite(opened) && at > opened) {
+      partialSecs.push((at - opened) / 1000);
+    }
+  }
+  const medPartial = median(partialSecs);
+  lines.push(
+    `medianTimeToFirstPartialSec=${medPartial != null ? fmtNum(medPartial, 0) : 'n/a'} (n=${partialSecs.length})`
+  );
+
+  const pppArmSecs: number[] = [];
+  for (const e of eps) {
+    const t = Number(e.timeToArmSec);
+    if (Number.isFinite(t) && t >= 0) pppArmSecs.push(t);
+  }
+  const medPpp = median(pppArmSecs);
+  lines.push(
+    `medianTimeToFirstMfeSec=n/a (HWM timestamp not stamped) · proxy medianTimeToPppArmSec=${medPpp != null ? fmtNum(medPpp, 0) : 'n/a'} (n=${pppArmSecs.length})`
+  );
+
+  const zeroMfe = eps.filter((e) => (Number(e.maxRunupPct) || 0) <= 0).length;
+  const greenThenRed = eps.filter(
+    (e) => (Number(e.maxRunupPct) || 0) >= 1 && (Number(e.pnlPct) || 0) < 0
+  ).length;
+  const zeroMfePct = zeroMfe / n;
+  const greenThenRedPct = greenThenRed / n;
+  lines.push(
+    `%maxRunup<=0=${(zeroMfePct * 100).toFixed(1)}% (${zeroMfe}/${n}) · %greenThenClosedRed=${(greenThenRedPct * 100).toFixed(1)}% (${greenThenRed}/${n})`
+  );
+  lines.push(
+    'capture by profile: see §2 PROFILE TABLE / §5 TRADE CRAFT'
+  );
+  return { lines, zeroMfePct, greenThenRedPct };
+}
+
+function buildEntryTimingLines(
+  eps: ProfileLearningEpisode[],
+  funnel: {
+    armToTriggerMs?: number | null;
+    blockedSecondPass?: number;
+  },
+  blockedSecondPass: number
+): string[] {
+  const lines: string[] = [];
+  let armToTrigMs: number | null =
+    funnel.armToTriggerMs != null && Number.isFinite(funnel.armToTriggerMs)
+      ? Number(funnel.armToTriggerMs)
+      : null;
+  try {
+    const { getSetupWatchDiagnostics } =
+      require('./profileAttention') as typeof import('./profileAttention');
+    const d = getSetupWatchDiagnostics();
+    if (d.armToTriggerLatencyMs != null && Number.isFinite(d.armToTriggerLatencyMs)) {
+      armToTrigMs = Number(d.armToTriggerLatencyMs);
+    }
+  } catch {
+    /* soft */
+  }
+  lines.push(
+    `median arm→trigger=${armToTrigMs != null ? fmtNum(armToTrigMs / 1000, 1) + 's' : 'n/a'} (${armToTrigMs != null ? Math.round(armToTrigMs) + 'ms' : '—'})`
+  );
+
+  let trigToOpenMed: number | null = null;
+  try {
+    const { listSetupWatchEvents } =
+      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+    const events = listSetupWatchEvents(100);
+    const lastTrig = new Map<string, number>();
+    const deltas: number[] = [];
+    for (const e of [...events].reverse()) {
+      const mint = String(e.mint || '');
+      if (!mint) continue;
+      if (e.kind === 'triggered') {
+        lastTrig.set(mint, Number(e.at) || 0);
+      } else if (e.kind === 'trigger_opened') {
+        const t0 = lastTrig.get(mint);
+        const t1 = Number(e.at) || 0;
+        if (t0 != null && t1 > t0) deltas.push(t1 - t0);
+        lastTrig.delete(mint);
+      }
+    }
+    trigToOpenMed = median(deltas);
+    lines.push(
+      `median trigger→open=${trigToOpenMed != null ? fmtNum(trigToOpenMed / 1000, 1) + 's' : 'n/a'} (n=${deltas.length} pairs)`
+    );
+  } catch {
+    lines.push('median trigger→open=n/a');
+  }
+
+  lines.push(
+    'median signal→arm=n/a (candidate→armed timestamp not stamped)'
+  );
+
+  const n = eps.length;
+  if (n > 0) {
+    const late = eps.filter((e) => e.lateChaseAtEntry === true).length;
+    const near = eps.filter(
+      (e) =>
+        e.nearSupportAtEntry === true ||
+        (e as { nearMultiTfSupport?: boolean }).nearMultiTfSupport === true
+    ).length;
+    lines.push(
+      `%entries lateChase/extended=${((late / n) * 100).toFixed(1)}% (${late}/${n}) · near-support=${((near / n) * 100).toFixed(1)}% (${near}/${n})`
+    );
+  } else {
+    lines.push('%entries lateChase/extended=— · near-support=—');
+  }
+
+  lines.push(`blocked_second_pass count=${blockedSecondPass}`);
+  try {
+    const { getSetupWatchDiagnostics } =
+      require('./profileAttention') as typeof import('./profileAttention');
+    const d = getSetupWatchDiagnostics();
+    const secondPass = (d.blockReasons || [])
+      .filter((r: { reason: string }) =>
+        /blocked_second_pass|hard-lock|failed floors|holders|min mc|token age|top10/i.test(
+          String(r.reason || '')
+        )
+      )
+      .slice(0, 8);
+    if (secondPass.length) {
+      lines.push('2nd-pass / floor reject reasons:');
+      secondPass.forEach(
+        (r: { reason: string; count: number }, i: number) => {
+          lines.push(
+            `  ${i + 1}. ${r.count}× ${String(r.reason).slice(0, 120)}`
+          );
+        }
+      );
+    } else {
+      lines.push('2nd-pass top rejects: (none matched in blockReasons)');
+    }
+  } catch {
+    lines.push('2nd-pass top rejects: (diagnostics unavailable)');
+  }
+  return lines;
+}
+
+function buildSizeRiskLines(
+  eps: ProfileLearningEpisode[],
+  profileIds: string[]
+): string[] {
+  const lines: string[] = [];
+  const open = paperTrader.getOpenPositions?.() || [];
+  const concurrent = new Map<string, number>();
+  for (const p of open) {
+    const id = String(
+      (p as { tradeProfileId?: string }).tradeProfileId || 'unknown'
+    );
+    concurrent.set(id, (concurrent.get(id) || 0) + 1);
+  }
+  lines.push('open concurrent by profile:');
+  if (!concurrent.size) {
+    lines.push('  (none open)');
+  } else {
+    for (const [id, n] of [...concurrent.entries()].sort((a, b) =>
+      a[0].localeCompare(b[0])
+    )) {
+      lines.push(`  ${pad(id, 18)} ${n}`);
+    }
+  }
+
+  // Catalog size mult + expectancy size-downrank
+  lines.push('size / downrank by profile:');
+  for (const id of profileIds) {
+    const def = TRADE_PROFILE_CATALOG.find((p) => p.id === id);
+    const catalogMult = def?.exitRules?.sizeMultiplier ?? null;
+    let sizeNote = '—';
+    let mult: number | null = null;
+    try {
+      const { expectancySizeMultiplier } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      const sz = expectancySizeMultiplier({ profileId: id });
+      mult = sz.mult;
+      sizeNote = sz.note || '';
+    } catch {
+      /* soft */
+    }
+    const openCost = open
+      .filter(
+        (p) =>
+          String((p as { tradeProfileId?: string }).tradeProfileId || '') ===
+          id
+      )
+      .map(
+        (p) =>
+          Number((p as { costSol?: number }).costSol) ||
+          Number((p as { initialCostSol?: number }).initialCostSol) ||
+          0
+      );
+    const avgOpen =
+      openCost.length > 0
+        ? openCost.reduce((a, b) => a + b, 0) / openCost.length
+        : null;
+    const down =
+      mult != null && mult < 0.99
+        ? ` DOWNRANK×${fmtNum(mult, 2)}`
+        : mult != null
+          ? ` ×${fmtNum(mult, 2)}`
+          : '';
+    lines.push(
+      `  ${pad(id, 18)} catalogMult=${fmtNum(catalogMult, 2)} avgOpenCostSol=${fmtNum(avgOpen, 4)}${down}${sizeNote && sizeNote !== 'expectancy size n/a' && sizeNote !== 'expectancy size' ? ` · ${sizeNote.slice(0, 60)}` : ''}`
+    );
+  }
+
+  // Loss contribution
+  const lossBy = new Map<string, number>();
+  let totalLossAbs = 0;
+  for (const e of eps) {
+    const pnl = Number(e.pnlSol) || 0;
+    if (pnl >= 0) continue;
+    const abs = Math.abs(pnl);
+    totalLossAbs += abs;
+    const id = String(e.profileId || 'unknown');
+    lossBy.set(id, (lossBy.get(id) || 0) + abs);
+  }
+  lines.push('% of total realized loss by profile:');
+  if (totalLossAbs <= 1e-12) {
+    lines.push('  (no losses in window)');
+  } else {
+    const ranked = [...lossBy.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [id, abs] of ranked) {
+      lines.push(
+        `  ${pad(id, 18)} ${((abs / totalLossAbs) * 100).toFixed(1)}% (${fmtNum(abs, 4)} SOL)`
+      );
+    }
+  }
+  return lines;
+}
+
+function buildLaneInventoryLines(): string[] {
+  const lines: string[] = [];
+  try {
+    const { getDipMinorLaneHealth, getQualityParkLaneHealth } =
+      require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
+    const dip = getDipMinorLaneHealth();
+    lines.push(
+      `Dip minors: armed=${dip.minorsArmedNow} watching=${dip.minorsWatchingNow} cap=${dip.minorsCap} filled=${dip.minorsFilled} starved=${dip.starved ? 'yes' : 'no'} topBlock=${dip.topBlockReason ?? '—'}`
+    );
+    lines.push(
+      `  funnel candidatesSeen=${dip.funnel.candidatesSeen} armed=${dip.funnel.armed} trig=${dip.funnel.triggered} open=${dip.funnel.opened} expired=${dip.funnel.expired}`
+    );
+  } catch (err) {
+    lines.push(
+      `Dip minors: unavailable (${err instanceof Error ? err.message : String(err)})`
+    );
+  }
+
+  try {
+    const { getQualityParkLaneHealth } =
+      require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
+    const { getQualityParkDenyCounters } =
+      require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+    const q = getQualityParkLaneHealth();
+    const deny = getQualityParkDenyCounters();
+    lines.push(
+      `Steady medium ($20M–$200M): armed=${q.steady.armedNow} watching=${q.steady.watchingNow} cand=${q.steady.funnel.candidates_seen} armedF=${q.steady.funnel.armed} trig=${q.steady.funnel.triggered} open=${q.steady.funnel.opened} low_movement=${q.steady.funnel.low_movement} denyTop=${q.steady.topDeny ?? '—'}`
+    );
+    lines.push(
+      `  Steady denies: low_movement=${deny.steady_compounder.low_movement} no_level=${deny.steady_compounder.no_level} mc_band=${deny.steady_compounder.mc_band} soft_allow=${deny.steady_compounder.soft_allow_preview}`
+    );
+    lines.push(
+      `HWR majors: armed=${q.hwr.armedNow} watching=${q.hwr.watchingNow} cand=${q.hwr.funnel.candidates_seen} armedF=${q.hwr.funnel.armed} trig=${q.hwr.funnel.triggered} open=${q.hwr.funnel.opened} low_movement=${q.hwr.funnel.low_movement} denyTop=${q.hwr.topDeny ?? '—'}`
+    );
+    lines.push(
+      `  HWR denies: low_movement=${deny.high_win_rate.low_movement} no_level=${deny.high_win_rate.no_level} mc_band=${deny.high_win_rate.mc_band} soft_allow=${deny.high_win_rate.soft_allow_preview}`
+    );
+    lines.push(`rotated_stale session=${q.rotatedStaleSession}`);
+    for (const p of (q.plainLanguage || []).slice(0, 6)) {
+      lines.push(`  ${p}`);
+    }
+  } catch (err) {
+    lines.push(
+      `Steady/HWR parks: unavailable (${err instanceof Error ? err.message : String(err)})`
+    );
+  }
+
+  try {
+    const { getDipFunnelCounters } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const f = getDipFunnelCounters() as Record<string, number>;
+    const exclProxy = Number(f.quality_excluded_proxy) || 0;
+    const exclStock = Number(f.quality_excluded_stock) || 0;
+    lines.push(
+      `excluded stable/wrapper/stock-like (dip funnel): proxy=${exclProxy} stock=${exclStock}`
+    );
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getMajorsUniverseStatus } =
+      require('./majorsUniverse') as typeof import('./majorsUniverse');
+    const st = getMajorsUniverseStatus();
+    const r = st.rejects || {};
+    lines.push(
+      `excluded (majors universe): stable/proxy=${Number(r.excluded_stable_or_major_asset_proxy) || 0} stock=${Number(r.excluded_stock_name_token) || 0} low_movement=${Number(r.low_movement) || 0} vol=${Number(r.vol) || 0}`
+    );
+  } catch {
+    /* soft */
+  }
+  return lines;
+}
+
+function buildLearningMutationLines(
+  profileIds: string[],
+  lm: ReturnType<typeof getLearningMetricsPanel>
+): string[] {
+  const lines: string[] = [];
+  try {
+    const { LEARNING_PROGRESS_GOAL } =
+      require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+    const { getTradeProfilesStatus } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const st = getTradeProfilesStatus();
+
+    let totalEps = 0;
+    let totalRollbacks = 0;
+    const mutationLines: string[] = [];
+    for (const p of st.profiles || []) {
+      if (p.id === 'default' || p.id === 'zion') continue;
+      if (!profileIds.includes(p.id)) continue;
+      const sl = p.selfLearning;
+      const prog = p.learningProgress;
+      totalEps += prog?.episodes || 0;
+      const hist = sl?.history || [];
+      const rollbacks = hist.filter((h) => h.rolledBack === true).length;
+      totalRollbacks += rollbacks;
+      const last = sl?.lastMutation;
+      const lastLine = last
+        ? `${last.kind || 'tweak'}${last.source ? '/' + last.source : ''}: ${String(last.summary || '').slice(0, 80)}${last.changes ? ' · ' + String(last.changes).slice(0, 60) : ''}`
+        : '—';
+      mutationLines.push(
+        `  ${pad(p.id, 18)} fill=${fmtNum(prog?.pct, 1)}% (${prog?.episodes ?? 0}/${LEARNING_PROGRESS_GOAL}) v${prog?.level ?? 0} rollbacks=${rollbacks} last=${lastLine}`
+      );
+    }
+    const combinedFill =
+      profileIds.length > 0
+        ? Math.min(
+            100,
+            Math.round(
+              (totalEps /
+                (LEARNING_PROGRESS_GOAL * Math.max(1, profileIds.length))) *
+                1000
+            ) / 10
+          )
+        : 0;
+    lines.push(
+      `episode fill (combined across profiles ≈${fmtNum(combinedFill, 1)}% of per-bot goals) · total durable eps≈${totalEps} · rollbacks=${totalRollbacks}`
+    );
+    lines.push(...mutationLines);
+  } catch (err) {
+    lines.push(
+      `self-learn: unavailable (${err instanceof Error ? err.message : String(err)})`
+    );
+  }
+
+  lines.push('promotion blockers (LM + RL):');
+  try {
+    const { getProfileRlStatus } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    const rl = getProfileRlStatus({ persist: false, ensureKeyAgents: false });
+    const byId = new Map(rl.agents.map((a) => [a.profileId, a]));
+    for (const p of lm.profiles) {
+      const blockers = [...(p.blockers || [])];
+      const agent = byId.get(p.profileId);
+      if (agent?.modeBlocker) blockers.push(`RL: ${agent.modeBlocker}`);
+      if (!blockers.length) continue;
+      lines.push(
+        `  ${pad(p.profileId, 18)} ${blockers.map((b) => String(b).slice(0, 90)).join(' | ')}`
+      );
+    }
+  } catch {
+    for (const p of lm.profiles) {
+      if (!(p.blockers || []).length) continue;
+      lines.push(
+        `  ${pad(p.profileId, 18)} ${(p.blockers || []).map((b) => String(b).slice(0, 90)).join(' | ')}`
+      );
+    }
+  }
+
+  lines.push('recovery stages (fast profiles):');
+  try {
+    const { getFastProfileRecoveryPublic } =
+      require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    const fpr = getFastProfileRecoveryPublic();
+    lines.push(
+      `  FPR group enabled=${fpr.config?.enabled === true ? 'yes' : 'no'}`
+    );
+    for (const p of fpr.profiles || []) {
+      lines.push(
+        `  ${pad(p.profileId, 18)} stage=${p.stage} ${p.stageName || ''} enabled=${p.enabled !== false} recovering=${p.recovering === true ? 'yes' : 'no'}`
+      );
+    }
+  } catch {
+    lines.push('  FPR unavailable');
+  }
+  try {
+    const { getDipBuyerRecoveryStatus } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const d = getDipBuyerRecoveryStatus();
+    if (d) {
+      lines.push(
+        `  dip_buyer recovery stage=${d.stage ?? '—'} ${d.stageName || ''} recovering=${d.recovering === true ? 'yes' : 'no'} enabled=${d.enabled === true ? 'yes' : 'no'}`
+      );
+    }
+  } catch {
+    /* soft — Dip recovery optional */
+  }
+  return lines;
 }
 
 export interface SystemDiagnosticsExportResult {
@@ -150,7 +748,6 @@ export function buildSystemDiagnosticsExport(
 
   const overall = el.profiles.length
     ? {
-        // Use mix + family skill; overall metrics from status plain / compute via profiles aggregate
         winRate: null as number | null,
         expectancyPct: null as number | null,
         profitFactor: null as number | null,
@@ -161,7 +758,6 @@ export function buildSystemDiagnosticsExport(
       }
     : null;
 
-  // Prefer combined craft + expectancy from status chart window trades via family skill memory
   try {
     const { collectExpectancyTrades, computeExpectancyMetrics } =
       require('./expectancyLift') as typeof import('./expectancyLift');
@@ -208,20 +804,6 @@ export function buildSystemDiagnosticsExport(
         `${r.family} E=${fmtSignedPct(r.expectancyPct)} natives=${(r.nativeProfiles || []).join('/')}`
     );
 
-  const flags = deriveOperatorFlags({
-    expectancyPct: overall?.expectancyPct ?? null,
-    armedShare: mix.armedShare,
-    armedTarget,
-    lateChaseShare: mix.lateChaseShare,
-    avgWinPct: overall?.avgWinPct ?? null,
-    avgLossPct: overall?.avgLossPct ?? null,
-    armToOpenPct: funnel.armToOpenPct ?? null,
-    triggerToOpenPct: funnel.triggerToOpenPct ?? null,
-    maxDrawdownPct: Number(stats.maxDrawdownPct) || null,
-    quietSteadyHwr,
-    restrictedPositiveNative,
-  });
-
   const harvestTrait = craft?.traits?.find((t) => t.id === 'harvest');
   const exitsTrait = craft?.traits?.find((t) => t.id === 'exits');
   const captureCombined =
@@ -236,6 +818,30 @@ export function buildSystemDiagnosticsExport(
     harvestTrait?.kpis?.scratchPct != null
       ? Number(harvestTrait.kpis.scratchPct)
       : null;
+
+  const windowEps = collectWindowEpisodes(window);
+  const exitHarvest = buildExitHarvestLines(windowEps, craft);
+
+  const flags = deriveOperatorFlags({
+    expectancyPct: overall?.expectancyPct ?? null,
+    armedShare: mix.armedShare,
+    armedTarget,
+    lateChaseShare: mix.lateChaseShare,
+    avgWinPct: overall?.avgWinPct ?? null,
+    avgLossPct: overall?.avgLossPct ?? null,
+    armToOpenPct: funnel.armToOpenPct ?? null,
+    triggerToOpenPct: funnel.triggerToOpenPct ?? null,
+    maxDrawdownPct: Number(stats.maxDrawdownPct) || null,
+    quietSteadyHwr,
+    restrictedPositiveNative,
+    winRatePct: overall?.winRate ?? null,
+    capturePct:
+      captureCombined != null && Number.isFinite(captureCombined)
+        ? Number(captureCombined)
+        : null,
+    zeroMfePct: exitHarvest.zeroMfePct,
+    greenThenRedPct: exitHarvest.greenThenRedPct,
+  });
 
   const lines: string[] = [];
   lines.push('=== CRYPTO BOT SYSTEM DIAGNOSTICS EXPORT ===');
@@ -297,6 +903,7 @@ export function buildSystemDiagnosticsExport(
   const profilesSorted = [...el.profiles].sort((a, b) =>
     a.profileId.localeCompare(b.profileId)
   );
+  const profileIds = profilesSorted.map((p) => p.profileId);
   for (const p of profilesSorted) {
     const lmP = lmById.get(p.profileId);
     const cr = craftById.get(p.profileId);
@@ -423,7 +1030,49 @@ export function buildSystemDiagnosticsExport(
   }
   lines.push('');
 
-  lines.push('--- 6. KNOWN ISSUES / OPERATOR FLAGS ---');
+  lines.push('--- 6. TARGET GAP PANEL ---');
+  lines.push(
+    ...buildTargetGapLines({
+      winRate: overall?.winRate ?? null,
+      armedShare: mix.armedShare,
+      lateChaseShare: mix.lateChaseShare,
+      capturePct:
+        captureCombined != null && Number.isFinite(captureCombined)
+          ? Number(captureCombined)
+          : null,
+      avgWinPct: overall?.avgWinPct ?? null,
+      avgLossPct: overall?.avgLossPct ?? null,
+    })
+  );
+  lines.push('');
+
+  lines.push('--- 7. EXIT & HARVEST BREAKDOWN ---');
+  lines.push(...exitHarvest.lines);
+  lines.push('');
+
+  lines.push('--- 8. ENTRY TIMING DETAIL ---');
+  lines.push(
+    ...buildEntryTimingLines(
+      windowEps,
+      { armToTriggerMs: funnel.armToTriggerMs },
+      el.blockedSecondPass ?? 0
+    )
+  );
+  lines.push('');
+
+  lines.push('--- 9. SIZE / RISK CONTRIBUTION ---');
+  lines.push(...buildSizeRiskLines(windowEps, profileIds));
+  lines.push('');
+
+  lines.push('--- 10. LANE INVENTORY HEALTH ---');
+  lines.push(...buildLaneInventoryLines());
+  lines.push('');
+
+  lines.push('--- 11. LEARNING MUTATION STATE ---');
+  lines.push(...buildLearningMutationLines(profileIds, lm));
+  lines.push('');
+
+  lines.push('--- 12. KNOWN ISSUES / OPERATOR FLAGS ---');
   if (!flags.length) {
     lines.push('(none auto-derived)');
   } else {

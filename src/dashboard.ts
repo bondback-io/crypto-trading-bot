@@ -10611,7 +10611,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="card" id="export-data-card">
           <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
             <div style="min-width:0;flex:1">
-              <div class="section-title">Export Data <span class="tip" tabindex="0" data-tip="Read-only plain-text system report for AI agents (Grok / Cursor). Snapshot, profiles, family governor, skip reasons, trade craft, and operator flags. No trading side effects."></span></div>
+              <div class="section-title">Export Data <span class="tip" tabindex="0" data-tip="Read-only plain-text system report for AI agents (Grok / Cursor). Snapshot, profiles, governors, craft, Target Gap, Exit/Harvest, Entry Timing, Size/Risk, Lane Inventory, Learning Mutations, and operator flags. No trading side effects."></span></div>
               <p class="text-xs text-slate-400 mb-0">Generate a full AI-readable diagnostics dump. Copy and paste into Grok or Cursor for next-upgrade prompts.</p>
             </div>
             <div class="flex flex-wrap gap-2 items-end">

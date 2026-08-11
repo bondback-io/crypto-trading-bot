@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.267',
+    title: 'Export Data enrichment for AI upgrades',
+    sections: ['overview', 'microbots', 'learning', 'tradecraft'],
+    items: [
+      'Stats → Export Data now includes Target Gap, Exit/Harvest, Entry Timing, Size/Risk, Lane Inventory, and Learning Mutation sections (plain-text, read-only).',
+      'Adds WR/armed/late-chase/capture/avgW·avgL gaps, exitReason %, 0-MFE and green-then-red rates, arm→trig / trig→open latencies, concurrent + loss share, Dip/Steady/HWR lane counters, episode fill / lastMutation / FPR stages.',
+    ],
+  },
+  {
     version: '1.2.266',
     title: 'Expectancy killers repair · Export Data',
     sections: ['overview', 'microbots', 'learning', 'tradecraft', 'scanners'],
