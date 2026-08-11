@@ -119,6 +119,10 @@ export interface RpcProviderPoolStats {
   failoverCountRecent: number;
   configured: boolean;
   hasBackup: boolean;
+  primaryConfigured: boolean;
+  backupConfigured: boolean;
+  /** ready when a distinct backup endpoint is in the pool; else unset */
+  backupStatus: 'ready' | 'unset';
 }
 
 export type RpcHealthSummary =
@@ -534,16 +538,30 @@ function logPoolFailover(
   const from = endpoints[fromIdx];
   const to = endpoints[toIdx];
   if (!from || !to) return;
-  console.warn(
-    `rpc_failover provider=${provider} from=${slotLabel(from.slot)} to=${slotLabel(to.slot)} reason=${reason}`
-  );
-  noteFailoverEvent(provider);
-  const healthyLeft = poolIndicesFor(provider).filter((i) =>
-    isEndpointUsable(endpoints[i])
-  ).length;
-  if (healthyLeft <= 0) {
-    console.warn(`rpc_pool_degraded provider=${provider}`);
+  const toBackup =
+    to.slot === 'backup' ||
+    (from.provider === to.provider && from.slot !== to.slot);
+  if (toBackup && from.provider === to.provider) {
+    console.warn(
+      `rpc_failover_to_backup provider=${provider} from=${slotLabel(from.slot)} to=${slotLabel(to.slot)} reason=${reason}`
+    );
+  } else {
+    console.warn(
+      `rpc_failover_to_provider from=${from.provider} to=${to.provider} reason=${reason}`
+    );
   }
+  noteFailoverEvent(provider);
+}
+
+function logCrossProviderFailover(
+  fromProvider: 'helius' | 'alchemy',
+  toProvider: 'helius' | 'alchemy',
+  reason: string
+): void {
+  console.warn(
+    `rpc_failover_to_provider from=${fromProvider} to=${toProvider} reason=${reason}`
+  );
+  noteFailoverEvent(fromProvider);
 }
 
 function endpointHostMasked(url: string): string {
@@ -1149,8 +1167,14 @@ function resolveIndexForRole(role: RpcRole): number {
           ? pickHealthiestFromPool(otherProv)
           : pickRoundRobinFromPool(otherProv);
       if (cross >= 0) {
-        console.warn(`rpc_pool_degraded provider=${preferProvider}`);
-        noteFailoverEvent(preferProvider);
+        const reason = rateLimited
+          ? '429'
+          : isRpcQuotaMessage(pref.lastError || '')
+            ? 'quota'
+            : latencySoft
+              ? 'latency'
+              : classifyRpcError(pref.lastError);
+        logCrossProviderFailover(preferProvider, otherProv, String(reason));
         setActiveForRole(role, cross);
         return cross;
       }
@@ -1904,19 +1928,23 @@ export function getRpcStats(): {
     };
     let shareLabel = 'not configured';
     if (shareMode === 'solo') {
-      shareLabel = `solo · ${activeMem?.state || state} · active ${activeMem?.label || '—'}`;
+      shareLabel = `primary configured · backup unset · solo · active ${activeMem?.label || '—'}`;
     } else if (shareMode === 'sharing') {
-      shareLabel = `sharing load · both healthy · active ${activeMem?.label || '—'}`;
+      shareLabel = `primary configured · backup ready · sharing load · active ${activeMem?.label || '—'}`;
     } else if (shareMode === 'primary_only') {
-      shareLabel = `primary only · backup ${backupMem?.state || 'down'}${
-        errHint(backupMem) ? ` (${errHint(backupMem)})` : ''
-      } · active ${activeMem?.label || '—'}`;
+      shareLabel = `primary configured · backup ready (${backupMem?.state || 'down'}${
+        errHint(backupMem) ? ` ${errHint(backupMem)}` : ''
+      }) · active ${activeMem?.label || '—'}`;
     } else if (shareMode === 'failover') {
       shareLabel = `FAILOVER on backup · primary ${
         errHint(primaryMem) || primaryMem?.state || 'down'
-      } · active ${activeMem?.label || '—'}`;
+      } · backup ready · active ${activeMem?.label || '—'}`;
     } else if (shareMode === 'down') {
-      shareLabel = 'pool down — traffic on other providers';
+      shareLabel = hasBackup
+        ? 'pool down · backup was configured — traffic on other providers'
+        : 'pool down · backup unset — traffic on other providers';
+    } else if (shareMode === 'empty') {
+      shareLabel = 'not configured';
     }
     return {
       provider,
@@ -1931,6 +1959,9 @@ export function getRpcStats(): {
       failoverCountRecent: failoverCountRecent(provider),
       configured: members.length > 0,
       hasBackup,
+      primaryConfigured: Boolean(primaryMem),
+      backupConfigured: hasBackup,
+      backupStatus: hasBackup ? 'ready' : 'unset',
     };
   };
 
@@ -1997,9 +2028,9 @@ export function getRpcStats(): {
       } else if (heliusPoolStats.shareMode === 'failover') {
         parts.push('Helius on backup (primary degraded)');
       } else if (heliusPoolStats.shareMode === 'solo') {
-        parts.push('Helius solo (no backup URL)');
+        parts.push('Helius primary configured · backup unset');
       } else if (heliusPoolStats.shareMode === 'primary_only') {
-        parts.push('Helius primary up · backup degraded');
+        parts.push('Helius primary up · backup ready but degraded');
       } else if (heliusPoolStats.shareMode === 'down') {
         parts.push('Helius pool down');
       } else {
@@ -2012,9 +2043,9 @@ export function getRpcStats(): {
       } else if (alchemyPoolStats.shareMode === 'failover') {
         parts.push('Alchemy on backup (primary degraded)');
       } else if (alchemyPoolStats.shareMode === 'solo') {
-        parts.push('Alchemy solo (no backup URL)');
+        parts.push('Alchemy primary configured · backup unset');
       } else if (alchemyPoolStats.shareMode === 'primary_only') {
-        parts.push('Alchemy primary up · backup degraded');
+        parts.push('Alchemy primary up · backup ready but degraded');
       } else if (alchemyPoolStats.shareMode === 'down') {
         parts.push('Alchemy pool down');
       } else {

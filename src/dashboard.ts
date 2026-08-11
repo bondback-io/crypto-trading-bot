@@ -10763,7 +10763,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_RPC_URL</code> + <code>HELIUS_RPC_URL_BACKUP</code> / <code>HELIUS_RPC_URLBACKUP</code>, or <code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_RPC_URL</code> + <code>ALCHEMY_RPC_URL_BACKUP</code>, or <code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_RPC_URL</code> + <code>HELIUS_RPC_URL_BACKUP</code>, or legacy <code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_RPC_URL</code> + <code>ALCHEMY_RPC_URL_BACKUP</code>, or legacy <code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius pool (primary then backup).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy pool.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
@@ -26407,7 +26407,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               'is-active'
             );
             if (!mem) {
-              el.textContent = emptyLabel + ' (unset)';
+              if (emptyLabel === 'backup') {
+                el.textContent = 'backup unset';
+              } else {
+                el.textContent = 'primary unset';
+              }
               return;
             }
             const st = mem.state || 'down';
@@ -26421,12 +26425,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             if (mem.isActive) el.classList.add('is-active');
             const slotLabel =
               mem.slot === 'solo'
-                ? 'solo'
+                ? 'PRIMARY'
                 : mem.slot === 'backup'
                   ? 'BACKUP'
                   : 'PRIMARY';
+            const readyBit =
+              mem.slot === 'backup'
+                ? ' ready'
+                : mem.slot === 'solo'
+                  ? ' (solo)'
+                  : '';
             el.textContent =
               slotLabel +
+              readyBit +
               (mem.isActive ? ' ●' : '') +
               ' · ' +
               (mem.host || mem.label || '—') +
@@ -26460,8 +26471,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               members.find(function (m) {
                 return m.lastError && m.lastError !== 'none';
               }) || null;
+            const bak =
+              pool.backupStatus === 'ready' ? 'backup ready' : 'backup unset';
             meta.textContent =
-              'active ' +
+              (pool.primaryConfigured ? 'primary configured' : 'primary unset') +
+              ' · ' +
+              bak +
+              ' · active ' +
               (pool.activeLabel || '—') +
               ' · ' +
               fo +
@@ -26481,7 +26497,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               (mode === 'empty'
                 ? 'not configured — set ' +
                   (name === 'helius'
-                    ? 'HELIUS_RPC_URL (+ HELIUS_RPC_URLBACKUP)'
+                    ? 'HELIUS_RPC_URL (+ HELIUS_RPC_URL_BACKUP)'
                     : 'ALCHEMY_RPC_URL (+ ALCHEMY_RPC_URL_BACKUP)')
                 : mode);
           }

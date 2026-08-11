@@ -136,7 +136,7 @@ function checkRpc(): HealthIssue[] {
         title: plain,
         detail: `summary=${summary}`,
         recommendation:
-          'Check HELIUS_RPC_URL / ALCHEMY_RPC_URL (+ backups; HELIUS_RPC_URLBACKUP alias OK). Stats → RPC shows pool members.',
+      'Check HELIUS_RPC_URL / ALCHEMY_RPC_URL (+ HELIUS_RPC_URL_BACKUP / ALCHEMY_RPC_URL_BACKUP). Stats → RPC shows pool members.',
         sustainedHint: true,
       });
     } else if (

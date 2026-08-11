@@ -112,94 +112,144 @@ function normalizeExplicitRpcUrl(raw: string | null | undefined): string | null 
   return u;
 }
 
-/** First usable explicit RPC URL from env keys (supports typo aliases). */
-function firstEnvRpcUrl(...keys: string[]): string | null {
+/** First env key that has a non-empty raw value (may still be invalid). */
+function firstPresentEnvKey(...keys: string[]): string | null {
   for (const key of keys) {
-    const v = normalizeExplicitRpcUrl(process.env[key]);
-    if (v) return v;
+    if (process.env[key]?.trim()) return key;
   }
   return null;
 }
 
+function rpcHostOnly(url: string | null | undefined): string {
+  const u = (url || '').trim();
+  if (!u) return '—';
+  try {
+    return new URL(u).host || '—';
+  } catch {
+    return u.slice(0, 40);
+  }
+}
+
+type BackupSkipReason = 'missing' | 'invalid' | 'duplicate';
+
 /**
- * Resolve Helius pool members: HELIUS_RPC_URL (+ BACKUP), else HELIUS_API_KEY.
- * Also accepts HELIUS_RPC_URLBACKUP (no underscore) as used on some Render envs.
- * 0–2 members; duplicate URLs collapsed.
+ * Resolve a provider pool (primary + optional backup) with structured boot logs.
+ * New Render names are preferred; legacy API keys / typo aliases remain as fallbacks.
  */
-export function resolveHeliusPoolMembers(): RpcPoolMember[] {
-  const primary =
-    firstEnvRpcUrl('HELIUS_RPC_URL', 'HELIUS_RPC_PRIMARY') ||
-    buildHeliusRpcUrl();
-  const backup = firstEnvRpcUrl(
-    'HELIUS_RPC_URL_BACKUP',
-    'HELIUS_RPC_URLBACKUP',
-    'HELIUS_RPC_BACKUP'
-  );
+function resolveProviderPoolMembers(opts: {
+  provider: 'helius' | 'alchemy';
+  primaryKeys: string[];
+  backupKeys: string[];
+  buildFromApiKey: () => string | null;
+  apiKeyEnv: string;
+}): RpcPoolMember[] {
+  const { provider, primaryKeys, backupKeys, buildFromApiKey, apiKeyEnv } = opts;
+  let primarySource: string | null = null;
+  let primary: string | null = null;
+  for (const key of primaryKeys) {
+    const v = normalizeExplicitRpcUrl(process.env[key]);
+    if (v) {
+      primary = v;
+      primarySource = key;
+      break;
+    }
+  }
+  if (!primary) {
+    const fromKey = buildFromApiKey();
+    if (fromKey) {
+      primary = fromKey;
+      primarySource = apiKeyEnv;
+    }
+  }
+
+  const backupPresentKey = firstPresentEnvKey(...backupKeys);
+  let backup: string | null = null;
+  let backupSource: string | null = null;
+  for (const key of backupKeys) {
+    const v = normalizeExplicitRpcUrl(process.env[key]);
+    if (v) {
+      backup = v;
+      backupSource = key;
+      break;
+    }
+  }
+
   const out: RpcPoolMember[] = [];
-  const seen = new Set<string>();
-  if (primary && !seen.has(primary)) {
-    seen.add(primary);
+  const dual = Boolean(primary && backup && backup !== primary);
+  if (primary) {
     out.push({
       url: primary,
-      label: backup && backup !== primary ? 'helius-primary' : 'helius',
-      provider: 'helius',
-      slot: backup && backup !== primary ? 'primary' : 'solo',
+      label: dual ? `${provider}-primary` : provider,
+      provider,
+      slot: dual ? 'primary' : 'solo',
     });
   }
-  if (backup && !seen.has(backup)) {
-    seen.add(backup);
+  if (dual && backup) {
     out.push({
       url: backup,
-      label: 'helius-backup',
-      provider: 'helius',
+      label: `${provider}-backup`,
+      provider,
       slot: 'backup',
     });
   }
-  if (out.length === 1) {
-    out[0]!.label = 'helius';
-    out[0]!.slot = 'solo';
+
+  console.log(
+    `rpc_env_loaded provider=${provider} primary=${primary ? 'set' : 'unset'}` +
+      ` source=${primarySource || '—'}` +
+      ` host=${rpcHostOnly(primary)}`
+  );
+
+  if (dual && backup) {
+    console.log(
+      `rpc_backup_loaded provider=${provider} source=${backupSource || '—'}` +
+        ` host=${rpcHostOnly(backup)}`
+    );
+  } else {
+    let reason: BackupSkipReason = 'missing';
+    if (backupPresentKey && !backup) reason = 'invalid';
+    else if (backup && primary && backup === primary) reason = 'duplicate';
+    else if (!backupPresentKey) reason = 'missing';
+    console.log(`rpc_backup_unset provider=${provider} reason=${reason}`);
   }
+
   return out;
 }
 
 /**
+ * Resolve Helius pool members: HELIUS_RPC_URL (+ BACKUP), else HELIUS_API_KEY.
+ * Also accepts HELIUS_RPC_URLBACKUP (no underscore) as a temporary alias.
+ * 0–2 members; duplicate URLs collapsed; invalid backup → solo (no throw).
+ */
+export function resolveHeliusPoolMembers(): RpcPoolMember[] {
+  return resolveProviderPoolMembers({
+    provider: 'helius',
+    primaryKeys: ['HELIUS_RPC_URL', 'HELIUS_RPC_PRIMARY'],
+    backupKeys: [
+      'HELIUS_RPC_URL_BACKUP',
+      'HELIUS_RPC_URLBACKUP',
+      'HELIUS_RPC_BACKUP',
+    ],
+    buildFromApiKey: () => buildHeliusRpcUrl(),
+    apiKeyEnv: 'HELIUS_API_KEY',
+  });
+}
+
+/**
  * Resolve Alchemy pool members: ALCHEMY_RPC_URL (+ BACKUP), else ALCHEMY_API_KEY.
- * Also accepts ALCHEMY_RPC_URLBACKUP (no underscore).
+ * Also accepts ALCHEMY_RPC_URLBACKUP (no underscore) as a temporary alias.
  */
 export function resolveAlchemyPoolMembers(): RpcPoolMember[] {
-  const primary =
-    firstEnvRpcUrl('ALCHEMY_RPC_URL', 'ALCHEMY_RPC_PRIMARY') ||
-    buildAlchemyRpcUrl();
-  const backup = firstEnvRpcUrl(
-    'ALCHEMY_RPC_URL_BACKUP',
-    'ALCHEMY_RPC_URLBACKUP',
-    'ALCHEMY_RPC_BACKUP'
-  );
-  const out: RpcPoolMember[] = [];
-  const seen = new Set<string>();
-  if (primary && !seen.has(primary)) {
-    seen.add(primary);
-    out.push({
-      url: primary,
-      label: backup && backup !== primary ? 'alchemy-primary' : 'alchemy',
-      provider: 'alchemy',
-      slot: backup && backup !== primary ? 'primary' : 'solo',
-    });
-  }
-  if (backup && !seen.has(backup)) {
-    seen.add(backup);
-    out.push({
-      url: backup,
-      label: 'alchemy-backup',
-      provider: 'alchemy',
-      slot: 'backup',
-    });
-  }
-  if (out.length === 1) {
-    out[0]!.label = 'alchemy';
-    out[0]!.slot = 'solo';
-  }
-  return out;
+  return resolveProviderPoolMembers({
+    provider: 'alchemy',
+    primaryKeys: ['ALCHEMY_RPC_URL', 'ALCHEMY_RPC_PRIMARY'],
+    backupKeys: [
+      'ALCHEMY_RPC_URL_BACKUP',
+      'ALCHEMY_RPC_URLBACKUP',
+      'ALCHEMY_RPC_BACKUP',
+    ],
+    buildFromApiKey: () => buildAlchemyRpcUrl(),
+    apiKeyEnv: 'ALCHEMY_API_KEY',
+  });
 }
 
 /** Infer provider from URL / label when metadata missing. */
@@ -697,34 +747,6 @@ export function rpcEndpointsFromEnv(
       '[rpc] No Helius/Alchemy pool — using RPC_URL / public. ' +
         'Set HELIUS_RPC_URL (+ HELIUS_RPC_URL_BACKUP) and ALCHEMY_RPC_URL (+ ALCHEMY_RPC_URL_BACKUP), ' +
         'or HELIUS_API_KEY / ALCHEMY_API_KEY.'
-    );
-  } else {
-    const hSrc = process.env.HELIUS_RPC_URL?.trim()
-      ? 'HELIUS_RPC_URL'
-      : process.env.HELIUS_API_KEY?.trim()
-        ? 'HELIUS_API_KEY'
-        : '—';
-    const hBak = process.env.HELIUS_RPC_URL_BACKUP?.trim()
-      ? 'HELIUS_RPC_URL_BACKUP'
-      : process.env.HELIUS_RPC_URLBACKUP?.trim()
-        ? 'HELIUS_RPC_URLBACKUP'
-        : process.env.HELIUS_RPC_BACKUP?.trim()
-          ? 'HELIUS_RPC_BACKUP'
-          : 'unset';
-    const aSrc = process.env.ALCHEMY_RPC_URL?.trim()
-      ? 'ALCHEMY_RPC_URL'
-      : process.env.ALCHEMY_API_KEY?.trim()
-        ? 'ALCHEMY_API_KEY'
-        : '—';
-    const aBak = process.env.ALCHEMY_RPC_URL_BACKUP?.trim()
-      ? 'ALCHEMY_RPC_URL_BACKUP'
-      : process.env.ALCHEMY_RPC_URLBACKUP?.trim()
-        ? 'ALCHEMY_RPC_URLBACKUP'
-        : process.env.ALCHEMY_RPC_BACKUP?.trim()
-          ? 'ALCHEMY_RPC_BACKUP'
-          : 'unset';
-    console.log(
-      `[rpc] Pool env — Helius primary←${hSrc} backup←${hBak} · Alchemy primary←${aSrc} backup←${aBak}`
     );
   }
 

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.275',
+    title: 'RPC backup env hardening + health labels',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Boot/failover logs: rpc_env_loaded, rpc_backup_loaded, rpc_backup_unset, rpc_failover_to_backup, rpc_failover_to_provider.',
+      'Stats → RPC shows primary configured / backup ready vs backup unset; solo only when backup truly missing.',
+      'Invalid or duplicate backup URLs fail soft into solo without breaking routing.',
+    ],
+  },
+  {
     version: '1.2.274',
     title: 'Render RPC URL env + backup share status',
     sections: ['overview', 'execution', 'knobs'],
