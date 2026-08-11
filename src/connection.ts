@@ -75,11 +75,22 @@ function agentRpcDebug(
     },
     body: JSON.stringify(payload),
   }).catch(() => {});
+  const line = JSON.stringify(payload);
   try {
-    fs.appendFileSync(AGENT_DEBUG_LOG, JSON.stringify(payload) + '\n');
+    fs.appendFileSync(AGENT_DEBUG_LOG, line + '\n');
   } catch {
-    /* Render may lack write perms — ring still exposed via getRpcStats */
+    /* cwd may be read-only */
   }
+  try {
+    // Durable path on Render Disk — survives deploys / readable via /api/status ring.
+    const { getDataDir } = require('./dataDir') as typeof import('./dataDir');
+    const durable = path.join(getDataDir(), 'debug-0ecc0f.log');
+    fs.appendFileSync(durable, line + '\n');
+  } catch {
+    /* */
+  }
+  // Render log stream (copy/paste friendly).
+  console.warn(`[rpc-debug] ${hypothesisId} ${message} ${JSON.stringify(data)}`);
 }
 // #endregion
 
