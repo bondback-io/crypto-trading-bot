@@ -7579,31 +7579,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="card !py-3"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="PF / avg win / avg loss use the selected stats window. Other health bits stay live."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
 
-      <div class="card mt-2.5 sm:mt-3 rpc-health-panel" id="rpc-health-panel">
-        <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Live Helius/Alchemy pool status: primary+backup load share and failover. Hosts only — API keys never shown. Refreshes with Overview."></span></div>
-        <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
-          <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
-          <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
-          <span class="rpc-health-chip" id="rpc-chip-failover">Failover active</span>
-          <span class="rpc-health-chip" id="rpc-chip-down">Provider down</span>
-        </div>
-        <div id="rpc-health-providers">
-          <div class="rpc-prov-row" data-provider="helius">
-            <span class="rpc-prov-name">Helius</span>
-            <span class="rpc-ep-pill" id="rpc-helius-primary">primary —</span>
-            <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
-            <span class="mint text-xs" id="rpc-helius-meta">—</span>
-          </div>
-          <div class="rpc-prov-row" data-provider="alchemy">
-            <span class="rpc-prov-name">Alchemy</span>
-            <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
-            <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
-            <span class="mint text-xs" id="rpc-alchemy-meta">—</span>
-          </div>
-        </div>
-        <p class="rpc-plain" id="rpc-health-plain">—</p>
-      </div>
-
       <div class="card mt-2.5 sm:mt-3" id="lane-fight-overview-card">
         <div class="section-title" style="margin-bottom:0.35rem">Lane fight log</div>
         <p class="text-xs text-slate-500 mb-1">Smart Bot micro-lane pass/fail. Shows winner, opened vs no-buy after cascade. When Multi-Agent RL is on, MARL thoughts show score boosts, reorder, and size/low-MC suggestions.</p>
@@ -10099,7 +10074,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="config-section-label">Risk &amp; execution <span>Position risk, trails, MEV, RPC</span></div>
+      <div class="config-section-label">Risk &amp; execution <span>Position risk, trails, MEV</span></div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Risk Management <span class="tip" tabindex="0" data-tip="Position sizing, trailing stops, drawdown limits, and auto-pause when limits hit."></span></div>
@@ -10136,9 +10111,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
 
         <div class="card">
-          <div class="section-title">MEV / RPC <span class="tip" tabindex="0" data-tip="Jito tips, sandwich protection, and Solana RPC health for live execution."></span></div>
+          <div class="section-title">MEV <span class="tip" tabindex="0" data-tip="Jito tips and sandwich protection for live execution. RPC Health lives under Stats → RPC."></span></div>
           <div class="mint mb-2" id="mev-status">—</div>
-          <p class="mint mb-2">Master switch: Settings → MEV Protection.</p>
+          <p class="mint mb-2">Master switch: Settings → MEV Protection. RPC lanes &amp; endpoint table: <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('botperf'); setBotPerfTab('rpc')">Stats → RPC</button>.</p>
           <div class="toggle-row"><span title="Send swaps via Jito bundles when possible">Jito bundles</span><label class="switch"><input type="checkbox" id="useJitoBundles" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Detect recent buy clustering that looks like sandwich setup">Sandwich protection</span><label class="switch"><input type="checkbox" id="sandwichProtection" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Cancel the trade if sandwich risk is high">Abort on sandwich risk</span><label class="switch"><input type="checkbox" id="abortOnSandwichRisk" checked /><span class="slider"></span></label></div>
@@ -10149,39 +10124,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <label class="ctl ctl-sm"><span>Max buyers <span class="tip" tabindex="0" data-tip="Recent same-block buyers before sandwich abort."></span></span><input type="number" id="sandwichMaxRecentBuys" value="3" /></label>
           </div>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveMevConfig()" title="Save MEV / tip settings">Save MEV</button></div>
-          <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
-          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
-          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
-            <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
-              <span>Soft watch cap</span>
-              <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
-            </label>
-            <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
-            <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
-          </div>
-          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
-          </div>
-          <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
-          </div>
-          <div id="rpc-summary" class="mint mb-2">—</div>
-          <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
-          <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
-          <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
-          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
-          <div class="mt-3 flex flex-wrap gap-2 items-center">
-            <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
-            <span class="mint text-xs" id="rpc-diag-status">—</span>
-          </div>
-          <div id="rpc-diag-panel" class="mint text-xs mt-2" style="display:none;line-height:1.5;color:#94a3b8"></div>
           <div class="mint mt-2" id="jito-status"></div>
           <p class="mint text-xs mt-1" id="jito-turbo-tip" style="color:#64748b;line-height:1.4">Turbo Mode raises priority fee + buy slip; Jito bundles only if MEV “Jito bundles” (or rpc.jito) is on. Live Sim never sends real bundles.</p>
         </div>
@@ -10333,7 +10275,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" style="padding-bottom:0.55rem">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, Learning Metrics, Decision Log, and Export Data — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
+            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, Learning Metrics, Decision Log, Export Data, and RPC Health — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
             <p class="text-xs text-slate-400 mb-0">Tune bots on <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button>. Recovery stages live under Micro Bots → Learning.</p>
           </div>
         </div>
@@ -10345,6 +10287,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-exportdata" data-botperf-tab="exportdata" aria-selected="false" aria-controls="botperf-panel-exportdata" onclick="setBotPerfTab('exportdata')">Export Data</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-rpc" data-botperf-tab="rpc" aria-selected="false" aria-controls="botperf-panel-rpc" onclick="setBotPerfTab('rpc')">RPC</button>
         </div>
       </div>
 
@@ -10739,6 +10682,70 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <p class="mint text-xs mb-2" id="export-data-stamp">Snapshot: —</p>
           <pre id="export-data-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate report to build a snapshot…</pre>
+        </div>
+      </div>
+
+      <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
+        <div class="card rpc-health-panel" id="rpc-health-panel">
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Live Helius/Alchemy pool status: primary+backup load share and failover. Hosts only — API keys never shown. Refreshes with the dashboard status poll."></span></div>
+          <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
+            <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
+            <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
+            <span class="rpc-health-chip" id="rpc-chip-failover">Failover active</span>
+            <span class="rpc-health-chip" id="rpc-chip-down">Provider down</span>
+          </div>
+          <div id="rpc-health-providers">
+            <div class="rpc-prov-row" data-provider="helius">
+              <span class="rpc-prov-name">Helius</span>
+              <span class="rpc-ep-pill" id="rpc-helius-primary">primary —</span>
+              <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
+              <span class="mint text-xs" id="rpc-helius-meta">—</span>
+            </div>
+            <div class="rpc-prov-row" data-provider="alchemy">
+              <span class="rpc-prov-name">Alchemy</span>
+              <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
+              <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
+              <span class="mint text-xs" id="rpc-alchemy-meta">—</span>
+            </div>
+          </div>
+          <p class="rpc-plain" id="rpc-health-plain">—</p>
+        </div>
+
+        <div class="card" id="rpc-status-card">
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Includes Helius/Alchemy backup endpoints when configured. Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
+          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
+              <span>Soft watch cap</span>
+              <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
+            </label>
+            <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
+            <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
+          </div>
+          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
+            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
+          </div>
+          <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
+            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code> / <code>HELIUS_RPC_URL</code>+backup) → Alchemy (<code>ALCHEMY_API_KEY</code> / <code>ALCHEMY_RPC_URL</code>+backup) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius pool (primary then backup).</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy pool.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
+            <div class="mint">Failover: sibling in the same provider pool first, then cross-provider, then mid-tier/public. Soft latency uses ≥30s grace; 429 fails over immediately.</div>
+          </div>
+          <div id="rpc-summary" class="mint mb-2">—</div>
+          <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
+          <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
+          <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
+          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
+          <div class="mt-3 flex flex-wrap gap-2 items-center">
+            <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
+            <span class="mint text-xs" id="rpc-diag-status">—</span>
+          </div>
+          <div id="rpc-diag-panel" class="mint text-xs mt-2" style="display:none;line-height:1.5;color:#94a3b8"></div>
+          <p class="mint text-xs mt-2" style="color:#64748b;line-height:1.4">MEV / Jito tip knobs stay on Config → MEV. This tab is RPC health + lane routing only.</p>
         </div>
       </div>
     </section>
@@ -19448,6 +19455,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         'learningmetrics',
         'decisions',
         'exportdata',
+        'rpc',
       ];
       const next = allowed.indexOf(tab) >= 0 ? tab : 'performance';
       const shouldLoad = !opts || opts.load !== false;
@@ -19481,6 +19489,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { loadAgentDecisionLog(); } catch (_) {}
         } else if (next === 'exportdata') {
           try { generateSystemDiagnosticsExport(); } catch (_) {}
+        } else if (next === 'rpc') {
+          try {
+            if (typeof refresh === 'function') refresh();
+            else if (typeof window.refresh === 'function') window.refresh();
+          } catch (_) {}
         }
       }
       // Charts in newly shown panels need a resize pass
@@ -20720,7 +20733,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             stored === 'tradecraft' ||
             stored === 'learning' ||
             stored === 'learningmetrics' ||
-            stored === 'decisions'
+            stored === 'decisions' ||
+            stored === 'exportdata' ||
+            stored === 'rpc'
           ) {
             sub = stored;
           }
@@ -26100,19 +26115,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const pool =
             (rpcObj && rpcObj.pools && rpcObj.pools[name]) || {};
           const members = pool.members || [];
-          const bySlot = function (slot) {
-            return (
-              members.find(function (m) {
-                return m.slot === slot;
-              }) ||
-              members.find(function (m) {
-                return members.length === 1;
-              }) ||
-              null
-            );
+          const bySlot = function (slot, allowSoloFallback) {
+            const exact = members.find(function (m) {
+              return m.slot === slot;
+            });
+            if (exact) return exact;
+            if (allowSoloFallback && members.length === 1) {
+              return members[0];
+            }
+            return null;
           };
-          const primary = bySlot('primary') || bySlot('solo');
-          const backup = bySlot('backup');
+          const primary = bySlot('primary', true) || bySlot('solo', true);
+          const backup = bySlot('backup', false);
           const paintPill = function (elId, mem, emptyLabel) {
             const el = document.getElementById(elId);
             if (!el) return;
@@ -26335,17 +26349,42 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       const rpcBody = document.querySelector('#rpc-table tbody');
       if (rpcBody) {
-        rpcBody.innerHTML = (rpc.endpoints || []).length === 0
+        const eps = (rpc.endpoints || []).slice().sort(function (a, b) {
+          const rank = function (e) {
+            const p = e.provider || '';
+            const slot = e.slot || '';
+            if (p === 'helius' && (slot === 'primary' || slot === 'solo')) return 10;
+            if (p === 'helius' && slot === 'backup') return 11;
+            if (p === 'alchemy' && (slot === 'primary' || slot === 'solo')) return 20;
+            if (p === 'alchemy' && slot === 'backup') return 21;
+            if (e.lane === 'utility' || e.role === 'utility') return 30;
+            if (e.lane === 'primary' || e.role === 'primary') return 40;
+            if (e.lane === 'secondary' || e.role === 'secondary') return 50;
+            return 90;
+          };
+          return rank(a) - rank(b);
+        });
+        rpcBody.innerHTML = eps.length === 0
           ? '<tr><td colspan="6" style="color:var(--muted)">No RPC endpoints configured</td></tr>'
-          : rpc.endpoints.map(e => \`
+          : eps.map(e => {
+              const lane =
+                e.lane ||
+                (e.slot === 'backup' ? 'backup' : '') ||
+                e.role ||
+                '—';
+              const label =
+                e.label ||
+                'rpc';
+              return \`
             <tr>
-              <td title="\${e.url}">\${e.label}</td>
-              <td>\${e.lane || e.role || '—'}</td>
+              <td title="\${e.url}">\${label}\${e.slot && e.slot !== 'solo' ? ' <span class="mint" style="opacity:0.75">(' + e.slot + ')</span>' : ''}</td>
+              <td>\${lane}</td>
               <td>\${e.healthy ? '✅' : '❌'}</td>
               <td>\${e.latencyMs != null ? e.latencyMs + 'ms' : '—'}</td>
               <td>\${e.successRate != null ? Number(e.successRate).toFixed(0) : '—'}% (\${e.successCount || 0}/\${(e.successCount || 0) + (e.failureCount || 0)})</td>
               <td>\${e.isActive ? '●' : ''}</td>
-            </tr>\`).join('');
+            </tr>\`;
+            }).join('');
       }
       const jito = status.jito || {};
       const mev = status.mev || {};

@@ -281,7 +281,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   if (shareLoad && softWatch && !softWatch.softWatchPaused) {
     if (utilityStressed || lastPollRateLimited) {
       chokeHints.push(
-        `Utility soft-watch under pressure (cap ${softWatch.softWatchCap}, pool ${softWatch.watchPool}/${softWatch.enabledWallets}, last poll ${softWatch.lastPollElapsedMs ?? '—'}ms). Lower Soft watch cap in Config → MEV/RPC (try 8–12, or 0 to pause Favourites watch).`
+        `Utility soft-watch under pressure (cap ${softWatch.softWatchCap}, pool ${softWatch.watchPool}/${softWatch.enabledWallets}, last poll ${softWatch.lastPollElapsedMs ?? '—'}ms). Lower Soft watch cap in Stats → RPC (try 8–12, or 0 to pause Favourites watch).`
       );
     } else if (softWatch.softWatchCap >= 25 && softWatch.enabledWallets > softWatch.softWatchCap) {
       chokeHints.push(

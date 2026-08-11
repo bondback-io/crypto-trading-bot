@@ -70,8 +70,8 @@ export interface RpcEndpointStats {
   lastCheckedAt: number | null;
   unhealthySince: number | null;
   isActive: boolean;
-  /** Preferred endpoint for primary, secondary, or utility lane */
-  lane?: RpcRole | null;
+  /** Preferred endpoint for primary, secondary, utility, or pool backup / fallback */
+  lane?: string | null;
   provider?: RpcProviderKind;
   slot?: RpcPoolSlot;
 }
@@ -2027,7 +2027,7 @@ export function getRpcStats(): {
     supports: RPC_LANE_SUPPORTS,
     endpoints: endpoints.map((s, i) => {
       const total = s.successCount + s.failureCount;
-      let lane: RpcRole | null = null;
+      let lane: string | null = null;
       if (i === preferredPrimary) lane = 'primary';
       else if (
         i === preferredSecondary &&
@@ -2040,6 +2040,13 @@ export function getRpcStats(): {
         preferredUtility !== preferredSecondary
       )
         lane = 'utility';
+      else if (
+        s.slot === 'backup' &&
+        (s.provider === 'helius' || s.provider === 'alchemy')
+      )
+        lane = 'backup';
+      else if (s.role === 'fallback') lane = 'fallback';
+      else lane = s.role || null;
       return {
         url: maskUrl(s.endpoint.url),
         label: s.endpoint.label,

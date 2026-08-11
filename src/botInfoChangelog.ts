@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.271',
+    title: 'Stats → RPC consolidates health + endpoint table',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Moved Overview RPC Health and Config RPC Status into Stats → RPC (one combined section).',
+      'Endpoint table lists all RPCs including Helius/Alchemy backups (lane/slot labels); solo no longer duplicates onto the backup pill.',
+      'Config keeps MEV/Jito knobs with a link to Stats → RPC.',
+    ],
+  },
+  {
     version: '1.2.270',
     title: 'Dual free-tier RPC pools + Overview RPC Health',
     sections: ['overview', 'execution', 'zion', 'knobs'],

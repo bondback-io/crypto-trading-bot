@@ -61,7 +61,7 @@ function checkRpc(): HealthIssue[] {
         title: `${badLanes.length} RPC lanes unhealthy (sustained)`,
         detail: badLanes.map((l) => l.label).join(', '),
         recommendation:
-          'Check Config → RPC endpoints and failover. Pause entries until primary recovers if needed.',
+          'Check Stats → RPC endpoints and failover. Pause entries until primary recovers if needed.',
         sustainedHint: true,
       });
     } else if (badLanes.length === 1) {
@@ -136,7 +136,7 @@ function checkRpc(): HealthIssue[] {
         title: plain,
         detail: `summary=${summary}`,
         recommendation:
-          'Check Helius/Alchemy keys or HELIUS_RPC_URL / ALCHEMY_RPC_URL (+ _BACKUP). Overview → RPC Health shows pool members.',
+          'Check Helius/Alchemy keys or HELIUS_RPC_URL / ALCHEMY_RPC_URL (+ _BACKUP). Stats → RPC shows pool members.',
         sustainedHint: true,
       });
     } else if (

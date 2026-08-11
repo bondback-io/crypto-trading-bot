@@ -214,7 +214,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <ul>
           <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles. The <strong>Entries</strong> light shows whether the buy path is clear (green) vs soft limits (amber) or abnormal blockers (red); lane no-match quietness stays green.</li>
           <li><strong>Watchlist</strong> — tabs: <em>Setups</em> (Dip/Steady, Mode B, Trend, Grad, Mirror, Skips) · <em>Scanner</em> (Market Scanner + AlphaScan) · <em>Activity</em> (Pump / signals / re-entry). Readiness strip (green/amber/red) stays observe-only.</li>
-          <li><strong>Stats</strong> — rankings, Expectancy Lift, Trade Craft, Learning, <em>Learning Metrics</em> (per-profile readiness / EMA / capture / blockers), and Agent Decision Log (main nav, right of Micro Bots).</li>
+          <li><strong>Stats</strong> — rankings, Expectancy Lift, Trade Craft, Learning, <em>Learning Metrics</em> (per-profile readiness / EMA / capture / blockers), Agent Decision Log, Export Data, and <em>RPC</em> (pool health + endpoint table) (main nav, right of Micro Bots).</li>
           <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). <em>Performance Power Cell</em> sits at the top (visual charge from WR/expectancy/armed/MFE). Coach stack (MARL, Profile RL, TA, accelerators) is under <em>Coaches &amp; Stack</em>.</li>
           <li><strong>Newer stack pieces</strong> — <em>Entry Skill</em> + <em>Admission Baseline</em> (armed-first admit / Baseline v235 kill-switch) · <em>HMC Gatekeeper</em> + <em>Setup Classifier</em> · <em>Peak Protect</em> + <em>PCL</em> · Dip/Steady inventory + top10 soft-allow · Zion Gold → Smart Money Mirror. Details under Micro Bots, Risk, Knobs, and What’s New.</li>
           <li><strong>Cog menu</strong> — Smart Wallets, Settings, Config, Logs, Back Up, and this manual. (Stats is on the main nav.)</li>
@@ -559,13 +559,13 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
       <article class="botinfo-card" id="botinfo-sec-execution" data-botinfo-section="execution">
         <h3><span class="botinfo-sec-num">10</span> Jupiter, RPC &amp; MEV</h3>
-        <p>Live buys/sells go through <strong>Jupiter</strong> swaps. Jupiter Tokens API also feeds organic score / trending for the scanner. Dual-lane RPC prefers free <strong>Helius</strong> (primary) + <strong>Alchemy</strong> (secondary / Zion) with automatic failover to <code>RPC_URL</code>, public Solana, then <code>RPC_SECONDARY</code>.</p>
+        <p>Live buys/sells go through <strong>Jupiter</strong> swaps. Jupiter Tokens API also feeds organic score / trending for the scanner. Dual-lane RPC prefers free <strong>Helius</strong> (primary) + <strong>Alchemy</strong> (secondary / Zion) with optional primary+backup pools and automatic failover to <code>RPC_URL</code>, public Solana, then <code>RPC_SECONDARY</code>.</p>
         <ul>
           <li><strong>MEV / Jito</strong> — tip bundles and sandwich abort (live only; module <code>mev_protection</code>).</li>
           <li>Paper and Live Sim never send real swaps; they still use live marks when configured.</li>
           <li>Fund gate, denied mints, dead-token filters, and honeypot checks sit on the path before size/execute.</li>
         </ul>
-        <div class="botinfo-actions">${btn('config', 'Open Config (MEV / RPC)')}</div>
+        <div class="botinfo-actions">${btn('config', 'Open Config (MEV)')} ${btn('botperf', 'Open Stats → RPC')}</div>
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-zion" data-botinfo-section="zion">
