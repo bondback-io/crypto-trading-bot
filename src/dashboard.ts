@@ -10904,7 +10904,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON. (RPC runtime restored from Release 1.2.262.)</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Under Share ON, Scanners never fail onto Helius (QuickNode/public instead). Status polls are observational — they do not flip lanes. Soft-watch starts after ~45s post-deploy.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -26338,6 +26338,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       try {
         const rpc = status && status.rpc;
         const lc = rpc && rpc.loadControl;
+        const laneHot = Boolean(
+          rpc &&
+            ((rpc.primary && (rpc.primary.failover || rpc.primary.healthy === false)) ||
+              (rpc.secondary && (rpc.secondary.failover || rpc.secondary.healthy === false)) ||
+              (rpc.utility && (rpc.utility.failover || rpc.utility.healthy === false)))
+        );
+        // Do not require rpc.summary (262-era stats omit it) — gate/load/failover are enough.
         window._rpcStressed = Boolean(
           rpc &&
             (rpc.summary === 'failover_active' ||
@@ -26345,7 +26352,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               rpc.summary === 'degraded' ||
               (rpc.gate && rpc.gate.stressed) ||
               (lc && lc.shedBackground) ||
-              (lc && (lc.utilitySlowFactor || 1) >= 2))
+              (lc && (lc.utilitySlowFactor || 1) >= 2) ||
+              laneHot)
         );
       } catch (_) {
         window._rpcStressed = false;

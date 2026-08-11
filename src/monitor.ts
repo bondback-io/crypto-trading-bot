@@ -1468,6 +1468,7 @@ const MAX_PENDING_BUY_EVENTS = 80;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let activityTimer: ReturnType<typeof setInterval> | null = null;
+let softWatchBootTimer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let paused = false;
 let pollInFlight = false;
@@ -1859,8 +1860,17 @@ export function startMonitor(): void {
     (shareBoot && getRpcRoleFor('wallet_poll', true) === 'utility');
   // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
   const firstPollDelayMs = softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000;
-  setTimeout(() => {
+  if (softWatchBootTimer) clearTimeout(softWatchBootTimer);
+  softWatchBootTimer = setTimeout(() => {
+    softWatchBootTimer = null;
     void pollAllWallets();
+    // Arm interval only after first-poll delay so Share+Utility stays quiet
+    // while Critical/Scanners settle post-deploy (~45s).
+    if (!running) return;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => {
+      void pollAllWallets();
+    }, config.pollIntervalMs);
   }, firstPollDelayMs);
 
   // Activity refresh hits GMGN/RPC per wallet — defer heavily on free RPC or skip
@@ -1887,10 +1897,6 @@ export function startMonitor(): void {
       recoverDisabledWallets();
     }
   })();
-
-  pollTimer = setInterval(() => {
-    void pollAllWallets();
-  }, config.pollIntervalMs);
 
   activityTimer = setInterval(() => {
     if (paused || !config.filters.enableActivityFilter) return;
@@ -1930,6 +1936,10 @@ export function startMonitor(): void {
 export function stopMonitor(): void {
   running = false;
   paused = false;
+  if (softWatchBootTimer) {
+    clearTimeout(softWatchBootTimer);
+    softWatchBootTimer = null;
+  }
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.298',
+    title: 'Fix post-deploy Helius ramp + dashboard lag',
+    sections: ['overview', 'execution'],
+    items: [
+      'Status/RPC stats are read-only again — /api/status no longer mutates lane failover or adaptive shed (stops event-loop thrash that made the UI feel stuck).',
+      'Share ON: Scanners never soft-fail onto Helius; soft-watch interval waits ~45s after deploy; MEV sandwich reads use Alchemy; 12s hard RPC HTTP timeouts.',
+      'Dashboard slim refresh engages from gate/load/failover signals without needing rpc.summary — keeps navigation responsive under load.',
+    ],
+  },
+  {
     version: '1.2.297',
     title: 'Restore RPC stack to 1.2.262-era classic lanes',
     sections: ['overview', 'execution'],

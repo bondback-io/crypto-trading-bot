@@ -243,6 +243,35 @@ function parseRpcMethodsFromBody(body: unknown): string[] {
   }
 }
 
+function rpcHttpTimeoutMs(): number {
+  const raw = process.env.RPC_HTTP_TIMEOUT_MS;
+  const n = raw != null && raw !== '' ? Number(raw) : NaN;
+  if (Number.isFinite(n)) return Math.max(4_000, Math.min(30_000, Math.round(n)));
+  return 12_000;
+}
+
+function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const filtered = signals.filter(Boolean);
+  if (filtered.length === 1) return filtered[0]!;
+  const anyFn = (
+    AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }
+  ).any;
+  if (typeof anyFn === 'function') return anyFn.call(AbortSignal, filtered);
+  const ctrl = new AbortController();
+  for (const s of filtered) {
+    if (s.aborted) {
+      ctrl.abort((s as AbortSignal & { reason?: unknown }).reason);
+      return ctrl.signal;
+    }
+    s.addEventListener(
+      'abort',
+      () => ctrl.abort((s as AbortSignal & { reason?: unknown }).reason),
+      { once: true }
+    );
+  }
+  return ctrl.signal;
+}
+
 function meteredFetch(endpointLabel: string) {
   const baseFetch = globalThis.fetch.bind(globalThis);
   return async (
@@ -251,9 +280,14 @@ function meteredFetch(endpointLabel: string) {
   ): Promise<Response> => {
     const methods = parseRpcMethodsFromBody(init?.body);
     const t0 = Date.now();
+    const timeoutMs = rpcHttpTimeoutMs();
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = init?.signal
+      ? mergeAbortSignals([init.signal, timeoutSignal])
+      : timeoutSignal;
     let ok = false;
     try {
-      const res = await baseFetch(input, init);
+      const res = await baseFetch(input, { ...init, signal });
       ok = res.ok;
       const latencyMs = Date.now() - t0;
       for (const method of methods) {
@@ -274,6 +308,18 @@ function meteredFetch(endpointLabel: string) {
           ok: false,
           latencyMs,
         });
+      }
+      const name = err instanceof Error ? err.name : '';
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        timeoutSignal.aborted ||
+        name === 'TimeoutError' ||
+        name === 'AbortError' ||
+        /aborted|timeout/i.test(msg)
+      ) {
+        throw new Error(
+          `RPC timeout after ${Math.round(timeoutMs / 1000)}s (${endpointLabel})`
+        );
       }
       throw err;
     }
@@ -704,11 +750,24 @@ function setActiveForRole(role: RpcRole, index: number): void {
   }
 }
 
+function isHeliusEndpoint(state: EndpointState | undefined): boolean {
+  if (!state) return false;
+  const label = (state.endpoint.label || '').toLowerCase();
+  const u = (state.endpoint.url || '').toLowerCase();
+  return label === 'helius' || u.includes('helius');
+}
+
+/** Share ON: Scanners must not burn Helius (trade Critical only). */
+function shareBlocksHeliusForRole(role: RpcRole, idx: number): boolean {
+  if (!config.rpc?.shareLoad || role === 'primary') return false;
+  if (idx === preferredPrimary) return true;
+  return isHeliusEndpoint(endpoints[idx]);
+}
+
 function piggybackOrder(role: RpcRole): RpcRole[] {
   // Critical: Helius → Alchemy → (QuickNode mid-tier) → public.
-  // Scanners: Alchemy → Helius → (QuickNode) → public.
+  // Scanners: Alchemy → (QuickNode) → public — never Helius under Share ON (resolve filters).
   // Utility: public → (QN only if ~1000ms stressed and not busy) → Alchemy → Helius.
-  // Paid cross-lane only here; QuickNode + utility are inserted after in resolve/withRpc.
   if (role === 'primary') return ['secondary'];
   if (role === 'secondary') return ['primary'];
   return ['secondary', 'primary'];
@@ -915,10 +974,31 @@ function resolveIndexForRole(role: RpcRole): number {
   }
 
   // 1) Other paid free lane (Helius ↔ Alchemy)
-  // Share+Utility: skip paid-lane piggyback (soft-watch must not burn Critical/Scanners).
+  // Share+Utility: skip. Share+Scanners: never onto Helius (protect Critical CU).
+  // Prefer QuickNode for Scanners before paid cross-lane.
+  if (role === 'secondary') {
+    if (
+      acceptFailoverTarget(
+        role,
+        preferred,
+        pref,
+        preferredQuicknode,
+        latencySoft,
+        rateLimited,
+        downMs,
+        avoidPublicForCritical
+      )
+    ) {
+      return preferredQuicknode;
+    }
+  }
   if (!(shareLoad && role === 'utility')) {
     for (const otherRole of piggybackOrder(role)) {
+      if (shareLoad && role === 'secondary' && otherRole === 'primary') {
+        continue; // Helius is trade-only under Share ON
+      }
       const otherPreferred = preferredIndexFor(otherRole);
+      if (shareBlocksHeliusForRole(role, otherPreferred)) continue;
       if (
         acceptFailoverTarget(
           role,
@@ -936,8 +1016,8 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
-  // 2) QuickNode mid-tier (Critical + Scanners only; skip if unset/unhealthy)
-  if (role === 'primary' || role === 'secondary') {
+  // 2) QuickNode mid-tier (Critical; Scanners already tried QN above)
+  if (role === 'primary') {
     if (
       acceptFailoverTarget(
         role,
@@ -952,6 +1032,8 @@ function resolveIndexForRole(role: RpcRole): number {
     ) {
       return preferredQuicknode;
     }
+  }
+  if (role === 'primary' || role === 'secondary') {
     // 3) Utility / public before remaining fallbacks
     if (
       acceptFailoverTarget(
@@ -974,6 +1056,7 @@ function resolveIndexForRole(role: RpcRole): number {
     if (avoidPublicForCritical && isPublicRpcUrl(endpoints[i].endpoint.url)) {
       continue;
     }
+    if (shareBlocksHeliusForRole(role, i)) continue;
     // Share+Utility: only public/fallback/utility (or QN if severe) — never Helius/Alchemy.
     if (shareLoad && role === 'utility') {
       const e = endpoints[i]!;
@@ -1006,15 +1089,16 @@ function resolveIndexForRole(role: RpcRole): number {
 
   // Last resort: any healthy endpoint (even public for critical)
   // Share+Utility: prefer stay on preferred over dumping onto paid Critical/Scanners.
+  // Share+Scanners: never land on Helius.
   if (shareLoad && role === 'utility') {
     setActiveForRole(role, preferred);
     return preferred;
   }
   for (let i = 0; i < endpoints.length; i++) {
-    if (endpoints[i]?.healthy && !isEndpointRateLimited(endpoints[i])) {
-      setActiveForRole(role, i);
-      return i;
-    }
+    if (!endpoints[i]?.healthy || isEndpointRateLimited(endpoints[i])) continue;
+    if (shareBlocksHeliusForRole(role, i)) continue;
+    setActiveForRole(role, i);
+    return i;
   }
 
   return preferred;
@@ -1280,13 +1364,18 @@ async function withRpcInner<T>(
     ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
     : WITH_RPC_MAX_ATTEMPTS_OTHER;
 
-  // Build attempt order: preferred → other paid → QuickNode → utility → remaining
+  // Build attempt order: preferred → other paid → QuickNode → utility → remaining.
+  // Share ON: never walk Scanners onto Helius.
+  const shareLoad = Boolean(config.rpc?.shareLoad);
   const order: number[] = [];
   const pushUnique = (i: number) => {
-    if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
+    if (i < 0 || i >= endpoints.length || order.includes(i)) return;
+    if (shareBlocksHeliusForRole(r, i)) return;
+    order.push(i);
   };
   pushUnique(startIndex);
   for (const other of piggybackOrder(r)) {
+    if (shareLoad && r === 'secondary' && other === 'primary') continue;
     pushUnique(preferredIndexFor(other));
   }
   if (r === 'primary' || r === 'secondary') {
@@ -1429,9 +1518,13 @@ export function getRpcStats(): {
   utilityWeakPublic: boolean;
 } {
   ensureEndpoints();
-  const pIdx = resolveIndexForRole('primary');
-  const sIdx = resolveIndexForRole('secondary');
-  const uIdx = resolveIndexForRole('utility');
+  // Observational only — do NOT resolve/failover or mutate adaptive load from
+  // status polls (dashboard every 5s). Health monitor tick owns those side effects.
+  const clampIdx = (i: number, fallback: number) =>
+    i >= 0 && i < endpoints.length ? i : fallback;
+  const pIdx = clampIdx(activePrimary, preferredPrimary);
+  const sIdx = clampIdx(activeSecondary, preferredSecondary);
+  const uIdx = clampIdx(activeUtility, preferredUtility);
   const pPref = endpoints[preferredPrimary];
   const sPref = endpoints[preferredSecondary];
   const uPref = endpoints[preferredUtility];
@@ -1486,22 +1579,9 @@ export function getRpcStats(): {
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null = null;
   try {
-    const {
-      updateRpcLoadSignals,
-      getRpcLoadControlSnapshot,
-    } = require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-    updateRpcLoadSignals({
-      primaryLatencyMs: pActive?.latencyMs ?? null,
-      secondaryLatencyMs: sActive?.latencyMs ?? null,
-      utilityLatencyMs: uActive?.latencyMs ?? null,
-      utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
-      utilityFailover: uIdx !== preferredUtility,
-      primaryQueued: gate.lanes.primary.queued,
-      secondaryIdle:
-        gate.lanes.secondary.inFlight === 0 &&
-        gate.lanes.secondary.queued === 0,
-      // Do NOT pass lifetime gate.skipped — it never resets and locked adaptive ×3.
-    });
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    // Observational only — do NOT mutate adaptive load from /api/status polls.
     loadControl = getRpcLoadControlSnapshot();
     if (
       !warning &&
