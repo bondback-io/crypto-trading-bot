@@ -559,7 +559,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
       <article class="botinfo-card" id="botinfo-sec-execution" data-botinfo-section="execution">
         <h3><span class="botinfo-sec-num">10</span> Jupiter, RPC &amp; MEV</h3>
-        <p>Live buys/sells go through <strong>Jupiter</strong> swaps. Jupiter Tokens API also feeds organic score / trending for the scanner. Dual-lane RPC prefers free <strong>Helius</strong> (primary) + <strong>Alchemy</strong> (secondary / Zion) with optional primary+backup pools and automatic failover to <code>RPC_URL</code>, public Solana, then <code>RPC_SECONDARY</code>.</p>
+        <p>Live buys/sells go through <strong>Jupiter</strong> swaps. Jupiter Tokens API also feeds organic score / trending for the scanner. Dual-lane RPC prefers free <strong>Helius</strong> (primary) + <strong>Alchemy</strong> (secondary / Zion) via <code>HELIUS_API_KEY</code> / <code>ALCHEMY_API_KEY</code> (or single <code>HELIUS_RPC_URL</code> / <code>ALCHEMY_RPC_URL</code>) with automatic failover to <code>RPC_URL</code>, public Solana, then <code>RPC_SECONDARY</code>.</p>
         <ul>
           <li><strong>MEV / Jito</strong> — tip bundles and sandwich abort (live only; module <code>mev_protection</code>).</li>
           <li>Paper and Live Sim never send real swaps; they still use live marks when configured.</li>

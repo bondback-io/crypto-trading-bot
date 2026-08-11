@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.281',
+    title: 'Revert dual RPC pools — back to Helius/Alchemy keys',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Removed Helius/Alchemy primary+backup pool routing and in-pool round-robin that caused failover thrash.',
+      'Restored classic single-endpoint config: HELIUS_API_KEY + ALCHEMY_API_KEY (Share load still splits Critical/Scanners/Utility).',
+      'HELIUS_RPC_URL / ALCHEMY_RPC_URL still work as one endpoint each; *_BACKUP env vars are ignored.',
+      'Stats → RPC Health shows one pill per provider again (no backup share status).',
+    ],
+  },
+  {
     version: '1.2.280',
     title: 'Sanitize HELIUS/ALCHEMY_RPC_URL paste (whitespace + api-key typo)',
     sections: ['overview', 'execution', 'knobs'],
