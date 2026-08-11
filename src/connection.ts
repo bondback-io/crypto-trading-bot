@@ -4,6 +4,8 @@
  */
 
 import { AsyncLocalStorage } from 'async_hooks';
+import fs from 'fs';
+import path from 'path';
 import {
   Connection,
   Keypair,
@@ -37,6 +39,49 @@ import {
   getRpcGateSnapshot,
   isRpcGateSkipError,
 } from './rpcGate';
+
+// #region agent log
+const AGENT_DEBUG_LOG = path.join(process.cwd(), 'debug-0ecc0f.log');
+const agentRpcDebugRing: Array<Record<string, unknown>> = [];
+const agentDebugThrottle = new Map<string, number>();
+function agentRpcDebug(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+  throttleMs = 5_000
+): void {
+  const key = `${hypothesisId}:${location}:${message}`;
+  const now = Date.now();
+  const last = agentDebugThrottle.get(key) || 0;
+  if (now - last < throttleMs) return;
+  agentDebugThrottle.set(key, now);
+  const payload = {
+    sessionId: '0ecc0f',
+    runId: 'pre-fix',
+    hypothesisId,
+    location,
+    message,
+    data,
+    timestamp: now,
+  };
+  agentRpcDebugRing.push(payload);
+  while (agentRpcDebugRing.length > 50) agentRpcDebugRing.shift();
+  fetch('http://127.0.0.1:7710/ingest/4a93e060-3c93-430c-865a-86d3cc897ce8', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': '0ecc0f',
+    },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+  try {
+    fs.appendFileSync(AGENT_DEBUG_LOG, JSON.stringify(payload) + '\n');
+  } catch {
+    /* Render may lack write perms — ring still exposed via getRpcStats */
+  }
+}
+// #endregion
 
 dotenv.config();
 
@@ -1310,6 +1355,18 @@ function resolveIndexForRole(role: RpcRole): number {
 
     // Escape sticky/backup when preferred is clearly healthier/faster.
     if (curUsableSibling && isClearlyWorse(endpoints[cur], pref)) {
+      // #region agent log
+      agentRpcDebug('B', 'connection.ts:resolve:demote', 'demote_clearly_worse', {
+        role,
+        preferProvider,
+        curLabel: endpoints[cur]?.endpoint.label,
+        prefLabel: pref?.endpoint.label,
+        curEwma: endpoints[cur]?.latencyMs ?? null,
+        prefEwma: pref?.latencyMs ?? null,
+        prefHealthy: pref?.healthy ?? false,
+        prefSuccesses: pref?.consecutiveSuccesses ?? 0,
+      });
+      // #endregion
       softStickyUntil.delete(stickyKey);
       setActiveForRole(role, preferred);
       return preferred;
@@ -1318,6 +1375,21 @@ function resolveIndexForRole(role: RpcRole): number {
     if (stickyUntil > Date.now()) {
       // Stay on last active sibling during soft-sticky window (stops RR flip-back).
       if (curUsableSibling) {
+        // #region agent log
+        agentRpcDebug('B', 'connection.ts:resolve:sticky', 'stay_soft_sticky', {
+          role,
+          preferProvider,
+          stickyRemMs: stickyUntil - Date.now(),
+          curLabel: endpoints[cur]?.endpoint.label,
+          prefLabel: pref?.endpoint.label,
+          curEwma: endpoints[cur]?.latencyMs ?? null,
+          prefEwma: pref?.latencyMs ?? null,
+          clearlyWorse: isClearlyWorse(endpoints[cur], pref),
+          fullyRecovered: isFullyRecovered(pref),
+          prefHealthy: Boolean(pref?.healthy),
+          prefSuccesses: pref?.consecutiveSuccesses ?? 0,
+        });
+        // #endregion
         return cur;
       }
     } else if (stickyUntil) {
@@ -1326,15 +1398,52 @@ function resolveIndexForRole(role: RpcRole): number {
 
     // Prefer stay on backup/sibling until preferred fully recovers (2 successes + latency).
     if (curUsableSibling && !isFullyRecovered(pref)) {
+      // #region agent log
+      agentRpcDebug('A', 'connection.ts:resolve:notRecovered', 'stay_until_fully_recovered', {
+        role,
+        preferProvider,
+        curLabel: endpoints[cur]?.endpoint.label,
+        prefLabel: pref?.endpoint.label,
+        curEwma: endpoints[cur]?.latencyMs ?? null,
+        prefEwma: pref?.latencyMs ?? null,
+        recoverMs: latencyRecoverMs(pref),
+        prefHealthy: Boolean(pref?.healthy),
+        prefUsable: isEndpointUsable(pref),
+        prefSuccesses: pref?.consecutiveSuccesses ?? 0,
+        needed: RECOVERY_SUCCESS_NEEDED,
+        ewmaBlocksRecover:
+          pref?.latencyMs != null &&
+          pref.latencyMs >= latencyRecoverMs(pref),
+      });
+      // #endregion
       return cur;
     }
 
     // Preferred recovered: promote primary (no RR to backup) unless backup is clearly better.
     if (isFullyRecovered(pref) && !latencySoft) {
       if (curUsableSibling && isClearlyBetter(endpoints[cur], pref)) {
+        // #region agent log
+        agentRpcDebug('D', 'connection.ts:resolve:backupWins', 'stay_backup_clearly_better', {
+          role,
+          preferProvider,
+          curLabel: endpoints[cur]?.endpoint.label,
+          prefLabel: pref?.endpoint.label,
+          curEwma: endpoints[cur]?.latencyMs ?? null,
+          prefEwma: pref?.latencyMs ?? null,
+        });
+        // #endregion
         setActiveForRole(role, cur);
         return cur;
       }
+      // #region agent log
+      agentRpcDebug('A', 'connection.ts:resolve:promote', 'promote_preferred', {
+        role,
+        preferProvider,
+        prefLabel: pref?.endpoint.label,
+        prefEwma: pref?.latencyMs ?? null,
+        wasCur: endpoints[cur]?.endpoint.label ?? null,
+      });
+      // #endregion
       setActiveForRole(role, preferred);
       return preferred;
     }
@@ -1406,6 +1515,19 @@ function resolveIndexForRole(role: RpcRole): number {
   // Share+Utility: leave very slow usable publicnode when a clearly better public/rpc-url exists.
   if (shareLoad && role === 'utility' && pref && isEndpointUsable(pref)) {
     const alt = pickClearlyBetterUtilityAlt(preferred);
+    // #region agent log
+    if (alt >= 0 || isWeakPublicUtilityUrl(pref.endpoint.url)) {
+      agentRpcDebug('E', 'connection.ts:resolve:utility', 'utility_alt_check', {
+        prefLabel: pref.endpoint.label,
+        prefEwma: pref.latencyMs ?? null,
+        prefWeak: isWeakPublicUtilityUrl(pref.endpoint.url),
+        altLabel: alt >= 0 ? endpoints[alt]?.endpoint.label : null,
+        altEwma: alt >= 0 ? endpoints[alt]?.latencyMs ?? null : null,
+        activeUtilityLabel: endpoints[activeUtility]?.endpoint.label ?? null,
+        activeUtilityEwma: endpoints[activeUtility]?.latencyMs ?? null,
+      });
+    }
+    // #endregion
     if (alt >= 0) {
       setActiveForRole(role, alt);
       return alt;
@@ -1958,6 +2080,29 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
         ),
       ]);
       recordSuccess(index, Date.now() - start);
+      // #region agent log
+      if (
+        index === preferredPrimary ||
+        index === preferredSecondary ||
+        index === preferredUtility
+      ) {
+        const st = endpoints[index]!;
+        agentRpcDebug(
+          'C',
+          'connection.ts:probe',
+          'preferred_probe_ok',
+          {
+            label: st.endpoint.label,
+            healthy: st.healthy,
+            successes: st.consecutiveSuccesses || 0,
+            ewma: st.latencyMs ?? null,
+            fullyRecovered: isFullyRecovered(st),
+            usable: isEndpointUsable(st),
+          },
+          3_000
+        );
+      }
+      // #endregion
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2507,6 +2652,48 @@ export function getRpcStats(): {
   };
   const plainLanguage = buildPlainLanguage();
 
+  // #region agent log
+  agentRpcDebug(
+    'A',
+    'connection.ts:getRpcStats',
+    'lane_snapshot',
+    {
+      shareLoad,
+      summary,
+      primary: {
+        active: pActive?.endpoint.label,
+        pref: pPref?.endpoint.label,
+        activeSlot: pActive?.slot,
+        prefHealthy: pPref?.healthy,
+        prefEwma: pPref?.latencyMs ?? null,
+        activeEwma: pActive?.latencyMs ?? null,
+        fullyRecovered: isFullyRecovered(pPref),
+        successes: pPref?.consecutiveSuccesses ?? 0,
+      },
+      secondary: {
+        active: sActive?.endpoint.label,
+        pref: sPref?.endpoint.label,
+        activeSlot: sActive?.slot,
+        prefHealthy: sPref?.healthy,
+        prefEwma: sPref?.latencyMs ?? null,
+        activeEwma: sActive?.latencyMs ?? null,
+        fullyRecovered: isFullyRecovered(sPref),
+        successes: sPref?.consecutiveSuccesses ?? 0,
+        ewmaBlocks:
+          sPref?.latencyMs != null &&
+          sPref.latencyMs >= latencyRecoverMs(sPref),
+      },
+      utility: {
+        active: uActive?.endpoint.label,
+        pref: uPref?.endpoint.label,
+        prefEwma: uPref?.latencyMs ?? null,
+        activeEwma: uActive?.latencyMs ?? null,
+      },
+    },
+    8_000
+  );
+  // #endregion
+
   const gate = getRpcGateSnapshot();
   if (!warning && gate.stressed) {
     warning =
@@ -2652,6 +2839,42 @@ export function getRpcStats(): {
     pools: { helius: heliusPoolStats, alchemy: alchemyPoolStats },
     summary,
     plainLanguage,
+    // #region agent log
+    _agentRpcDebug: {
+      ring: agentRpcDebugRing.slice(-20),
+      lanes: {
+        primary: {
+          active: pActive?.endpoint.label,
+          preferred: pPref?.endpoint.label,
+          activeSlot: pActive?.slot,
+          prefHealthy: pPref?.healthy,
+          prefEwma: pPref?.latencyMs ?? null,
+          activeEwma: pActive?.latencyMs ?? null,
+          prefSuccesses: pPref?.consecutiveSuccesses ?? 0,
+          fullyRecovered: isFullyRecovered(pPref),
+          latencySoft: latencyFailoverReady(pPref),
+        },
+        secondary: {
+          active: sActive?.endpoint.label,
+          preferred: sPref?.endpoint.label,
+          activeSlot: sActive?.slot,
+          prefHealthy: sPref?.healthy,
+          prefEwma: sPref?.latencyMs ?? null,
+          activeEwma: sActive?.latencyMs ?? null,
+          prefSuccesses: sPref?.consecutiveSuccesses ?? 0,
+          fullyRecovered: isFullyRecovered(sPref),
+          latencySoft: latencyFailoverReady(sPref),
+        },
+        utility: {
+          active: uActive?.endpoint.label,
+          preferred: uPref?.endpoint.label,
+          prefHealthy: uPref?.healthy,
+          prefEwma: uPref?.latencyMs ?? null,
+          activeEwma: uActive?.latencyMs ?? null,
+        },
+      },
+    },
+    // #endregion
   };
 }
 
