@@ -2290,6 +2290,11 @@ export function getRpcStats(): {
   };
   summary: RpcHealthSummary;
   plainLanguage: string;
+  /** Temporary debug ring for stuck-backup diagnosis (session 0ecc0f). */
+  _agentRpcDebug?: {
+    ring: Array<Record<string, unknown>>;
+    lanes: Record<string, unknown>;
+  };
 } {
   ensureEndpoints();
   // Use last active indices — do NOT call resolveIndexForRole here.
