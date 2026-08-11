@@ -19,11 +19,11 @@ export const HWR_QUALITY_ARM = 'hwr_quality_arm';
 export const HWR_RECLAIM_TRIGGER = 'hwr_reclaim_trigger';
 
 /** Movement thresholds (module constants — no new UI knobs). */
-export const QUALITY_MIN_RANGE_24H_PCT = 3;
-export const QUALITY_MIN_SWING_H1_PCT = 1.2;
-export const QUALITY_MIN_SWING_H6_PCT = 2;
+export const QUALITY_MIN_RANGE_24H_PCT = 2.5;
+export const QUALITY_MIN_SWING_H1_PCT = 1.0;
+export const QUALITY_MIN_SWING_H6_PCT = 1.75;
 export const QUALITY_DEAD_RANGE_MS = 50 * 60_000;
-export const QUALITY_MIN_VOL_ALIVE_MULT = 1.0;
+export const QUALITY_MIN_VOL_ALIVE_MULT = 0.9;
 /** Soft HWR rank boost above this MC */
 export const HWR_PREFER_MC_USD = 100_000_000;
 

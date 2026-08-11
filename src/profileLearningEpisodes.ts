@@ -380,12 +380,21 @@ export function computeEpisodeTimingQuality(input: {
   if (input.pclPartialTaken && pnl > 0) exitQ += 4;
   exitQ = Math.max(0, Math.min(100, Math.round(exitQ)));
 
-  // Risk-adjusted timing reward (same units-ish as pnl %)
-  const mfeCapturePts = mfe > 0 ? Math.min(mfe, Math.max(0, exitU)) * 0.35 : 0;
+  // Risk-adjusted timing reward — weight capture + expectancy, not just "no big loss"
+  const mfeCapturePts = mfe > 0 ? Math.min(mfe, Math.max(0, exitU)) * 0.42 : 0;
   const maePenalty = Math.abs(mae) * 0.25;
-  const givebackPenalty = Math.min(20, giveback * 0.2);
+  const givebackPenalty = Math.min(22, giveback * 0.22);
+  const captureRatio = mfe > 0.5 ? Math.max(0, Math.min(1.2, exitU / mfe)) : 0;
   let timingReward =
     pnl + mfeCapturePts - maePenalty - givebackPenalty + (exitQ - 50) * 0.04;
+  // Bonus when capture is strong relative to raw pnl
+  if (captureRatio >= 0.5 && mfe >= 6) {
+    timingReward += (captureRatio - 0.45) * 6;
+  }
+  // Penalize scratchy soft-exits that leave harvest on the table
+  if (pnl > 0 && pnl < 4 && mfe >= 10 && captureRatio < 0.35) {
+    timingReward -= 3.5;
+  }
 
   try {
     const { computePclLearningRewardDelta } =

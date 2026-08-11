@@ -3881,6 +3881,21 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Full AI-readable system diagnostics export (read-only). */
+  app.get('/api/system-diagnostics-export', (req: Request, res: Response) => {
+    try {
+      const { buildSystemDiagnosticsExport } =
+        require('./systemDiagnosticsExport') as typeof import('./systemDiagnosticsExport');
+      const report = buildSystemDiagnosticsExport(req.query.window);
+      res.json(report);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   /** Admission Baseline — v235 observe-only expectancy vs governed throttles. */
   app.get('/api/config/admission-baseline', (_req: Request, res: Response) => {
     try {

@@ -60,7 +60,8 @@ export const PCL_PPP_BY_FAMILY: Record<
 > = {
   fast: {
     armOfTpPct: 52,
-    givebackOfPeakPct: 35,
+    // Tighter giveback for low-capture fast/MS harvest
+    givebackOfPeakPct: 32,
     minOpenSec: 25,
     minProfitFloorPct: 4,
   },
@@ -372,7 +373,8 @@ export function resolvePclPartialDefaults(
   } else if (id === 'momentum_burst') {
     base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.5 };
   } else if (id === 'migration_sniper') {
-    base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.5 };
+    // Migration: bank earlier while E weak — tighter than generic fast disc
+    base = { earlyPartialTpPct: 12, earlyPartialFraction: 0.55 };
   } else if (id === 'trend_rider') {
     base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.35 };
   } else if (id === 'dip_buyer') {
@@ -411,9 +413,14 @@ export function resolvePclPartialDefaults(
     family === 'fast';
   if (isFastFamily) {
     if (armed) {
-      base = { earlyPartialTpPct: 8, earlyPartialFraction: 0.45 };
+      // Migration armed: slightly earlier bank than generic fast 8%@0.45
+      if (id === 'migration_sniper') {
+        base = { earlyPartialTpPct: 7, earlyPartialFraction: 0.5 };
+      } else {
+        base = { earlyPartialTpPct: 8, earlyPartialFraction: 0.45 };
+      }
     }
-    // else keep base (15–18%) — do not pull forward on discretionary mediumHigh
+    // else keep base (15–18% / MS 12%) — do not pull forward on discretionary mediumHigh
   } else if (id === 'steady_compounder') {
     // Keep Steady harvest 28%/40% — do not pull to micro early bank
   } else if ((armed || mediumHigh) && isLowRiskHarvest) {
@@ -481,8 +488,10 @@ export function shouldBlockTinyGreenScratch(input: {
   const armed =
     input.armedWatch === true ||
     /scalp_reclaim|support_dip_reclaim/i.test(String(input.entryStyle || ''));
-  // Armed / high-MFE: never scratch tiny green when MFE ≥ 10%
-  if ((armed || mfe >= 10) && mfe >= 10) return true;
+  // Armed / high-MFE: never scratch tiny green when MFE ≥ 8% (was 10)
+  if ((armed || mfe >= 8) && mfe >= 8) return true;
+  // Strong MFE left on table: block scratchy soft-exit even below tiny threshold
+  if (mfe >= 12 && pnl > 0 && pnl < 5) return true;
   const perm = isProfitPermissionActive({
     profitPermissionUntilMs: input.profitPermissionUntilMs,
     nowMs: input.nowMs,
@@ -719,10 +728,12 @@ export function computePclLearningRewardDelta(input: {
       !late;
 
     let delta = 0;
-    // Boost: MFE capture
+    // Boost: MFE capture (reward realised harvest, not just "closed OK")
     if (capture >= 0.55 && mfe >= 8) {
-      delta += 4 * capture;
+      delta += 5 * capture;
       if (validStyle) delta += 1.5;
+    } else if (capture >= 0.4 && mfe >= 6) {
+      delta += 2.5 * capture;
     }
     const armedTag =
       (Array.isArray(input.learningTags) &&
@@ -740,10 +751,16 @@ export function computePclLearningRewardDelta(input: {
     }
     // Boost: runner continuation (exit after partial with positive remainder)
     if (input.pclPartialTaken && pnl > 1) delta += 2.5;
-    // Penalize: tiny scratch + high MFE
+    // Penalize: tiny scratch + high MFE (scratchy soft-exits that prevent harvest)
     if (pnl > 0 && pnl < PCL_TINY_GREEN_SCRATCH_PCT && mfe >= 12) {
-      delta -= 5;
+      delta -= 7;
       if (validStyle && q != null && q >= 70) delta -= 2;
+    } else if (pnl > 0 && pnl < 5 && mfe >= 10 && capture < 0.35) {
+      delta -= 4;
+    }
+    // Penalize: low capture on meaningful MFE
+    if (mfe >= 10 && capture < 0.3 && pnl >= 0) {
+      delta -= 3;
     }
     // Penalize: early exits on high quality
     const hold = Math.max(0, Number(input.holdSec) || 0);

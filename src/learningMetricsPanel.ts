@@ -60,6 +60,21 @@ export interface LearningMetricsPanel {
   updatedAt: number;
   profiles: LearningMetricsProfileRow[];
   plainLanguage: string;
+  funnelConversion?: {
+    armed: number | null;
+    triggered: number | null;
+    opened: number | null;
+    armToTriggerPct: number | null;
+    triggerToOpenPct: number | null;
+    armToOpenPct: number | null;
+  };
+  familyRestrictionImpact?: Array<{
+    family: string;
+    state: FamilyGovernorState;
+    nativeProfiles: string[];
+    expectancyPct: number | null;
+    note: string;
+  }>;
 }
 
 function pct(n: number | null | undefined, digits = 0): string {
@@ -447,7 +462,26 @@ export function getLearningMetricsPanel(
   const healthyN = profiles.filter((p) => p.tone === 'healthy').length;
   const weakN = profiles.filter((p) => p.tone === 'weak').length;
   const quietN = profiles.filter((p) => p.n <= 0).length;
-  const plainLanguage = `Learning Metrics last ${window}: ${healthyN} healthy · ${weakN} weak · ${quietN} quiet (read-only).`;
+  const funnel = el.funnel;
+  const convBits: string[] = [];
+  if (funnel?.armToTriggerPct != null) {
+    convBits.push(`arm→trig ${funnel.armToTriggerPct}%`);
+  }
+  if (funnel?.triggerToOpenPct != null) {
+    convBits.push(`trig→open ${funnel.triggerToOpenPct}%`);
+  }
+  if (funnel?.armToOpenPct != null) {
+    convBits.push(`arm→open ${funnel.armToOpenPct}%`);
+  }
+  const govImpact = (el.familyRestrictionImpact || [])
+    .slice(0, 3)
+    .map((r) => `${r.family}=${r.state}`)
+    .join(', ');
+  const plainLanguage =
+    `Learning Metrics last ${window}: ${healthyN} healthy · ${weakN} weak · ${quietN} quiet` +
+    (convBits.length ? ` · open-conv ${convBits.join(' · ')}` : '') +
+    (govImpact ? ` · gov ${govImpact}` : '') +
+    ' (read-only).';
 
   return {
     ok: true,
@@ -455,6 +489,15 @@ export function getLearningMetricsPanel(
     updatedAt: Date.now(),
     profiles,
     plainLanguage,
+    funnelConversion: {
+      armed: funnel?.armed ?? null,
+      triggered: funnel?.triggered ?? null,
+      opened: funnel?.opened ?? null,
+      armToTriggerPct: funnel?.armToTriggerPct ?? null,
+      triggerToOpenPct: funnel?.triggerToOpenPct ?? null,
+      armToOpenPct: funnel?.armToOpenPct ?? null,
+    },
+    familyRestrictionImpact: el.familyRestrictionImpact ?? [],
   };
 }
 

@@ -10230,7 +10230,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" style="padding-bottom:0.55rem">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, Learning Metrics, and the agent decision log — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
+            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, Learning Metrics, Decision Log, and Export Data — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
             <p class="text-xs text-slate-400 mb-0">Tune bots on <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button>. Recovery stages live under Micro Bots → Learning.</p>
           </div>
         </div>
@@ -10241,6 +10241,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
           <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-exportdata" data-botperf-tab="exportdata" aria-selected="false" aria-controls="botperf-panel-exportdata" onclick="setBotPerfTab('exportdata')">Export Data</button>
         </div>
       </div>
 
@@ -10604,6 +10605,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="mint text-xs">Loading…</p>
         </div>
       </div>
+      </div>
+
+      <div class="botperf-panel space-y-4" id="botperf-panel-exportdata" data-botperf-panel="exportdata" role="tabpanel" aria-labelledby="botperf-tab-exportdata">
+        <div class="card" id="export-data-card">
+          <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+            <div style="min-width:0;flex:1">
+              <div class="section-title">Export Data <span class="tip" tabindex="0" data-tip="Read-only plain-text system report for AI agents (Grok / Cursor). Snapshot, profiles, family governor, skip reasons, trade craft, and operator flags. No trading side effects."></span></div>
+              <p class="text-xs text-slate-400 mb-0">Generate a full AI-readable diagnostics dump. Copy and paste into Grok or Cursor for next-upgrade prompts.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-end">
+              <label class="ctl ctl-fit">
+                <span>Window</span>
+                <select id="export-window" onchange="syncExpectancyLiftWindow('export-window')">
+                  <option value="20">Last 20</option>
+                  <option value="50" selected>Last 50</option>
+                  <option value="100">Last 100</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-primary btn-sm" onclick="generateSystemDiagnosticsExport()">Generate report</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copySystemDiagnosticsExport()">Copy</button>
+              <button type="button" class="btn btn-sm" onclick="generateSystemDiagnosticsExport()">Refresh</button>
+            </div>
+          </div>
+          <p class="mint text-xs mb-2" id="export-data-stamp">Snapshot: —</p>
+          <pre id="export-data-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate report to build a snapshot…</pre>
+        </div>
       </div>
     </section>
 
@@ -15962,12 +15989,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             })
             .join('');
           const f = p.funnel || {};
+          const trigToOpen =
+            f.triggered > 0 && f.opened != null
+              ? Math.round((Number(f.opened) / Number(f.triggered)) * 1000) / 10
+              : null;
+          const armToOpen =
+            f.armed > 0 && f.opened != null
+              ? Math.round((Number(f.opened) / Number(f.armed)) * 1000) / 10
+              : null;
           const funnelBits = [
             f.candidates != null ? 'cand ' + f.candidates : null,
             f.armed != null ? 'armed ' + f.armed : null,
             f.triggered != null ? 'trig ' + f.triggered : null,
             f.opened != null ? 'open ' + f.opened : null,
             f.closed != null ? 'closed ' + f.closed : null,
+            trigToOpen != null ? 'trig→open ' + trigToOpen + '%' : null,
+            armToOpen != null ? 'arm→open ' + armToOpen + '%' : null,
           ]
             .filter(Boolean)
             .join(' · ');
@@ -17503,13 +17540,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const el = document.getElementById('el-window');
       const ppc = document.getElementById('ppc-window');
       const lm = document.getElementById('lm-window');
+      const ex = document.getElementById('export-window');
       const src =
-        (fromId && document.getElementById(fromId)) || ppc || el || lm;
+        (fromId && document.getElementById(fromId)) || ppc || el || lm || ex;
       const raw = src && src.value != null ? String(src.value) : '50';
       const val = raw === '20' || raw === '100' ? raw : '50';
       if (el) el.value = val;
       if (ppc) ppc.value = val;
       if (lm) lm.value = val;
+      if (ex) ex.value = val;
       return Number(val) || 50;
     }
     window.syncExpectancyLiftWindow = syncExpectancyLiftWindow;
@@ -17686,12 +17725,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             : Math.round(Number(targets.armedShare || 0.8) * 100);
         if (armedTargetEl) {
           const observe = data && data.baselineActive === true;
+          const eBoost = data && data.armedTargetEBoost === true;
           armedTargetEl.textContent =
-            'Target ' + tgtPct + '%' + (observe ? ' (observe)' : '');
-          armedTargetEl.className = elChipClass(!observe, observe);
+            'Target ' +
+            tgtPct +
+            '%' +
+            (eBoost ? ' E-boost' : '') +
+            (observe ? ' (observe)' : '');
+          armedTargetEl.className = elChipClass(
+            !observe && !eBoost,
+            observe || eBoost
+          );
           armedTargetEl.title = observe
             ? 'Slider observe-only under Baseline v235'
-            : 'Armed mix target; disc cap ' + (100 - tgtPct) + '%';
+            : eBoost
+              ? 'Combined E<0 — effective armed target ' +
+                tgtPct +
+                '% (disc cap ' +
+                (100 - tgtPct) +
+                '%); chip armed_target_e_boost'
+              : 'Armed mix target; disc cap ' + (100 - tgtPct) + '%';
         }
         const armedEl = document.getElementById('el-chip-armed');
         const discEl = document.getElementById('el-chip-disc');
@@ -17912,6 +17965,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const funnel = document.getElementById('el-funnel');
         if (funnel && data && data.funnel) {
           const f = data.funnel;
+          const convBits = [];
+          if (f.armToTriggerPct != null)
+            convBits.push('arm→trig ' + f.armToTriggerPct + '%');
+          if (f.triggerToOpenPct != null)
+            convBits.push('trig→open ' + f.triggerToOpenPct + '%');
+          if (f.armToOpenPct != null)
+            convBits.push('arm→open ' + f.armToOpenPct + '%');
+          let impactHtml = '';
+          const impacts = data.familyRestrictionImpact || [];
+          if (impacts.length) {
+            impactHtml =
+              '<span class="mint" style="opacity:0.9"> · Gov impact: ' +
+              impacts
+                .map(function (r) {
+                  return (
+                    r.family +
+                    '=' +
+                    r.state +
+                    (r.nativeProfiles && r.nativeProfiles.length
+                      ? '→' + r.nativeProfiles.slice(0, 3).join('/')
+                      : '') +
+                    (r.expectancyPct != null
+                      ? ' E' +
+                        (r.expectancyPct >= 0 ? '+' : '') +
+                        Number(r.expectancyPct).toFixed(1) +
+                        '%'
+                      : '')
+                  );
+                })
+                .join('; ') +
+              '</span>';
+          }
           funnel.innerHTML =
             '<span class="mint">Funnel offered ' +
             (f.offered || 0) +
@@ -17926,10 +18011,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (f.openRatePct != null
               ? ' · open ' + f.openRatePct + '%'
               : '') +
+            (convBits.length ? ' · ' + convBits.join(' · ') : '') +
             (f.armToTriggerMs != null
               ? ' · arm→trig ' + Math.round(f.armToTriggerMs / 1000) + 's'
               : '') +
-            '</span>';
+            '</span>' +
+            impactHtml;
         }
         renderExpectancyLiftChart();
         try {
@@ -17947,6 +18034,94 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.loadExpectancyLift = loadExpectancyLift;
+
+    let __exportDataReportText = '';
+    async function generateSystemDiagnosticsExport() {
+      const viewer = document.getElementById('export-data-viewer');
+      const stamp = document.getElementById('export-data-stamp');
+      try {
+        if (viewer) viewer.textContent = 'Generating report…';
+        const win = syncExpectancyLiftWindow('export-window');
+        const data = await fetchJSON(
+          '/api/system-diagnostics-export?window=' +
+            encodeURIComponent(String(win))
+        );
+        __exportDataReportText =
+          data && data.reportText ? String(data.reportText) : '';
+        if (viewer) {
+          viewer.textContent =
+            __exportDataReportText || 'Empty report.';
+        }
+        if (stamp) {
+          const ts =
+            data && data.generatedAt
+              ? new Date(data.generatedAt).toLocaleString()
+              : new Date().toLocaleString();
+          const mode = (data && data.mode) || '—';
+          const flags =
+            data && data.meta && data.meta.flagCount != null
+              ? data.meta.flagCount
+              : '—';
+          stamp.textContent =
+            'Snapshot: ' +
+            ts +
+            ' · mode ' +
+            mode +
+            ' · window ' +
+            ((data && data.window) || win) +
+            ' · flags ' +
+            flags +
+            ' (read-only)';
+        }
+      } catch (err) {
+        __exportDataReportText = '';
+        if (viewer) {
+          viewer.textContent =
+            'Export failed: ' + (err.message || String(err));
+        }
+        if (stamp) stamp.textContent = 'Snapshot: error';
+      }
+    }
+    window.generateSystemDiagnosticsExport = generateSystemDiagnosticsExport;
+
+    async function copySystemDiagnosticsExport() {
+      const text =
+        __exportDataReportText ||
+        ((document.getElementById('export-data-viewer') || {}).textContent ||
+          '');
+      if (!text || /Click Generate|Generating|Export failed/i.test(text)) {
+        try {
+          await generateSystemDiagnosticsExport();
+        } catch (_) {}
+      }
+      const copyText =
+        __exportDataReportText ||
+        ((document.getElementById('export-data-viewer') || {}).textContent ||
+          '');
+      const stamp = document.getElementById('export-data-stamp');
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(copyText);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = copyText;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent = prev.replace(/ \(copied\)/, '') + ' (copied)';
+        }
+      } catch (err) {
+        if (stamp) {
+          stamp.textContent =
+            'Copy failed: ' + (err.message || String(err));
+        }
+      }
+    }
+    window.copySystemDiagnosticsExport = copySystemDiagnosticsExport;
 
     function renderScalperTrendChart() {
       const canvas = document.getElementById('chart-scalper-trend');
@@ -19041,6 +19216,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         'learning',
         'learningmetrics',
         'decisions',
+        'exportdata',
       ];
       const next = allowed.indexOf(tab) >= 0 ? tab : 'performance';
       const shouldLoad = !opts || opts.load !== false;
@@ -19072,6 +19248,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { loadLearningMetrics(); } catch (_) {}
         } else if (next === 'decisions') {
           try { loadAgentDecisionLog(); } catch (_) {}
+        } else if (next === 'exportdata') {
+          try { generateSystemDiagnosticsExport(); } catch (_) {}
         }
       }
       // Charts in newly shown panels need a resize pass

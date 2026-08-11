@@ -410,16 +410,24 @@ function computeMaxDrawdown(sortedAsc: InternalTrade[]): {
   maxDrawdownSol: number;
   maxDrawdownPct: number;
 } {
+  // Align with Overview (paperTrader): trough floored at 0, DD capped at 100%.
+  // Starting equity from 0 produced absurd % when early peak was tiny vs later losses.
   let equity = 0;
   let peak = 0;
   let maxDdSol = 0;
+  let maxDrawdownPct = 0;
   for (const t of sortedAsc) {
     equity += t.pnlSol;
     if (equity > peak) peak = equity;
-    const dd = peak - equity;
-    if (dd > maxDdSol) maxDdSol = dd;
+    const trough = Math.max(0, equity);
+    const ddSol = peak - trough;
+    if (ddSol > maxDdSol) maxDdSol = ddSol;
+    if (peak > 1e-9) {
+      const ddPct = (ddSol / peak) * 100;
+      if (ddPct > maxDrawdownPct) maxDrawdownPct = ddPct;
+    }
   }
-  const maxDrawdownPct = peak > 1e-9 ? (maxDdSol / peak) * 100 : 0;
+  maxDrawdownPct = Math.min(100, maxDrawdownPct);
   return { maxDrawdownSol: maxDdSol, maxDrawdownPct };
 }
 

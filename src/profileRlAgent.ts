@@ -500,11 +500,23 @@ function resolveRlModeMax(profileId: string): 'shadow' | 'hybrid' | 'lead' | 'an
   } catch {
     /* optional */
   }
-  // Steady 1.2.248: Shadow until proven (≥40 trades + positive EMA)
-  if (profileId === 'steady_compounder') {
+  // Steady / HWR: Shadow until proven — do not permanently zero sample flow.
+  // Lower trade floor so medium/majors arms can graduate to Hybrid and keep
+  // learning feedback alive (Lead still gated by readiness / expectancy).
+  if (profileId === 'steady_compounder' || profileId === 'high_win_rate') {
     try {
-      const agent = getOrCreateProfileRlAgent(profileId, { defaultMode: 'shadow' });
-      if (agent.trades < 40 || (agent.rewardEma ?? 0) <= 0) return 'shadow';
+      const agent = getOrCreateProfileRlAgent(profileId, {
+        defaultMode: 'shadow',
+      });
+      const minTrades = profileId === 'high_win_rate' ? 20 : 25;
+      if (agent.trades < minTrades || (agent.rewardEma ?? 0) <= 0) {
+        // Cap at hybrid once sample exists — never force Lead while unproven,
+        // but allow Hybrid after minTrades so shadow does not zero influence forever.
+        if (agent.trades >= Math.max(8, Math.floor(minTrades / 2))) {
+          return 'hybrid';
+        }
+        return 'shadow';
+      }
     } catch {
       return 'shadow';
     }

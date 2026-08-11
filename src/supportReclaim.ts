@@ -513,9 +513,27 @@ export function scoreEntryStyleDna(input: {
 
   if (late && (dna.hardLateChase || dna.forbidden.includes('late_chase'))) {
     // Armed Dip: soft penalty only — do not hardZero late_chase
-    if (armedDip && dna.hardLateChase) {
+    // Under strongly negative combined E: strip soft path (treat as toxic)
+    let strongNegE = false;
+    try {
+      const { isStrongNegExpectancyForDna } =
+        require('./expectancyLift') as {
+          isStrongNegExpectancyForDna?: () => boolean;
+        };
+      strongNegE =
+        typeof isStrongNegExpectancyForDna === 'function'
+          ? isStrongNegExpectancyForDna()
+          : false;
+    } catch {
+      strongNegE = false;
+    }
+    if (armedDip && dna.hardLateChase && !strongNegE) {
       bits.push('late_chase soft (armed dip)');
       return { hardZero: false, scoreDelta: -22, bits };
+    }
+    if (armedDip && strongNegE) {
+      bits.push('late_chase hard (armed dip, E≪0)');
+      return { hardZero: true, scoreDelta: 0, bits };
     }
     if (dna.hardLateChase) {
       return { hardZero: true, scoreDelta: 0, bits: ['late_chase forbidden'] };

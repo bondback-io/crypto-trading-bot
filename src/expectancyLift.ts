@@ -89,6 +89,14 @@ const SIZE_MULT_HI = 1.15;
 const SCRATCH_PNL_PCT = 0.25;
 const SCRATCH_PNL_SOL = 0.001;
 const DISC_MIX_SIZE_PENALTY = 0.85;
+/** When combined window E < 0, bump effective armed target to this (slider max). */
+const ARMED_TARGET_E_BOOST_PCT = 90;
+/** Strongly negative E — deny late-chase reclaim relief for primary chase. */
+const LATE_CHASE_STRONG_NEG_E = -0.75;
+/** Min samples for E-adaptive armed boost / late-chase E clamp. */
+const E_ADAPT_MIN_SAMPLES = 12;
+/** Min family n for Dip comparative soft-allow. */
+const DIP_COMPARATIVE_MIN_N = 8;
 
 /** Clamp operator armed-mix target pct (60–90). */
 export function clampEntrySkillArmedTargetPct(raw: unknown): number {
@@ -128,12 +136,85 @@ export function setEntrySkillArmedTargetPct(raw: unknown): number {
   return pct;
 }
 
-/** Armed share target 0–1 from operator slider (ignored under Baseline v235 admit). */
-function armedShareTarget(): number {
-  return getEntrySkillArmedTargetPct() / 100;
+/** Recent combined expectancy (last-50) for Entry Skill adaptive gates. */
+function getRecentCombinedExpectancy(): {
+  expectancyPct: number | null;
+  tradeCount: number;
+} {
+  try {
+    const trades = collectExpectancyTrades().slice(-50);
+    const m = computeExpectancyMetrics(trades);
+    return {
+      expectancyPct: m.expectancyPct,
+      tradeCount: m.tradeCount,
+    };
+  } catch {
+    return { expectancyPct: null, tradeCount: 0 };
+  }
 }
 
-/** Disc share hard cap = 1 − armed target (e.g. 80% → 20%). */
+/** True when combined E ≤ −0.75 (for DNA late-chase harden; avoids circular import weight). */
+export function isStrongNegExpectancyForDna(): boolean {
+  return isStronglyNegativeExpectancy(null);
+}
+
+/** True when combined E is negative enough to boost armed dominance. */
+export function isArmedTargetEBoostActive(): boolean {
+  if (isAdmissionBaselineV235()) return false;
+  const { expectancyPct, tradeCount } = getRecentCombinedExpectancy();
+  return (
+    tradeCount >= E_ADAPT_MIN_SAMPLES &&
+    expectancyPct != null &&
+    expectancyPct < 0
+  );
+}
+
+/** True when combined (or family) E is strongly negative for late-chase clamp. */
+function isStronglyNegativeExpectancy(family?: ExpectancyFamily | null): boolean {
+  if (isAdmissionBaselineV235()) return false;
+  const { expectancyPct, tradeCount } = getRecentCombinedExpectancy();
+  if (
+    tradeCount >= E_ADAPT_MIN_SAMPLES &&
+    expectancyPct != null &&
+    expectancyPct <= LATE_CHASE_STRONG_NEG_E
+  ) {
+    return true;
+  }
+  if (family) {
+    try {
+      const st = getFamilyGovernorState(family);
+      const trades = collectExpectancyTrades()
+        .filter((t) => t.family === family)
+        .slice(-40);
+      const m = computeExpectancyMetrics(trades);
+      if (
+        m.tradeCount >= E_ADAPT_MIN_SAMPLES &&
+        m.expectancyPct != null &&
+        m.expectancyPct <= LATE_CHASE_STRONG_NEG_E
+      ) {
+        return true;
+      }
+      if (st === 'restricted' && m.expectancyPct != null && m.expectancyPct < 0) {
+        return true;
+      }
+    } catch {
+      /* soft */
+    }
+  }
+  return false;
+}
+
+/** Armed share target 0–1 from operator slider (ignored under Baseline v235 admit).
+ * When combined E < 0 under governed: effective target bumps to 90% (disc cap 10%). */
+function armedShareTarget(): number {
+  const base = getEntrySkillArmedTargetPct() / 100;
+  if (isArmedTargetEBoostActive()) {
+    return Math.max(base, ARMED_TARGET_E_BOOST_PCT / 100);
+  }
+  return base;
+}
+
+/** Disc share hard cap = 1 − armed target (e.g. 80% → 20%; E-boost → 10%). */
 function discShareCap(): number {
   return 1 - armedShareTarget();
 }
@@ -310,6 +391,24 @@ export interface ArmedFunnelRow {
   blocked: number;
   openRatePct: number | null;
   armToTriggerMs: number | null;
+  /** armed → triggered conversion % */
+  armToTriggerPct: number | null;
+  /** triggered → opened conversion % */
+  triggerToOpenPct: number | null;
+  /** armed → opened conversion % */
+  armToOpenPct: number | null;
+}
+
+/** Restricted/down_ranked family impact on native profiles (diagnostics). */
+export interface FamilyRestrictionImpactRow {
+  family: ExpectancyFamily;
+  state: FamilyGovernorState;
+  nativeProfiles: string[];
+  expectancyPct: number | null;
+  winRate: number | null;
+  mfeCapturePct: number | null;
+  tradeCount: number;
+  note: string;
 }
 
 export interface ExpectancyLiftStatus {
@@ -372,12 +471,18 @@ export interface ExpectancyLiftStatus {
   entrySkillActive: boolean;
   /** Operator armed-mix target pct (60–90); observe-only under Baseline v235. */
   entrySkillArmedTargetPct?: number;
+  /** Effective armed target after E&lt;0 boost (may be 90). */
+  entrySkillArmedTargetEffectivePct?: number;
+  /** Combined E < 0 → effective armed target bumped to 90%. */
+  armedTargetEBoost?: boolean;
   /** Armed hard-lock preferred-lane floor fails (diagnostics chip only). */
   blockedSecondPass?: number;
   /** Per-family skill memory (WR / E / avg W/L / MFE / n + governor). */
   familySkillMemory: FamilySkillMemoryRow[];
   /** Performance Power Cell charge (visual-only). */
   performanceCharge: import('./performanceCharge').PerformanceChargeBundle | null;
+  /** Restricted/down_ranked families vs native profile impact. */
+  familyRestrictionImpact?: FamilyRestrictionImpactRow[];
 }
 
 export interface FamilySkillMemoryRow {
@@ -1473,6 +1578,27 @@ export function shouldSkipFamilyGovernor(input: {
         family: effective,
       };
     }
+    // Dip comparative soft-allow: when support_dip_reclaim is restricted but
+    // Dip native metrics beat peer families, soft-pass Dip-native (and close
+    // reclaim handoffs) instead of broad off-style kill.
+    if (effective === 'support_dip_reclaim') {
+      const cmp = evaluateDipComparativeSoftAllow();
+      if (cmp.allow) {
+        const dipNative =
+          pid === 'dip_buyer' ||
+          profileMatchesFamilyNative(input.profileId, 'support_dip_reclaim');
+        if (dipNative || pid === 'dip_buyer') {
+          return {
+            skip: false,
+            state,
+            softPassNative: true,
+            reason: cmp.reason,
+            family: effective,
+            reasonCode: 'gov_dip_comparative_soft_allow',
+          };
+        }
+      }
+    }
     // Hard-skip only off-style / forbidden mismatch
     return {
       skip: true,
@@ -1484,20 +1610,102 @@ export function shouldSkipFamilyGovernor(input: {
   return { skip: false, state, family: effective };
 }
 
-/** Armed reclaim near level — not true late chase for ceiling / hard-skip. */
+/** When support_dip_reclaim is restricted but Dip E/WR/capture beats peer median — soft-allow. */
+function evaluateDipComparativeSoftAllow(): {
+  allow: boolean;
+  reason: string;
+} {
+  try {
+    const trades = collectExpectancyTrades().slice(-50);
+    const byFam = new Map<ExpectancyFamily, ExpectancyTradeRow[]>();
+    for (const t of trades) {
+      const list = byFam.get(t.family) || [];
+      list.push(t);
+      byFam.set(t.family, list);
+    }
+    const dip = byFam.get('support_dip_reclaim') || [];
+    const dipM = computeExpectancyMetrics(dip);
+    if (
+      dipM.tradeCount < DIP_COMPARATIVE_MIN_N ||
+      dipM.expectancyPct == null
+    ) {
+      return { allow: false, reason: 'dip comparative: insufficient sample' };
+    }
+    const peerEs: number[] = [];
+    const peerWrs: number[] = [];
+    const peerCaps: number[] = [];
+    for (const f of EXPECTANCY_FAMILIES) {
+      if (f === 'support_dip_reclaim' || f === 'late_chase') continue;
+      const m = computeExpectancyMetrics(byFam.get(f) || []);
+      if (m.tradeCount < DIP_COMPARATIVE_MIN_N) continue;
+      if (m.expectancyPct != null) peerEs.push(m.expectancyPct);
+      if (m.winRate != null) peerWrs.push(m.winRate);
+      if (m.mfeCapturePct != null) peerCaps.push(m.mfeCapturePct);
+    }
+    if (peerEs.length < 1) {
+      // No peers — allow if Dip E is not deeply negative
+      if (dipM.expectancyPct > -1.5) {
+        return {
+          allow: true,
+          reason: `gov_dip_comparative_soft_allow: Dip E=${dipM.expectancyPct.toFixed(2)}% n=${dipM.tradeCount} (no peer sample)`,
+        };
+      }
+      return { allow: false, reason: 'dip comparative: no peers + weak E' };
+    }
+    peerEs.sort((a, b) => a - b);
+    peerWrs.sort((a, b) => a - b);
+    peerCaps.sort((a, b) => a - b);
+    const medE = peerEs[Math.floor(peerEs.length / 2)]!;
+    const medWr =
+      peerWrs.length > 0 ? peerWrs[Math.floor(peerWrs.length / 2)]! : null;
+    const medCap =
+      peerCaps.length > 0 ? peerCaps[Math.floor(peerCaps.length / 2)]! : null;
+    const beatsE = dipM.expectancyPct >= medE;
+    const beatsWr =
+      medWr == null ||
+      (dipM.winRate != null && dipM.winRate >= medWr - 0.02);
+    const beatsCap =
+      medCap == null ||
+      (dipM.mfeCapturePct != null && dipM.mfeCapturePct >= medCap - 5);
+    // Soft-allow when Dip beats median E and at least one of WR/capture
+    if (beatsE && (beatsWr || beatsCap)) {
+      return {
+        allow: true,
+        reason: `gov_dip_comparative_soft_allow: Dip E=${dipM.expectancyPct.toFixed(2)}% WR=${dipM.winRate != null ? (dipM.winRate * 100).toFixed(0) + '%' : '—'} vs peer med E=${medE.toFixed(2)}%`,
+      };
+    }
+    return {
+      allow: false,
+      reason: `dip comparative: below peers E=${dipM.expectancyPct.toFixed(2)}% vs med ${medE.toFixed(2)}%`,
+    };
+  } catch {
+    return { allow: false, reason: 'dip comparative: error' };
+  }
+}
+
+/** Armed reclaim near level — not true late chase for ceiling / hard-skip.
+ * Under strongly negative E: deny relief for primary late_chase with ext > 4%. */
 function isArmedReclaimRelief(input: {
   armedWatch?: boolean;
   entryStyle?: string | null;
   extensionFromLevelPct?: number | null;
+  lateChase?: boolean;
 }): boolean {
   if (input.armedWatch !== true) return false;
   const style = String(input.entryStyle || '').toLowerCase();
-  if (/reclaim/i.test(style) && !/late.?chase/i.test(style)) return true;
   const ext =
     input.extensionFromLevelPct != null &&
     Number.isFinite(Number(input.extensionFromLevelPct))
       ? Number(input.extensionFromLevelPct)
       : null;
+  const primaryLate =
+    input.lateChase === true || /late.?chase/i.test(style);
+  // Strongly negative E: only true near-level reclaim (ext ≤4%) may relief
+  if (isStronglyNegativeExpectancy('late_chase') && primaryLate) {
+    if (ext != null && ext >= -2 && ext <= 4) return true;
+    return false;
+  }
+  if (/reclaim/i.test(style) && !/late.?chase/i.test(style)) return true;
   // Extension ≤4% from level = reclaim / near-level, not chase
   if (ext != null && ext >= -2 && ext <= 4) return true;
   return false;
@@ -1554,6 +1762,7 @@ export function shouldLimitLateChaseShare(input: {
       armedWatch: input.armedWatch,
       entryStyle: input.entryStyle,
       extensionFromLevelPct: input.extensionFromLevelPct,
+      lateChase: input.lateChase,
     })
   ) {
     return { limit: false, reasonCode: 'LC_ARMED_RECLAIM_RELIEF' };
@@ -1945,12 +2154,30 @@ export function expectancySizeMultiplier(input: {
       }
     }
 
-    // MS habit: smaller size when migration_hold_reclaim is down_ranked/restricted
+    // MS habit: smaller size when migration_hold_reclaim weak OR MS E < 0
     if (pid === 'migration_sniper') {
       const migGov = getFamilyGovernorState('migration_hold_reclaim');
       if (migGov === 'down_ranked' || migGov === 'restricted') {
-        mult = clamp(mult * (migGov === 'restricted' ? 0.55 : 0.65), HABIT_SIZE_LO, SIZE_MULT_HI);
+        mult = clamp(
+          mult * (migGov === 'restricted' ? 0.5 : 0.6),
+          HABIT_SIZE_LO,
+          SIZE_MULT_HI
+        );
         notes.push(`MS habit size↓ (${migGov} migration_hold_reclaim)`);
+      }
+      const negMsE =
+        m.expectancyPct != null &&
+        Number.isFinite(m.expectancyPct) &&
+        m.expectancyPct < 0 &&
+        m.tradeCount >= 6;
+      if (negMsE && input.armedWatch !== true) {
+        mult = clamp(mult * 0.7, HABIT_SIZE_LO, 0.65);
+        notes.push(
+          `MS size↓ E=${m.expectancyPct!.toFixed(2)}% (disc while E<0)`
+        );
+      } else if (negMsE) {
+        mult = clamp(mult * 0.85, HABIT_SIZE_LO, SIZE_MULT_HI);
+        notes.push(`MS size↓ E=${m.expectancyPct!.toFixed(2)}% (armed)`);
       }
     }
 
@@ -2621,9 +2848,15 @@ function quietReasonForProfile(profileId: string): string | null {
           const lane =
             profileId === 'high_win_rate' ? q.hwr : q.steady;
           if (lane.armedNow === 0 && lane.topDeny) {
+            const deny = String(lane.topDeny);
+            if (/low_movement|no_level|soft_allow/i.test(deny)) {
+              return profileId === 'high_win_rate'
+                ? `HWR waiting arms (${deny})`
+                : `Steady waiting arms (${deny})`;
+            }
             return profileId === 'high_win_rate'
-              ? `HWR 0 arms: ${lane.topDeny}`
-              : `Steady 0 arms: ${lane.topDeny}`;
+              ? `HWR 0 arms: ${deny}`
+              : `Steady 0 arms: ${deny}`;
           }
           if (lane.armedNow > 0) {
             return profileId === 'high_win_rate'
@@ -2647,13 +2880,13 @@ function quietReasonForProfile(profileId: string): string | null {
       }
       const r = describeTrendInactiveReason(profileId);
       if (r === 'profile_off') return 'Profile off';
-      if (r === 'recovery') return 'Recovery throttle';
+      if (r === 'recovery') return 'Recovery throttle (arms still eligible)';
       if (r === 'marl') return 'MARL downrank';
       if (r === 'blocked') return 'Triggers blocked';
       if (r === 'expired') return 'Watches expired';
-      if (r === 'no_trigger') return 'Armed — no trigger';
-      if (r === 'no_arms') return 'No armed setups';
-      if (r === 'few_trades') return 'Quiet — few recent trades';
+      if (r === 'no_trigger') return 'Armed — waiting trigger';
+      if (r === 'no_arms') return 'Waiting for arms (medium/majors movement)';
+      if (r === 'few_trades') return 'Quiet — few recent trades (sample building)';
     }
     // HWR soft-allow deny / microcap NAP quiet hints
     if (profileId === 'high_win_rate' || profileId === 'steady_compounder') {
@@ -2721,6 +2954,9 @@ function buildArmedFunnel(): ArmedFunnelRow {
     blocked: 0,
     openRatePct: null,
     armToTriggerMs: null,
+    armToTriggerPct: null,
+    triggerToOpenPct: null,
+    armToOpenPct: null,
   };
   try {
     const { setupWatchEventStats, listSetupWatchEvents } =
@@ -2749,11 +2985,20 @@ function buildArmedFunnel(): ArmedFunnelRow {
     const d = getSetupWatchDiagnostics();
     const denom =
       stats.triggered + stats.opened + stats.blockedSafety + stats.handoffFailed;
+    const armed = stats.armed;
+    const triggered = stats.triggered;
+    const opened = stats.opened;
+    const armToTriggerPct =
+      armed > 0 ? Math.round((triggered / armed) * 1000) / 10 : null;
+    const triggerToOpenPct =
+      triggered > 0 ? Math.round((opened / triggered) * 1000) / 10 : null;
+    const armToOpenPct =
+      armed > 0 ? Math.round((opened / armed) * 1000) / 10 : null;
     return {
       offered,
-      armed: stats.armed,
-      triggered: stats.triggered,
-      opened: stats.opened,
+      armed,
+      triggered,
+      opened,
       blocked: stats.blockedSafety + stats.handoffFailed,
       openRatePct:
         d.triggerSuccessPct != null
@@ -2762,10 +3007,71 @@ function buildArmedFunnel(): ArmedFunnelRow {
             ? Math.round((stats.opened / denom) * 1000) / 10
             : null,
       armToTriggerMs: d.armToTriggerLatencyMs,
+      armToTriggerPct,
+      triggerToOpenPct,
+      armToOpenPct,
     };
   } catch {
     return empty;
   }
+}
+
+/** Native profile ids for a family (DNA primary/allowed). */
+function nativeProfilesForFamily(family: ExpectancyFamily): string[] {
+  const out: string[] = [];
+  try {
+    const { PROFILE_ENTRY_STYLE_DNA } =
+      require('./supportReclaim') as typeof import('./supportReclaim');
+    for (const [pid, dna] of Object.entries(PROFILE_ENTRY_STYLE_DNA)) {
+      if (!dna) continue;
+      if (String(dna.primary) === family) {
+        out.push(pid);
+        continue;
+      }
+      if (
+        Array.isArray(dna.allowed) &&
+        dna.allowed.some((s) => String(s) === family)
+      ) {
+        out.push(pid);
+      }
+    }
+  } catch {
+    /* soft */
+  }
+  return out.sort();
+}
+
+function buildFamilyRestrictionImpact(
+  families: FamilyGovernorRow[]
+): FamilyRestrictionImpactRow[] {
+  const rows: FamilyRestrictionImpactRow[] = [];
+  for (const f of families) {
+    if (f.state !== 'restricted' && f.state !== 'down_ranked') continue;
+    const natives = nativeProfilesForFamily(f.family);
+    const e = f.metrics.expectancyPct;
+    const wr = f.metrics.winRate;
+    const cap = f.metrics.mfeCapturePct;
+    let note = f.note || f.state;
+    if (
+      f.family === 'support_dip_reclaim' &&
+      e != null &&
+      e > -0.25 &&
+      (wr == null || wr >= 0.35)
+    ) {
+      note = `${f.state}: native Dip may deserve soft-allow (E=${e.toFixed(2)}%)`;
+    }
+    rows.push({
+      family: f.family,
+      state: f.state,
+      nativeProfiles: natives,
+      expectancyPct: e,
+      winRate: wr,
+      mfeCapturePct: cap,
+      tradeCount: f.metrics.tradeCount,
+      note,
+    });
+  }
+  return rows;
 }
 
 function buildChart(trades: ExpectancyTradeRow[]): ExpectancyLiftStatus['chart'] {
@@ -2895,6 +3201,7 @@ export function getExpectancyLiftStatus(
 
   const quietChips = getQuietProfileChips();
   const funnel = buildArmedFunnel();
+  const familyRestrictionImpact = buildFamilyRestrictionImpact(families);
   const overall = computeExpectancyMetrics(windowTrades);
   const eStr =
     overall.expectancyPct != null
@@ -2906,8 +3213,10 @@ export function getExpectancyLiftStatus(
     mix.lateChaseShare != null
       ? `${(mix.lateChaseShare * 100).toFixed(0)}%`
       : '—';
-  const armedTargetPct = getEntrySkillArmedTargetPct();
-  const plainLanguage = `Expectancy ${eStr} over last ${window} · armed ${armedStr} (target ${armedTargetPct}%) · late-chase ${lateStr} (≤5%).`;
+  const armedTargetPct = Math.round(armedShareTarget() * 100);
+  const operatorArmedTargetPct = getEntrySkillArmedTargetPct();
+  const eBoost = isArmedTargetEBoostActive();
+  const plainLanguage = `Expectancy ${eStr} over last ${window} · armed ${armedStr} (target ${armedTargetPct}%${eBoost ? ', E-boost' : ''}) · late-chase ${lateStr} (≤5%).`;
 
   const liveArmed = countLiveArmedWatches();
   const liveTriggerableArmed = countLiveTriggerableArmed();
@@ -3097,11 +3406,14 @@ export function getExpectancyLiftStatus(
     admissionBaseline,
     baselineActive,
     entrySkillActive,
-    entrySkillArmedTargetPct: armedTargetPct,
+    entrySkillArmedTargetPct: operatorArmedTargetPct,
+    entrySkillArmedTargetEffectivePct: armedTargetPct,
     blockedSecondPass: getBlockedSecondPassCount(),
     familySkillMemory,
     performanceCharge,
     entrySkillByProfile: buildEntrySkillByProfile(),
+    familyRestrictionImpact,
+    armedTargetEBoost: eBoost,
   };
 }
 

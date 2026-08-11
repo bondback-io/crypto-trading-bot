@@ -817,8 +817,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forceScalp: true,
       shortTermStrategyId: 'migration_event',
       overrideScalpParams: true,
-      sizeMultiplier: 0.55,
-      maxTradeOverrideSol: 0.1,
+      sizeMultiplier: 0.45,
+      maxTradeOverrideSol: 0.08,
       turboMode: true,
     },
     modules: {
@@ -3201,12 +3201,31 @@ export function evaluateLaneEntryFloors(
     ctx.holderCount != null && Number.isFinite(ctx.holderCount)
       ? Number(ctx.holderCount)
       : null;
-  // Armed Dip lane soft-pass: ease non-safety floors (holders / H1 soft).
+  // Armed setup-watch soft-pass: ease non-safety floors (holders).
+  // Applies to all pre-vetted watch families (dip / mode_b / grad / trend / quality).
   // Keep hard MC / max MC / top10 / age — global $8k + anti-rug stay final.
-  const armedDipSoft =
+  const setupFam = String(ctx.setupWatchFamily || '').toLowerCase();
+  const armedSetupWatchSoft =
     ctx.armedWatch === true &&
-    (String(ctx.setupWatchFamily || '').toLowerCase() === 'dip' ||
-      def.id === 'dip_buyer');
+    (setupFam === 'dip' ||
+      setupFam === 'mode_b' ||
+      setupFam === 'modeb' ||
+      setupFam === 'scalper' ||
+      setupFam === 'grad' ||
+      setupFam === 'migration' ||
+      setupFam === 'trend' ||
+      setupFam === 'quality' ||
+      setupFam === 'steady' ||
+      setupFam === 'hwr' ||
+      def.id === 'dip_buyer' ||
+      def.id === 'scalper' ||
+      def.id === 'migration_sniper' ||
+      def.id === 'momentum_burst' ||
+      def.id === 'trend_rider' ||
+      def.id === 'steady_compounder' ||
+      def.id === 'high_win_rate');
+  // Legacy alias used below
+  const armedDipSoft = armedSetupWatchSoft;
 
   const eased = dipBuyerEasedFloors(def, ctx);
   const profileMin =

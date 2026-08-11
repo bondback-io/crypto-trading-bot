@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.266',
+    title: 'Expectancy killers repair · Export Data',
+    sections: ['overview', 'microbots', 'learning', 'tradecraft', 'scanners'],
+    items: [
+      'Entry Skill: E<0 bumps effective armed target to 90%; late-chase reclaim relief denied when E≤−0.75; Dip comparative soft-allow when support_dip_reclaim is restricted but native Dip beats peers.',
+      'Armed trigger→open: non-safety floor soft-pass for all setup-watch families; governed fail-open soft lane fight (anti-rug/MC still hard). Funnel shows arm→trig→open conversion + family restriction impact.',
+      'Harvest/loss: Migration size-down + earlier bank; tighter fast PPP giveback; faster 0-MFE stall; learning rewards capture/expectancy and penalises scratchy soft-exits. Steady/HWR movement gates eased; RL shadow no longer permanently zeros sample flow.',
+      'Rankings Max DD capped/floored like Overview. New Stats → Export Data tab: read-only AI-readable system report (Generate / Copy).',
+    ],
+  },
+  {
     version: '1.2.265',
     title: 'Stats Learning Metrics tab',
     sections: ['overview', 'microbots', 'learning', 'scanners'],

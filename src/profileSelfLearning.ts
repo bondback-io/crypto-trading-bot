@@ -1187,19 +1187,20 @@ export function buildExitLearningCandidates(
   const expectancy =
     episodes.reduce((s, e) => s + (e.pnlPct || 0), 0) / episodes.length;
   const leftShare = leftOnTable / episodes.length;
-  if (expectancy < 0 || leftShare >= 0.18) {
+  // Raise sensitivity: was 0.18 — catch scratchy soft-exits sooner
+  if (expectancy < 0 || leftShare >= 0.14) {
     const nextGive = clamp(
-      (currentPolicy.profitGivebackPts || 25) - 2,
+      (currentPolicy.profitGivebackPts || 25) - (leftShare >= 0.22 ? 3 : 2),
       8,
       45
     );
     const nextPartial = clamp(
-      Math.round((currentPolicy.earlyPartialTpPct || 15) - 2),
+      Math.round((currentPolicy.earlyPartialTpPct || 15) - (leftShare >= 0.22 ? 3 : 2)),
       6,
       40
     );
     const nextArm = clamp(
-      Math.round((currentPolicy.profitLockArmPct || 40) * 0.92),
+      Math.round((currentPolicy.profitLockArmPct || 40) * (leftShare >= 0.22 ? 0.9 : 0.92)),
       12,
       90
     );

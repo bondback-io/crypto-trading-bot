@@ -7202,6 +7202,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       lanePassers = lanes.filter((l) => l.passed && l.assignment);
       if (!lanePassers.length) {
         let v235FailOpen = false;
+        let governedArmedSoftOpen = false;
         try {
           const { isAdmissionBaselineV235 } =
             require('./expectancyLift') as typeof import('./expectancyLift');
@@ -7209,11 +7210,36 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         } catch {
           v235FailOpen = false;
         }
-        if (v235FailOpen) {
+        // Governed: fail-open soft lane fight for non-safety floor fails on
+        // pre-vetted armed watches (holders / soft H1). Keep hard safety blocks.
+        if (!v235FailOpen) {
+          const intended0 =
+            lanes.find((l) => l.profileId === prefId) ||
+            lanes.find((l) => !l.passed);
+          const failR = String(
+            intended0?.failReason || intended0?.reason || ''
+          ).toLowerCase();
+          const isSafetyHard =
+            /honeypot|anti.?rug|rug|pump.?only|mc\s*\$?\s*\d+\s*<\s*(lane\s*)?min|unknown.*mc|min mc override|top10|token age|dead.?token|blacklist/i.test(
+              failR
+            );
+          governedArmedSoftOpen = !isSafetyHard;
+        }
+        if (v235FailOpen || governedArmedSoftOpen) {
           console.log(
-            `[monitor] armed hard-lock fail-open (baseline v235) ${signal.symbol}: ` +
+            `[monitor] armed hard-lock fail-open (${v235FailOpen ? 'baseline v235' : 'governed non-safety'}) ${signal.symbol}: ` +
               `preferred ${prefId} failed floors — soft lane fight`
           );
+          if (governedArmedSoftOpen && !v235FailOpen) {
+            try {
+              const { noteBlockedSecondPass } =
+                require('./expectancyLift') as typeof import('./expectancyLift');
+              // Advisory count — still soft-open; chip tracks near-miss floors
+              noteBlockedSecondPass();
+            } catch {
+              /* soft */
+            }
+          }
           const softLanes = evaluateTradeProfileLanes(ctx, {
             silent: false,
             eligibleProfileIds: null,
@@ -7240,7 +7266,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             recordRejectedSignal(signal, reason);
             console.log(
               `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-                `reason=smart-bot lane fight: ${reason}`
+                `reason=blocked_second_pass: ${reason}`
             );
             return false;
           }
