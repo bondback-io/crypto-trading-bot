@@ -3896,6 +3896,21 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Learning Report — last 50/100 closed trades evaluation package (read-only). */
+  app.get('/api/learning-report', (req: Request, res: Response) => {
+    try {
+      const { buildLearningReport } =
+        require('./learningReportExport') as typeof import('./learningReportExport');
+      const report = buildLearningReport(req.query.window);
+      res.json(report);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   /** Admission Baseline — v235 observe-only expectancy vs governed throttles. */
   app.get('/api/config/admission-baseline', (_req: Request, res: Response) => {
     try {

@@ -10683,6 +10683,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="mint text-xs mb-2" id="export-data-stamp">Snapshot: —</p>
           <pre id="export-data-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate report to build a snapshot…</pre>
         </div>
+
+        <div class="card" id="learning-report-card">
+          <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+            <div style="min-width:0;flex:1">
+              <div class="section-title">Learning Report <span class="tip" tabindex="0" data-tip="Read-only last 50/100 closed-trade evaluation package for Cursor. Summary, per-profile table, trade sample, quality diagnostics, and learning-relevant config. Does not change trading."></span></div>
+              <p class="text-xs text-slate-400 mb-0">Generate a clean trade-learning package to paste into Cursor. Separate from the full system diagnostics export above.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-end">
+              <label class="ctl ctl-fit">
+                <span>Window</span>
+                <select id="learning-report-window">
+                  <option value="50" selected>Last 50</option>
+                  <option value="100">Last 100</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-primary btn-sm" id="learning-report-generate" onclick="generateLearningReport()">Generate Learning Report</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReport()">Copy report</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReportCursorPackage()" title="Fixed evaluation instructions + report">Copy Cursor package</button>
+              <button type="button" class="btn btn-sm" onclick="downloadLearningReport('md')">Download .md</button>
+              <button type="button" class="btn btn-sm" onclick="downloadLearningReport('json')">Download .json</button>
+            </div>
+          </div>
+          <p class="mint text-xs mb-2" id="learning-report-stamp">Learning report: —</p>
+          <pre id="learning-report-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate Learning Report to build a package…</pre>
+        </div>
       </div>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
@@ -18360,6 +18385,241 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.copySystemDiagnosticsExport = copySystemDiagnosticsExport;
+
+    let __learningReportText = '';
+    let __learningReportCursorText = '';
+    let __learningReportJson = null;
+    let __learningReportBusy = false;
+
+    function learningReportWindowValue() {
+      const el = document.getElementById('learning-report-window');
+      const n = el ? Number(el.value) : 50;
+      return n === 100 ? 100 : 50;
+    }
+
+    async function copyTextToClipboard(text) {
+      const copyText = String(text || '');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(copyText);
+        return;
+      }
+      const ta = document.createElement('textarea');
+      ta.value = copyText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+
+    function learningReportStampBase(data, win) {
+      const ts =
+        data && data.generatedAt
+          ? new Date(data.generatedAt).toLocaleString()
+          : new Date().toLocaleString();
+      const mode = (data && data.mode) || '—';
+      const trades =
+        data && data.meta && data.meta.tradeCount != null
+          ? data.meta.tradeCount
+          : '—';
+      return (
+        'Learning report: ' +
+        ts +
+        ' · mode ' +
+        mode +
+        ' · window ' +
+        ((data && data.window) || win) +
+        ' · trades ' +
+        trades +
+        ' (read-only)'
+      );
+    }
+
+    async function generateLearningReport() {
+      const viewer = document.getElementById('learning-report-viewer');
+      const stamp = document.getElementById('learning-report-stamp');
+      const btn = document.getElementById('learning-report-generate');
+      if (__learningReportBusy) return;
+      __learningReportBusy = true;
+      if (btn) btn.disabled = true;
+      const win = learningReportWindowValue();
+      try {
+        if (viewer) viewer.textContent = 'Generating learning report…';
+        if (stamp) stamp.textContent = 'Learning report: generating…';
+        const data = await fetchJSON(
+          '/api/learning-report?window=' + encodeURIComponent(String(win))
+        );
+        if (!data || data.ok === false) {
+          throw new Error(
+            (data && data.error) || 'Learning report failed'
+          );
+        }
+        __learningReportText =
+          data && data.reportText ? String(data.reportText) : '';
+        __learningReportCursorText =
+          data && data.cursorPackageText
+            ? String(data.cursorPackageText)
+            : __learningReportText;
+        __learningReportJson =
+          data && data.reportJson ? data.reportJson : null;
+        if (viewer) {
+          viewer.textContent =
+            __learningReportText || 'Empty learning report.';
+        }
+        if (stamp) stamp.textContent = learningReportStampBase(data, win);
+      } catch (err) {
+        __learningReportText = '';
+        __learningReportCursorText = '';
+        __learningReportJson = null;
+        const msg = (err && err.message) || String(err);
+        if (viewer) {
+          viewer.textContent = 'Learning report failed: ' + msg;
+        }
+        if (stamp) stamp.textContent = 'Learning report: error — ' + msg;
+        try {
+          if (typeof showToast === 'function') {
+            showToast('Learning report failed: ' + msg, 'error');
+          }
+        } catch (_) {}
+      } finally {
+        __learningReportBusy = false;
+        if (btn) btn.disabled = false;
+      }
+    }
+    window.generateLearningReport = generateLearningReport;
+
+    async function copyLearningReport() {
+      const stamp = document.getElementById('learning-report-stamp');
+      try {
+        if (
+          !__learningReportText ||
+          /Click Generate|Generating|failed/i.test(__learningReportText)
+        ) {
+          await generateLearningReport();
+        }
+        const text = __learningReportText || '';
+        if (!text || /failed/i.test(text)) {
+          throw new Error('No report to copy');
+        }
+        await copyTextToClipboard(text);
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent =
+            prev.replace(/ \(copied[^)]*\)/g, '') + ' (copied)';
+        }
+      } catch (err) {
+        if (stamp) {
+          stamp.textContent =
+            'Copy failed: ' + ((err && err.message) || String(err));
+        }
+      }
+    }
+    window.copyLearningReport = copyLearningReport;
+
+    async function copyLearningReportCursorPackage() {
+      const stamp = document.getElementById('learning-report-stamp');
+      try {
+        if (
+          !__learningReportCursorText ||
+          !__learningReportText ||
+          /Click Generate|Generating|failed/i.test(__learningReportText)
+        ) {
+          await generateLearningReport();
+        }
+        const text = __learningReportCursorText || __learningReportText || '';
+        if (!text || /failed/i.test(text)) {
+          throw new Error('No Cursor package to copy');
+        }
+        await copyTextToClipboard(text);
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent =
+            prev.replace(/ \(copied[^)]*\)/g, '') +
+            ' (copied Cursor package)';
+        }
+      } catch (err) {
+        if (stamp) {
+          stamp.textContent =
+            'Copy Cursor package failed: ' +
+            ((err && err.message) || String(err));
+        }
+      }
+    }
+    window.copyLearningReportCursorPackage = copyLearningReportCursorPackage;
+
+    function downloadLearningReport(fmt) {
+      const stamp = document.getElementById('learning-report-stamp');
+      const kind = fmt === 'json' ? 'json' : 'md';
+      try {
+        let body = '';
+        let mime = 'text/markdown;charset=utf-8';
+        let ext = 'md';
+        if (kind === 'json') {
+          if (!__learningReportJson) {
+            throw new Error('Generate a report first');
+          }
+          body = JSON.stringify(__learningReportJson, null, 2);
+          mime = 'application/json;charset=utf-8';
+          ext = 'json';
+        } else {
+          if (
+            !__learningReportText ||
+            /Click Generate|Generating|failed/i.test(__learningReportText)
+          ) {
+            throw new Error('Generate a report first');
+          }
+          body = __learningReportText;
+        }
+        const win = learningReportWindowValue();
+        const d = new Date();
+        const pad = function (n) {
+          return String(n).padStart(2, '0');
+        };
+        const stampName =
+          d.getFullYear() +
+          pad(d.getMonth() + 1) +
+          pad(d.getDate()) +
+          '-' +
+          pad(d.getHours()) +
+          pad(d.getMinutes());
+        const filename =
+          'learning-report-' + stampName + '-w' + win + '.' + ext;
+        const blob = new Blob([body], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (_) {}
+        }, 1500);
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent =
+            prev.replace(/ \(downloaded[^)]*\)/g, '') +
+            ' (downloaded .' +
+            ext +
+            ')';
+        }
+      } catch (err) {
+        if (stamp) {
+          stamp.textContent =
+            'Download failed: ' + ((err && err.message) || String(err));
+        }
+        try {
+          if (typeof showToast === 'function') {
+            showToast(
+              'Download failed: ' + ((err && err.message) || String(err)),
+              'error'
+            );
+          }
+        } catch (_) {}
+      }
+    }
+    window.downloadLearningReport = downloadLearningReport;
 
     function renderScalperTrendChart() {
       const canvas = document.getElementById('chart-scalper-trend');

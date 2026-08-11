@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.272',
+    title: 'Learning Report on Stats → Export Data',
+    sections: ['learning', 'overview', 'knobs'],
+    items: [
+      'Stats → Export Data: Generate Learning Report (last 50/100) with summary, per-profile table, trade sample, diagnostics, and learning config snapshot.',
+      'Copy report, Copy Cursor package (fixed evaluation preamble), Download .md / .json — read-only; existing system diagnostics export unchanged.',
+    ],
+  },
+  {
     version: '1.2.271',
     title: 'Stats → RPC consolidates health + endpoint table',
     sections: ['overview', 'execution', 'knobs'],
