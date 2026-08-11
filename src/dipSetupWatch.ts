@@ -78,6 +78,8 @@ export interface DipWatchEntry {
   multiTfSupportHits?: number;
   /** Soft-movement arm (1.2.268) — size haircut + session cap */
   softMovement?: boolean;
+  /** Pump.fun preferred in Medium/Majors inventory / UI */
+  isPumpFun?: boolean;
 }
 
 /**
@@ -404,8 +406,17 @@ function qualityWatchScore(w: DipWatchEntry): number {
       ? -50_000
       : Math.abs(Number(w.priceChangeH1Pct) || 0) * 80 +
         Math.abs(Number(w.priceChange24hPct) || 0) * 40;
-  // Primary: armed/near → H1 vol + movement; soft age + MC proxy; dead tape last
-  return armedBoost + nearBoost + vol + ageDays * 50 + liqProxy * 20 + movBoost;
+  const pumpBoost = w.isPumpFun === true ? 8_000 : 0;
+  // Primary: armed/near → H1 vol + movement; pump preferred; soft age + MC; dead tape last
+  return (
+    armedBoost +
+    nearBoost +
+    vol +
+    ageDays * 50 +
+    liqProxy * 20 +
+    movBoost +
+    pumpBoost
+  );
 }
 
 /**
@@ -1322,6 +1333,7 @@ export function considerDipWatchSetup(input: {
   preferredProfileId?: string;
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
+  isPumpFun?: boolean;
 }): DipWatchEntry | null {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
@@ -1578,6 +1590,18 @@ export function considerDipWatchSetup(input: {
           input.pairCreatedAtMs > 0
         ? Math.max(0, (now - Number(input.pairCreatedAtMs)) / 3_600_000)
         : undefined;
+  let isPumpFun = input.isPumpFun === true;
+  if (!isPumpFun) {
+    try {
+      const { isPumpFunMintSuffix } =
+        require('./deadTokenFilters') as typeof import('./deadTokenFilters');
+      isPumpFun = isPumpFunMintSuffix(input.mint);
+    } catch {
+      isPumpFun = String(input.mint || '')
+        .toLowerCase()
+        .endsWith('pump');
+    }
+  }
   const entry: DipWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
@@ -1613,6 +1637,7 @@ export function considerDipWatchSetup(input: {
         ? Number(input.pairCreatedAtMs)
         : undefined,
     tokenAgeHours: ageHours,
+    isPumpFun: isQuality ? isPumpFun : undefined,
     lastReason: armed
       ? dropStarted
         ? 'near Fib/S + dip'
@@ -2291,6 +2316,7 @@ export function offerDipWatchFromCandidate(c: {
   majorsBand?: string;
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
+  isPumpFun?: boolean;
 }): void {
   if (
     c.preferredProfileId &&
@@ -2334,6 +2360,7 @@ export function offerDipWatchFromCandidate(c: {
     preferredProfileId: c.preferredProfileId,
     pairCreatedAtMs: c.pairCreatedAtMs,
     tokenAgeHours: c.tokenAgeHours,
+    isPumpFun: c.isPumpFun,
   });
   if (entry && (src === 'medium' || src === 'majors')) {
     if (c.priceChangeH1Pct != null) entry.priceChangeH1Pct = c.priceChangeH1Pct;
@@ -2341,5 +2368,6 @@ export function offerDipWatchFromCandidate(c: {
     if (c.priceChange24hPct != null) {
       entry.priceChange24hPct = c.priceChange24hPct;
     }
+    if (c.isPumpFun === true) entry.isPumpFun = true;
   }
 }

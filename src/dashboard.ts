@@ -8646,7 +8646,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer · Steady Compounder</span>
               <span class="setup-watch-title">Dip/Steady setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $20–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤25 · majors ≤25. No-levels rotate ~80m (4×20m; skip MC≥$500M). Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $20–200M + Majors ≥$200M prefer Steady. Pump.fun prioritized on Medium/Majors (~55% seats); non-pump secondary. Caps: minors ≤16 · medium ≤80 · majors ≤50. Vol/movement filters + dead-tape / no-levels rotate. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
               <div class="setup-watch-tabs" role="tablist" aria-label="Dip/Steady watch source">
                 <button type="button" role="tab" class="closed-filter-btn is-active" id="dip-watch-tab-minors" data-dip-watch-tab="minors" aria-selected="true" title="Memecoin / scanner dip watches">Minors <span class="setup-watch-tab-count" id="dip-watch-tab-minors-count">0</span></button>
@@ -13886,6 +13886,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '<span class="setup-watch-chip is-rotating">rotating out</span>'
             );
           }
+          const isPumpRow =
+            e.isPumpFun === true ||
+            String(e.mint || '')
+              .toLowerCase()
+              .endsWith('pump');
+          if (isPumpRow) {
+            chipBits.push(
+              '<span class="setup-watch-chip" title="Pump.fun token">pump</span>'
+            );
+          }
           if (chipBits.length) {
             qualityChips =
               '<span class="setup-watch-chips">' + chipBits.join('') + '</span>';
@@ -14038,6 +14048,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               var ra = rank(a);
               var rb = rank(b);
               if (ra !== rb) return ra - rb;
+              // Medium/Majors: Pump.fun before non-pump at equal quality rank
+              if (tab === 'majors' || tab === 'medium') {
+                function isPumpRow(e) {
+                  if (e.isPumpFun === true) return true;
+                  var m = String(e.mint || '').toLowerCase();
+                  return m.endsWith('pump');
+                }
+                var pa = isPumpRow(a) ? 1 : 0;
+                var pb = isPumpRow(b) ? 1 : 0;
+                if (pb !== pa) return pb - pa;
+              }
               var va = Number(a.volumeH1Usd) || 0;
               var vb = Number(b.volumeH1Usd) || 0;
               if (vb !== va) return vb - va;

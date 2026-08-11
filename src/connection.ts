@@ -2109,6 +2109,28 @@ export function startRpcHealthMonitor(): void {
         await new Promise((r) => setTimeout(r, gateSnap.stressed ? 400 : 250));
       }
       await maybeSwitchEndpoints();
+      // Feed latency / queue into adaptive scanner/utility shed (Critical untouched).
+      try {
+        const { updateRpcLoadSignals } =
+          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+        const pState = endpoints[preferredPrimary];
+        const sState = endpoints[preferredSecondary];
+        const uState = endpoints[activeUtility];
+        const gate = getRpcGateSnapshot();
+        updateRpcLoadSignals({
+          primaryLatencyMs: pState?.latencyMs ?? null,
+          secondaryLatencyMs: sState?.latencyMs ?? null,
+          utilityLatencyMs: uState?.latencyMs ?? null,
+          utilityWeakPublic: isWeakPublicUtilityUrl(uState?.endpoint.url),
+          utilityFailover: activeUtility !== preferredUtility,
+          primaryQueued: gate.lanes.primary.queued,
+          secondaryIdle:
+            gate.lanes.secondary.inFlight === 0 &&
+            gate.lanes.secondary.queued === 0,
+        });
+      } catch {
+        /* optional */
+      }
     })();
   }, interval);
 

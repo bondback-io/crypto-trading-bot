@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.299',
+    title: 'Pump.fun Medium/Majors priority + RPC load signals',
+    sections: ['scanners', 'overview', 'execution'],
+    items: [
+      'Medium/Majors Dip/Steady: admit Pump.fun (prefer ~55% CYCLE seats); non-pump secondary. Age floors 7d pump / 30d organic; vol/movement filters + dead-tape rotation unchanged.',
+      'Dashboard Medium/Majors tabs sort Pump first among equals and show a pump chip; inventory score boosts Pump so cold organic rotates out first.',
+      'RPC health monitor feeds latency/queue into adaptive scanner/utility shed (updateRpcLoadSignals). Set HELIUS_API_KEY + ALCHEMY_API_KEY with Share load ON to clear public-RPC congestion.',
+    ],
+  },
+  {
     version: '1.2.298',
     title: 'Fix post-deploy Helius ramp + dashboard lag',
     sections: ['overview', 'execution'],

@@ -1,7 +1,8 @@
 /**
- * Mid-MC + high-MC discovery — Jupiter multi-category merge without pump filter.
+ * Mid-MC + high-MC discovery — Jupiter multi-category merge.
  * Medium $20M–$200M + Majors ≥$200M → Dip/Steady watch (prefer Steady quality reclaim).
- * Never Scalper Mode B. Additive: launch/pump scanner for Scalper-family stays unchanged.
+ * Pump.fun preferred in CYCLE seats (~55%); non-pump secondary. Never Scalper Mode B.
+ * Additive: launch/pump scanner for Scalper-family stays unchanged.
  */
 
 import { config } from './config';
@@ -58,6 +59,8 @@ export interface MajorsCandidate {
   /** Movement rank score (1.2.263) */
   movementScore?: number;
   movementActive?: boolean;
+  /** Pump.fun mint suffix or Jupiter pump/launchpad heuristics */
+  isPumpFun?: boolean;
 }
 
 /** Medium floor (Steady quality band) */
@@ -76,6 +79,8 @@ export const MAJORS_MIN_VOL_H1_USD = 20_000;
 export const MEDIUM_MAJORS_MIN_VOL_H1_USD = MAJORS_MIN_VOL_H1_USD;
 /** Hard min age for Medium/Majors watch list — 30 days (1.2.261; was 60d) */
 export const MEDIUM_MAJORS_MIN_AGE_HOURS = 30 * 24;
+/** Pump.fun quality parks — shorter floor so graduated names can enter Medium/Majors */
+export const PUMP_QUALITY_MIN_AGE_HOURS = 7 * 24;
 /** Soft prefer ranking bonus ≥ 90 days */
 export const MEDIUM_MAJORS_PREFER_AGE_HOURS = 90 * 24;
 const FETCH_LIMIT = 100;
@@ -88,6 +93,8 @@ const NO_LEVELS_STREAK_TICK_MS = 20 * 60_000;
 export const NO_LEVELS_SKIP_ROTATE_MC_USD = 500_000_000;
 /** Reserve ~40% of CYCLE seats for mid-MC bands (20m/50m/100m) */
 const MID_BAND_SEAT_FRAC = 0.4;
+/** Reserve ~55% of CYCLE seats for Pump.fun; fill remainder with non-pump */
+const PUMP_SEAT_FRAC = 0.55;
 /** Separate caps — majors selective so they do not crowd medium (1.2.292) */
 const CYCLE_CAP_MEDIUM = 80;
 const CYCLE_CAP_MAJORS = 45;
@@ -109,7 +116,7 @@ const DISCOVERY_FEEDS: Array<{
 type RejectKey =
   | 'denied'
   | 'mc'
-  | 'pump'
+  | 'pump_young'
   | 'age_unknown'
   | 'age'
   | 'liq'
@@ -122,7 +129,7 @@ type RejectKey =
 const rejectCounters: Record<RejectKey, number> = {
   denied: 0,
   mc: 0,
-  pump: 0,
+  pump_young: 0,
   age_unknown: 0,
   age: 0,
   liq: 0,
@@ -132,6 +139,9 @@ const rejectCounters: Record<RejectKey, number> = {
   excluded_stock_name_token: 0,
   other: 0,
 };
+
+let lastPumpAdmitted = 0;
+let lastOrganicAdmitted = 0;
 
 function resetRejectCounters(): void {
   for (const k of Object.keys(rejectCounters) as RejectKey[]) {
@@ -260,20 +270,22 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     return null;
   }
 
-  // Hard reject pump.fun / launchpad for quality parks (Steady is organic majors)
-  if (isPumpFunMintSuffix(mint) || isJupiterPumpFunToken(token)) {
-    noteReject('pump');
-    console.log(`${logPfx} reject pump ${sym} MC=$${Math.round(mc)}`);
-    return null;
-  }
+  // Pump.fun preferred (not rejected) — shorter age floor than organic majors
+  const isPumpFun =
+    isPumpFunMintSuffix(mint) || isJupiterPumpFunToken(token);
 
-  // Age: fail-open when unknown (rank lower). Hard floor 30d when known.
+  // Age: fail-open when unknown (rank lower). Pump ≥7d; organic ≥30d when known.
   const age = resolveJupiterTokenAgeHours(token);
-  if (age && age.ageHours < MEDIUM_MAJORS_MIN_AGE_HOURS) {
-    noteReject('age');
+  const minAgeHours = isPumpFun
+    ? PUMP_QUALITY_MIN_AGE_HOURS
+    : MEDIUM_MAJORS_MIN_AGE_HOURS;
+  if (age && age.ageHours < minAgeHours) {
+    noteReject(isPumpFun ? 'pump_young' : 'age');
     console.log(
-      `${logPfx} reject too_young ${sym} ageDays=${(age.ageHours / 24).toFixed(1)} ` +
-        `MC=$${Math.round(mc)}`
+      `${logPfx} reject too_young ${sym}` +
+        (isPumpFun ? ' pump' : '') +
+        ` ageDays=${(age.ageHours / 24).toFixed(1)} ` +
+        `minDays=${(minAgeHours / 24).toFixed(0)} MC=$${Math.round(mc)}`
     );
     return null;
   }
@@ -378,6 +390,7 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     tokenAgeHours: age?.ageHours,
     movementScore,
     movementActive,
+    isPumpFun,
     reasons: [
       `${wb}:${band}`,
       `circMC:$${Math.round(circ)}`,
@@ -385,6 +398,7 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
       age
         ? `ageDays:${(age.ageHours / 24).toFixed(0)}`
         : 'age:unknown',
+      ...(isPumpFun ? ['pump'] : ['organic']),
       ...(preferAged ? ['age≥90d'] : []),
       ...(movementActive ? ['active'] : ['low_movement']),
     ],
@@ -434,22 +448,26 @@ export async function refreshMajorsUniverse(
       if (c) list.push(c);
     }
     list.sort((a, b) => b.marketCapUsd - a.marketCapUsd);
-    const medium = pickCycleWithMidSeats(
+    const medium = pickCycleWithMidAndPumpSeats(
       list.filter((c) => c.watchBand === 'medium'),
       CYCLE_CAP_MEDIUM
     );
-    const majors = sortPreferNearLevels(
-      list.filter((c) => c.watchBand === 'majors')
-    ).slice(0, CYCLE_CAP_MAJORS);
+    const majors = pickCyclePreferPump(
+      list.filter((c) => c.watchBand === 'majors'),
+      CYCLE_CAP_MAJORS
+    );
     const capped = [...medium, ...majors].sort(
       (a, b) => b.marketCapUsd - a.marketCapUsd
     );
+    lastPumpAdmitted = capped.filter((c) => c.isPumpFun).length;
+    lastOrganicAdmitted = capped.length - lastPumpAdmitted;
     cache = { at: Date.now(), list: capped };
     lastError = null;
     console.log(
       `[majors] refresh merged=${lastRawMerged} passed=${list.length} ` +
         `cycle=${capped.length} (med=${medium.length} maj=${majors.length}) ` +
-        `reject pump=${rejectCounters.pump} age=${rejectCounters.age} ` +
+        `pump=${lastPumpAdmitted} organic=${lastOrganicAdmitted} ` +
+        `reject pumpYoung=${rejectCounters.pump_young} age=${rejectCounters.age} ` +
         `ageUnk=${rejectCounters.age_unknown} liq=${rejectCounters.liq} ` +
         `vol=${rejectCounters.vol} lowMov=${rejectCounters.low_movement} ` +
         `exclProxy=${rejectCounters.excluded_stable_or_major_asset_proxy} ` +
@@ -479,6 +497,7 @@ export function getMajorsUniverseStatus(): {
     mc: number;
     band: MajorsMcBand;
     watchBand: UniverseWatchBand;
+    isPumpFun?: boolean;
   }>;
 } {
   const list = cache?.list ?? [];
@@ -514,6 +533,7 @@ export function getMajorsUniverseStatus(): {
       mc: c.marketCapUsd,
       band: c.band,
       watchBand: c.watchBand,
+      isPumpFun: c.isPumpFun === true,
     })),
   };
 }
@@ -558,6 +578,7 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     mov: Number(c.movementScore) || 0,
     active: c.movementActive === false ? 0 : 1,
     vol: Number(c.volumeH1Usd) || 0,
+    pump: c.isPumpFun ? 1 : 0,
     absH1: Math.abs(Number(c.priceChangeH1Pct) || 0),
     abs24: Math.abs(Number(c.priceChange24hPct) || 0),
     aged:
@@ -572,6 +593,7 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     if (b.near !== a.near) return b.near - a.near;
     if (b.mov !== a.mov) return b.mov - a.mov;
     if (b.vol !== a.vol) return b.vol - a.vol;
+    if (b.pump !== a.pump) return b.pump - a.pump;
     if (b.absH1 !== a.absH1) return b.absH1 - a.absH1;
     if (b.abs24 !== a.abs24) return b.abs24 - a.abs24;
     if (b.aged !== a.aged) return b.aged - a.aged;
@@ -579,6 +601,37 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     return b.c.marketCapUsd - a.c.marketCapUsd;
   });
   return scored.map((x) => x.c);
+}
+
+/**
+ * Prefer Pump.fun for ~55% of CYCLE seats; fill remainder with non-pump secondary.
+ */
+function pickCyclePreferPump(
+  candidates: MajorsCandidate[],
+  cap: number
+): MajorsCandidate[] {
+  if (cap <= 0 || !candidates.length) return [];
+  const pumpReserve = Math.max(1, Math.floor(cap * PUMP_SEAT_FRAC));
+  const pumps = sortPreferNearLevels(
+    candidates.filter((c) => c.isPumpFun)
+  );
+  const organic = sortPreferNearLevels(
+    candidates.filter((c) => !c.isPumpFun)
+  );
+  const picked: MajorsCandidate[] = [];
+  const used = new Set<string>();
+  for (const c of pumps) {
+    if (picked.length >= pumpReserve) break;
+    picked.push(c);
+    used.add(c.mint);
+  }
+  for (const c of [...organic, ...pumps]) {
+    if (picked.length >= cap) break;
+    if (used.has(c.mint)) continue;
+    picked.push(c);
+    used.add(c.mint);
+  }
+  return picked;
 }
 
 /**
@@ -613,6 +666,70 @@ function pickCycleWithMidSeats(
     if (used.has(c.mint)) continue;
     picked.push(c);
     used.add(c.mint);
+  }
+  return picked;
+}
+
+/**
+ * Medium CYCLE: mid-band seat reserve, then Pump.fun ~55% preference on that pool.
+ * Expands from the full medium list so Pump mid-band names are not starved by MC sort.
+ */
+function pickCycleWithMidAndPumpSeats(
+  candidates: MajorsCandidate[],
+  cap: number
+): MajorsCandidate[] {
+  if (cap <= 0 || !candidates.length) return [];
+  const midReserve = Math.max(1, Math.floor(cap * MID_BAND_SEAT_FRAC));
+  const pumpReserve = Math.max(1, Math.floor(cap * PUMP_SEAT_FRAC));
+  const isMid = (c: MajorsCandidate) =>
+    c.band === '20m' || c.band === '50m' || c.band === '100m';
+
+  const pumps = sortPreferNearLevels(
+    candidates.filter((c) => c.isPumpFun)
+  );
+  const organic = sortPreferNearLevels(
+    candidates.filter((c) => !c.isPumpFun)
+  );
+  const midAll = sortPreferNearLevels(candidates.filter(isMid));
+
+  const picked: MajorsCandidate[] = [];
+  const used = new Set<string>();
+  const take = (list: MajorsCandidate[], limit: number) => {
+    for (const c of list) {
+      if (picked.length >= limit) return;
+      if (used.has(c.mint)) continue;
+      picked.push(c);
+      used.add(c.mint);
+    }
+  };
+
+  // Pump seats first (mid-band pumps preferred inside sortPreferNearLevels via band later)
+  take(
+    sortPreferNearLevels(pumps.filter(isMid)),
+    pumpReserve
+  );
+  take(pumps, pumpReserve);
+
+  // Ensure mid-band representation
+  for (const c of midAll) {
+    if (picked.filter(isMid).length >= midReserve) break;
+    if (picked.length >= cap) break;
+    if (used.has(c.mint)) continue;
+    picked.push(c);
+    used.add(c.mint);
+  }
+
+  // Fill remainder: organic secondary, then leftover pumps
+  take([...organic, ...pumps], cap);
+
+  // If still short (sparse pump universe), fall back to classic mid pick
+  if (picked.length < Math.min(cap, candidates.length)) {
+    for (const c of pickCycleWithMidSeats(candidates, cap)) {
+      if (picked.length >= cap) break;
+      if (used.has(c.mint)) continue;
+      picked.push(c);
+      used.add(c.mint);
+    }
   }
   return picked;
 }
@@ -708,6 +825,7 @@ export async function runMajorsUniversePass(): Promise<number> {
         majorsBand: c.band,
         pairCreatedAtMs: c.pairCreatedAtMs,
         tokenAgeHours: c.tokenAgeHours,
+        isPumpFun: c.isPumpFun === true,
       });
       offered += 1;
     }
