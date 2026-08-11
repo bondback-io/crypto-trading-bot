@@ -348,7 +348,7 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
   }
   const stressed =
     out.utility.queued > 0 ||
-    out.utility.skipped > 0 ||
+    out.utility.inFlight >= Math.max(1, out.utility.maxConcurrent) ||
     out.secondary.queued > 2 ||
     out.primary.hitConcurrency > 0 ||
     out.primary.queued > 0;
@@ -408,10 +408,13 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
       reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
     };
   }
-  if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
+  if (
+    kind === 'utility' &&
+    (u.queued >= 2 || u.inFlight >= u.maxConcurrent)
+  ) {
     return {
       defer: true,
-      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued}, skipped ${u.skipped})`,
+      reason: `Utility lane saturated (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued})`,
     };
   }
   return { defer: false, reason: null };

@@ -170,6 +170,11 @@ async function main(): Promise<void> {
 
   // Never let async RPC/WS work take down the process (Render → 502 crash loop).
   process.on('unhandledRejection', (reason) => {
+    const msg = String(reason);
+    if (/EPIPE|ECONNRESET/i.test(msg)) {
+      console.warn('[boot] Ignored pipe rejection:', msg.slice(0, 120));
+      return;
+    }
     console.error('[boot] Unhandled rejection (kept alive):', reason);
     try {
       const { pushDashboardNotification } =
@@ -177,13 +182,18 @@ async function main(): Promise<void> {
       pushDashboardNotification({
         kind: 'error',
         title: 'Unhandled rejection',
-        body: String(reason).slice(0, 200),
+        body: msg.slice(0, 200),
       });
     } catch {
       /* optional */
     }
   });
   process.on('uncaughtException', (err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/EPIPE|ECONNRESET/i.test(msg)) {
+      console.warn('[boot] Ignored pipe exception:', msg.slice(0, 120));
+      return;
+    }
     console.error('[boot] Uncaught exception (kept alive):', err);
     try {
       const { pushDashboardNotification } =
@@ -191,7 +201,7 @@ async function main(): Promise<void> {
       pushDashboardNotification({
         kind: 'error',
         title: 'System error',
-        body: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+        body: msg.slice(0, 200),
       });
     } catch {
       /* optional */

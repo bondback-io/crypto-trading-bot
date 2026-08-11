@@ -714,7 +714,11 @@ export function isWeakPublicUtilityUrl(url: string | null | undefined): boolean 
  */
 export function isUtilityOnWeakPublic(): boolean {
   ensureEndpoints();
-  const idx = resolveIndexForRole('utility');
+  // Observational only — do not resolve/failover from status/soft-watch checks.
+  const idx =
+    activeUtility >= 0 && activeUtility < endpoints.length
+      ? activeUtility
+      : preferredUtility;
   const state = endpoints[idx];
   if (!state) return true;
   return isWeakPublicUtilityUrl(state.endpoint.url);
@@ -1379,9 +1383,9 @@ function resolveIndexForRole(role: RpcRole): number {
       setActiveForRole(role, preferredQuicknode);
       return preferredQuicknode;
     }
-    // Share ON: do NOT dump Utility soft-watch onto Helius/Alchemy — stay sticky
-    // on preferred (even slow) rather than choking Critical/Scanners.
-    if (shareLoad) {
+    // Share ON: stay sticky on preferred only while it is still usable.
+    // Dead/quarantined publicnode must not pin Favourites forever.
+    if (shareLoad && isEndpointUsable(pref)) {
       setActiveForRole(role, preferred);
       return preferred;
     }
@@ -1478,8 +1482,9 @@ function resolveIndexForRole(role: RpcRole): number {
   }
 
   // Last resort: any healthy endpoint (even public for critical)
-  // Share+Utility: prefer stay on preferred over dumping onto paid Critical/Scanners.
-  if (shareLoad && role === 'utility') {
+  // Share+Utility: stay on preferred only when it is still usable — otherwise
+  // allow any healthy host so Favourites are not pinned to a dead publicnode.
+  if (shareLoad && role === 'utility' && isEndpointUsable(endpoints[preferred])) {
     setActiveForRole(role, preferred);
     return preferred;
   }
@@ -2248,22 +2253,9 @@ export function getRpcStats(): {
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null = null;
   try {
-    const {
-      updateRpcLoadSignals,
-      getRpcLoadControlSnapshot,
-    } = require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-    updateRpcLoadSignals({
-      primaryLatencyMs: pActive?.latencyMs ?? null,
-      secondaryLatencyMs: sActive?.latencyMs ?? null,
-      utilityLatencyMs: uActive?.latencyMs ?? null,
-      utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
-      utilityFailover: uIdx !== preferredUtility,
-      primaryQueued: gate.lanes.primary.queued,
-      secondaryIdle:
-        gate.lanes.secondary.inFlight === 0 &&
-        gate.lanes.secondary.queued === 0,
-      // Do NOT pass lifetime gate.skipped — it never resets and locked adaptive ×3.
-    });
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    // Observational only — do NOT mutate adaptive load from /api/status polls.
     loadControl = getRpcLoadControlSnapshot();
     if (
       !warning &&
@@ -2826,6 +2818,27 @@ export function startRpcHealthMonitor(): void {
         await new Promise((r) => setTimeout(r, gateSnap.stressed ? 400 : 250));
       }
       await maybeSwitchEndpoints();
+      try {
+        const { updateRpcLoadSignals } =
+          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+        const gateAfter = getRpcGateSnapshot();
+        const p = endpoints[activePrimary];
+        const s = endpoints[activeSecondary];
+        const u = endpoints[activeUtility];
+        updateRpcLoadSignals({
+          primaryLatencyMs: p?.latencyMs ?? null,
+          secondaryLatencyMs: s?.latencyMs ?? null,
+          utilityLatencyMs: u?.latencyMs ?? null,
+          utilityWeakPublic: isWeakPublicUtilityUrl(u?.endpoint.url),
+          utilityFailover: activeUtility !== preferredUtility,
+          primaryQueued: gateAfter.lanes.primary.queued,
+          secondaryIdle:
+            gateAfter.lanes.secondary.inFlight === 0 &&
+            gateAfter.lanes.secondary.queued === 0,
+        });
+      } catch {
+        /* */
+      }
     })();
   }, interval);
 

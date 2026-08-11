@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.283',
+    title: 'Unstick Favourites polls + stop status-driven RPC thrash',
+    sections: ['overview', 'copy', 'execution'],
+    items: [
+      'Utility gate no longer treats lifetime skipped as permanent stress — Favourites/soft-watch polls resume after early boot skips.',
+      'Share+Utility no longer pins dead publicnode forever; /api/status stops mutating adaptive load (health tick owns it).',
+      'Ignore EPIPE/ECONNRESET in process handlers so broken-pipe write storms cannot flood notifications and stall the event loop.',
+    ],
+  },
+  {
     version: '1.2.282',
     title: 'Safe dual Helius/Alchemy pools + latency thrash guards',
     sections: ['overview', 'execution', 'knobs'],
