@@ -22488,6 +22488,70 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    function paintClosedFromCache(openList) {
+      window._closedTradeGroups = buildClosedTradeGroups(
+        window._lastClosedPositions || [],
+        openList || window._lastOpenPositions || []
+      );
+      // Keep full ring for Profitable/Losing + timeframe filters (no newest-40 cut).
+      paintClosedTradesTables();
+    }
+
+    /**
+     * Fast /api/positions?fast=1 returns closed:[] (payload size). Never wipe the
+     * Closed Trades table from that empty array — only replace when we have a
+     * real closed list, or closedTotal === 0 (genuinely none).
+     */
+    function ingestClosedPositionsPayload(positions) {
+      const closed = positions && Array.isArray(positions.closed) ? positions.closed : null;
+      const closedTotal =
+        positions && typeof positions.closedTotal === 'number' ? positions.closedTotal : null;
+
+      if (closed && closed.length > 0) {
+        window._lastClosedPositions = closed;
+        window._lastClosedTotal = closedTotal != null ? closedTotal : closed.length;
+        return { updated: true, needFull: false };
+      }
+
+      if (closedTotal === 0) {
+        window._lastClosedPositions = [];
+        window._lastClosedTotal = 0;
+        return { updated: true, needFull: false };
+      }
+
+      // Omitted / empty closed on fast (or stale) — keep cache; fetch full if empty or total drifted.
+      const cached = window._lastClosedPositions || [];
+      const cachedTotal = window._lastClosedTotal || 0;
+      const needFull =
+        !cached.length ||
+        (closedTotal != null && closedTotal !== cachedTotal);
+      return { updated: false, needFull };
+    }
+
+    async function refreshClosedPositions(opts) {
+      const force = opts && opts.force === true;
+      if (window._closedRefreshInFlight) return;
+      const now = Date.now();
+      if (!force && now - (window._closedRefreshAt || 0) < 12000) return;
+      window._closedRefreshInFlight = true;
+      try {
+        const posData = await fetchJSON('/api/positions');
+        window._closedRefreshAt = Date.now();
+        if (!posData || !Array.isArray(posData.closed)) return;
+        window._lastClosedPositions = posData.closed;
+        window._lastClosedTotal =
+          typeof posData.closedTotal === 'number'
+            ? posData.closedTotal
+            : posData.closed.length;
+        paintClosedFromCache(window._lastOpenPositions);
+      } catch (_) {
+        /* keep prior closed cache */
+      } finally {
+        window._closedRefreshInFlight = false;
+      }
+    }
+    window.refreshClosedPositions = refreshClosedPositions;
+
     async function refreshOpenPositionsFast(opts) {
       const fromFill = opts && opts.fromFill === true;
       const genAtStart = window._openPositionsGen || 0;
@@ -22496,13 +22560,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (!fromFill && (window._openPositionsGen || 0) !== genAtStart) {
           return; // a fill paint won while we were fetching
         }
+        const closedIngest = ingestClosedPositionsPayload(posData);
         applyOpenPositionsList((posData && posData.open) || [], {
           fromFill: fromFill,
-          // Fast endpoint omits closed — keep prior closed for sound hydration only
-          closed: (posData && posData.closed && posData.closed.length)
-            ? posData.closed
-            : [],
+          // Fast endpoint omits closed — use cached closed for sound hydration
+          closed: window._lastClosedPositions || [],
         });
+        if (closedIngest.needFull) {
+          const total =
+            posData && typeof posData.closedTotal === 'number'
+              ? posData.closedTotal
+              : null;
+          void refreshClosedPositions({
+            force:
+              !(window._lastClosedPositions || []).length ||
+              (total != null && total !== (window._lastClosedTotal || 0)),
+          });
+        }
       } catch (_) {}
     }
     window.refreshOpenPositionsFast = refreshOpenPositionsFast;
@@ -25943,7 +26017,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         } else {
           setLastDashboardResetAt(Date.now());
         }
+        window._lastClosedPositions = [];
+        window._lastClosedTotal = 0;
         await refresh();
+        void refreshClosedPositions({ force: true });
         const bal = data.balance != null ? Number(data.balance).toFixed(4) : '—';
         alert('Dashboard reset · balance ' + bal + ' SOL');
       } catch (err) {
@@ -25961,6 +26038,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           body: '{}',
         });
         refresh();
+        void refreshClosedPositions({ force: true });
       } catch (err) {
         alert('Force sell failed: ' + (err.message || err));
       }
@@ -25993,6 +26071,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           alert('Some sells failed (' + errors.length + '/' + open.length + '):\\n' + errors.slice(0, 8).join('\\n'));
         }
         refresh();
+        void refreshClosedPositions({ force: true });
       } catch (err) {
         alert('Sell all failed: ' + (err.message || err));
       }
@@ -27633,12 +27712,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       paintOpenPositionsTables();
       if (typeof renderZionOpenTrades === 'function') renderZionOpenTrades();
 
-      window._closedTradeGroups = buildClosedTradeGroups(
-        (positions && Array.isArray(positions.closed) ? positions.closed : []) || [],
+      const closedIngest = ingestClosedPositionsPayload(positions);
+      paintClosedFromCache(
         window._lastOpenPositions || (positions && positions.open) || []
       );
-      // Keep full ring for Profitable/Losing + timeframe filters (no newest-40 cut).
-      paintClosedTradesTables();
+      if (closedIngest.needFull) {
+        const total =
+          positions && typeof positions.closedTotal === 'number'
+            ? positions.closedTotal
+            : null;
+        void refreshClosedPositions({
+          force:
+            !(window._lastClosedPositions || []).length ||
+            (total != null && total !== (window._lastClosedTotal || 0)),
+        });
+      }
 
       const rb = positions.rebuy || {};
       const rbStatus = rb.status || status.monitor?.rebuy || {};
@@ -34219,6 +34307,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           btn.classList.remove('is-error');
           btn.setAttribute('aria-label', 'Voice input off — click to speak');
           btn.title = 'Voice input (off)';
+        } else if (
+          isZionVoiceMobileClient() &&
+          !_zionVoiceMediaStream &&
+          _zionVoiceFailCount > 0
+        ) {
+          btn.classList.remove('is-error');
+          btn.setAttribute('aria-label', 'Allow microphone permission');
+          btn.title = 'Allow microphone…';
         } else if (_zionVoiceMode === 'wake-idle') {
           btn.classList.remove('is-error');
           btn.setAttribute('aria-label', 'Wake idle — say Zion or tap mic');
@@ -34517,6 +34613,34 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return;
         }
         if (err === 'not-allowed' || err === 'service-not-allowed') {
+          // Mobile race: SR often fires not-allowed while the OS permission
+          // sheet / getUserMedia prime is still in flight. Keep green armed and
+          // soft-retry until the stream exists or we hit max fails.
+          const mobilePending =
+            mobile &&
+            _zionVoiceOn &&
+            !_zionVoiceMediaStream;
+          if (mobilePending) {
+            _zionVoiceFailCount += 1;
+            try {
+              const hintBtn =
+                document.getElementById('zion-agent-mic') ||
+                document.getElementById('zion-agent-widget-mic');
+              if (hintBtn) hintBtn.title = 'Allow microphone…';
+            } catch (_) {}
+            try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
+            if (_zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
+              failZionVoiceSoft('Microphone permission denied');
+              return;
+            }
+            if (!_zionChatBusy && !_zionVoicePausedBusy) {
+              scheduleZionVoiceRestart(
+                ZION_VOICE_RESTART_BASE_MS * _zionVoiceFailCount
+              );
+            }
+            try { syncZionMicUi(); } catch (_) {}
+            return;
+          }
           failZionVoiceSoft('Microphone permission denied');
           return;
         }
@@ -34763,18 +34887,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           },
           { passive: true }
         );
-        // Click fallback for browsers that skip pointerup (some WebViews / iOS quirks).
-        btn.addEventListener(
-          'click',
-          function (ev) {
-            if (Date.now() - _zionVoiceLastPtrToggleAt < 500) {
+        // Desktop: click fallback. Mobile: pointerup only — a delayed click
+        // after pointerup was toggling the mic OFF and wiping the green arm.
+        if (!isZionVoiceMobileClient()) {
+          btn.addEventListener(
+            'click',
+            function (ev) {
+              if (Date.now() - _zionVoiceLastPtrToggleAt < 500) {
+                try { ev.preventDefault(); } catch (_) {}
+                return;
+              }
+              fireMicToggle(ev);
+            },
+            { passive: false }
+          );
+        } else {
+          btn.addEventListener(
+            'click',
+            function (ev) {
+              // Swallow synthetic click after pointerup; never toggle again.
               try { ev.preventDefault(); } catch (_) {}
-              return;
-            }
-            fireMicToggle(ev);
-          },
-          { passive: false }
-        );
+              try { ev.stopPropagation(); } catch (_) {}
+            },
+            { passive: false }
+          );
+        }
         // Keyboard / accessibility fallback
         btn.addEventListener('keydown', function (ev) {
           if (ev.key !== 'Enter' && ev.key !== ' ') return;
@@ -37186,6 +37323,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
     setInterval(refresh, 5000);
+    // Closed list is omitted from fast polls — refresh the full closed slice periodically.
+    void refreshClosedPositions({ force: true });
+    setInterval(function () {
+      try {
+        if (document.hidden) return;
+        void refreshClosedPositions({ force: false });
+      } catch (_) {}
+    }, 20000);
     // Lightweight open-positions poll so fight-log / wallet fills appear quickly
     // without waiting for the full 5s dashboard refresh.
     setInterval(function () {

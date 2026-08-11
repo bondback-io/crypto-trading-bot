@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.290',
+    title: 'Fix Closed Trades empty list + Zion mobile mic',
+    sections: ['overview', 'zion'],
+    items: [
+      'Closed Trades no longer stay empty: fast position polls omit the closed array for size, so the dashboard now caches the last full closed slice and refreshes it on a slower cadence (and after sells).',
+      'Mobile mic keeps the green armed state while the OS permission sheet / getUserMedia is still priming (no hard-fail on early SpeechRecognition not-allowed).',
+      'Coarse-pointer devices use pointerup-only mic toggle so a delayed click cannot immediately turn the mic off.',
+    ],
+  },
+  {
     version: '1.2.289',
     title: 'Revert KEY2 spares — classic three-lane RPC again',
     sections: ['overview', 'copy', 'execution'],
