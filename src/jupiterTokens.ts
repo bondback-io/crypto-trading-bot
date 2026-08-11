@@ -348,14 +348,31 @@ export function jupiterTokenToLaunchEvent(
       ? Date.parse(token.createdAt)
       : Date.now();
 
+  // Liquidity ≠ migration event. Only stamp migrated for real graduation evidence
+  // (graduatedAt) or ultra-fresh pump-with-liq. Prevents Jupiter trending majors
+  // from lighting MIG_FLAG / signalKind=migration and wasting Migration Sniper.
+  const graduatedAtMs = token.graduatedAt
+    ? Date.parse(String(token.graduatedAt))
+    : NaN;
+  const ageMs = Number.isFinite(launchedAt)
+    ? Math.max(0, Date.now() - launchedAt)
+    : Number.POSITIVE_INFINITY;
+  const FRESH_MIG_MS = 6 * 60 * 60_000;
+  const migrated = Number.isFinite(graduatedAtMs)
+    ? Date.now() - graduatedAtMs <= FRESH_MIG_MS
+    : Boolean(
+        isPump &&
+          token.liquidity != null &&
+          Number(token.liquidity) > 0 &&
+          ageMs <= FRESH_MIG_MS
+      );
+
   const event: LaunchEvent = {
     mint,
     symbol: String(token.symbol || mint.slice(0, 6)).slice(0, 24),
     name: String(token.name || token.symbol || 'Unknown').slice(0, 64),
     launchedAt: Number.isFinite(launchedAt) ? launchedAt : Date.now(),
-    // Graduated / tradable on DEX when we see Jupiter liquidity — bonding-only
-    // pump mints still flagged via isPumpFun.
-    migrated: Boolean(token.liquidity && token.liquidity > 0) || !isPump,
+    migrated,
     entryPriceSol: priceSol,
     lastPriceSol: priceSol,
     priceChangePct,

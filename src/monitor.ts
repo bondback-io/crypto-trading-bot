@@ -7337,7 +7337,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
       lanePassers = lanes.filter((l) => l.passed && l.assignment);
       if (!lanePassers.length) {
-        // Prefer top intended / first clear failer — avoid Migration+Dip concat noise
+        // Prefer specialty/candidate profile; if that fail is just MC-band miss,
+        // summarize so logs don't always read as "Migration Sniper MC > max".
         const preferId =
           (preferIds && preferIds[0]) ||
           signal.candidateTradeProfileId ||
@@ -7348,10 +7349,32 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             : null) ||
           lanes.find((l) => !l.passed && l.failReason) ||
           lanes[0];
-        const reason =
-          intended != null
-            ? `${intended.name}: ${intended.failReason || 'no match'}`
-            : 'No trade profile lane passed floors/match';
+        const mc =
+          signal.metrics?.marketCapUsd ??
+          (signal as { sourceEntryMcUsd?: number }).sourceEntryMcUsd ??
+          null;
+        const mcN =
+          mc != null && Number.isFinite(Number(mc)) ? Number(mc) : null;
+        const bandMisses = lanes.filter((l) =>
+          /MC \$\d+ (<|>) (?:lane )?min|MC \$\d+ > max/i.test(
+            String(l.failReason || '')
+          )
+        );
+        let reason: string;
+        if (
+          intended != null &&
+          /MC \$\d+ > max/i.test(String(intended.failReason || '')) &&
+          bandMisses.length >= Math.min(3, lanes.length)
+        ) {
+          reason =
+            mcN != null
+              ? `no lane covers MC $${Math.round(mcN)} (specialty ${preferId || 'none'} out of band)`
+              : `no lane covers MC band (specialty ${preferId || 'none'} out of band)`;
+        } else if (intended != null) {
+          reason = `${intended.name}: ${intended.failReason || 'no match'}`;
+        } else {
+          reason = 'No trade profile lane passed floors/match';
+        }
         recordRejectedSignal(signal, reason);
         console.log(
           `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +

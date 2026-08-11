@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.300',
+    title: 'Stop false flush kills + Migration specialty MC spam',
+    sections: ['scanners', 'microbots', 'execution'],
+    items: [
+      'Dip/Steady: no memecoin flush-invalidation on Medium/Majors; peak/H1 glitch guards; throttle Dex/Gecko refreshes (≤10/tick) to cut HTTP congestion.',
+      'Exclude AAPLx/SPYx-style stock wrappers from quality parks.',
+      'Jupiter migrated flag only for fresh graduation evidence; specialty feeds filter by profile MC/vol; classifier ignores specialty:migration string false-positives; clearer out-of-band lane-fight skip reasons.',
+    ],
+  },
+  {
     version: '1.2.299',
     title: 'Pump.fun Medium/Majors priority + RPC load signals',
     sections: ['scanners', 'overview', 'execution'],

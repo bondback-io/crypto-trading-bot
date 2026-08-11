@@ -389,6 +389,17 @@ export function classifySetup(
   const reasons = Array.isArray(input.scannerReasons)
     ? input.scannerReasons.map((r) => String(r).toLowerCase())
     : [];
+  // Real migration/grad scanner DNA — not "specialty:migration_sniper" (contains "migrat")
+  const reasonLooksMigrated = reasons.some((r) => {
+    if (r.startsWith('specialty:')) return false;
+    if (r.startsWith('jupiter:')) return false;
+    return (
+      /\bgrad(?:-watch|uation|uated)?\b/.test(r) ||
+      /\bmigrat(?:ion|ed)\b/.test(r) ||
+      r.includes('bonded') ||
+      r.includes('curve')
+    );
+  });
 
   // —— Migration ——
   if (input.isMigration || entry === 'migration') {
@@ -403,7 +414,7 @@ export function classifySetup(
     scores.migration += 0.4;
     codes.push('MIG_HINT');
   }
-  if (reasons.some((r) => r.includes('grad') || r.includes('migrat'))) {
+  if (reasonLooksMigrated) {
     scores.migration += 0.25;
     codes.push('MIG_SCANNER');
   }
@@ -411,7 +422,7 @@ export function classifySetup(
     input.isMigration === true ||
     input.nearMigration === true ||
     entry === 'migration' ||
-    reasons.some((r) => r.includes('grad') || r.includes('migrat'));
+    reasonLooksMigrated;
   if (migContext && ageH != null && ageH < 2) {
     scores.migration += 0.15;
     codes.push('MIG_FRESH');

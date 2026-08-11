@@ -104,10 +104,25 @@ const TRIGGER_RECLAIM_PCT = 0.9;
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
+/** Quality parks: snapshot less often — inventory is large and Dex/Gecko is HTTP-heavy */
+const QUALITY_MC_REFRESH_MIN_MS = 45_000;
+/** Full multi-TF OHLCV for quality parks at most this often (levels persist) */
+const QUALITY_OHLCV_REFRESH_MIN_MS = 3 * 60_000;
+/** Cap full market refreshes per tick to protect event loop / HTTP pools */
+const MAX_FULL_REFRESH_PER_TICK = 10;
+/** Ignore single-tick peak→price moves larger than this as feed glitches */
+const PEAK_GLITCH_DROP_PCT = 70;
+const PEAK_GLITCH_JUMP_MULT = 2.5;
+/** Soft H1 fill must stay within this band (Dex can print wild outliers) */
+const H1_SOFT_FILL_MAX_PCT = 55;
 const TERMINAL_UI_MS = 60_000;
 
 const watches = new Map<string, DipWatchEntry>();
 let lastMcRefreshAt = new Map<string, number>();
+/** mint → last multi-TF OHLCV refresh (quality parks) */
+const lastOhlcvRefreshAt = new Map<string, number>();
+/** Per-tick budget for expensive Dex/Gecko refreshes */
+let fullRefreshBudget = 0;
 /** Dedup no_levels funnel: last noted streak tick per mint */
 const noLevelsFunnelNotedAt = new Map<string, number>();
 const NO_LEVELS_FUNNEL_DEDUP_MS = 20 * 60_000;
@@ -987,14 +1002,32 @@ function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): voi
   const px = w.lastPriceSol;
   if (px != null && Number.isFinite(px) && px > 0) {
     const prevPeak = w.peakPriceSol;
-    if (prevPeak == null || !Number.isFinite(prevPeak) || px > prevPeak) {
+    if (prevPeak == null || !Number.isFinite(prevPeak) || prevPeak <= 0) {
       w.peakPriceSol = px;
-    }
-    const peak = w.peakPriceSol;
-    if (peak != null && peak > 0 && px < peak) {
+    } else if (px > prevPeak * PEAK_GLITCH_JUMP_MULT) {
+      // Feed unit glitch / pair switch — reset peak, do not invent a dump
+      w.peakPriceSol = px;
+      w.dropFromPeakPct = null;
+    } else if (px > prevPeak) {
+      w.peakPriceSol = px;
+    } else {
+      const peak = w.peakPriceSol!;
       const fromPeak = ((peak - px) / peak) * 100;
       if (Number.isFinite(fromPeak) && fromPeak > 0) {
-        w.dropFromPeakPct = fromPeak;
+        // One-tick cliff without confirming H1 → treat as bad mark, rebase peak
+        const h1Abs =
+          h1ChangePct != null && Number.isFinite(h1ChangePct)
+            ? Math.abs(Number(h1ChangePct))
+            : null;
+        if (
+          fromPeak >= PEAK_GLITCH_DROP_PCT &&
+          (h1Abs == null || h1Abs < fromPeak * 0.5)
+        ) {
+          w.peakPriceSol = px;
+          w.dropFromPeakPct = h1Abs != null && h1Abs > 1 ? h1Abs : null;
+        } else {
+          w.dropFromPeakPct = fromPeak;
+        }
       }
     }
   }
@@ -1005,6 +1038,10 @@ function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): voi
     h1ChangePct < -1
   ) {
     const fromH1 = Math.abs(h1ChangePct);
+    if (fromH1 > H1_SOFT_FILL_MAX_PCT) {
+      // Ignore extreme H1 prints for invalidate math
+      return;
+    }
     if (w.dropFromPeakPct == null || fromH1 > w.dropFromPeakPct) {
       w.dropFromPeakPct = fromH1;
     }
@@ -1014,10 +1051,19 @@ function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): voi
 async function refreshWatchMarket(
   w: DipWatchEntry,
   now: number,
-  opts?: { force?: boolean }
+  opts?: { force?: boolean; allowOhlcv?: boolean }
 ): Promise<void> {
+  const isQuality = isQualityBandSource(w.source);
+  const minGap = isQuality ? QUALITY_MC_REFRESH_MIN_MS : MC_REFRESH_MIN_MS;
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
-  if (!opts?.force && now - last < MC_REFRESH_MIN_MS) return;
+  if (!opts?.force && now - last < minGap) return;
+
+  // Budget expensive HTTP (Dex snapshot + Gecko OHLCV) across large inventories
+  if (!opts?.force) {
+    if (fullRefreshBudget <= 0) return;
+    fullRefreshBudget -= 1;
+  }
+
   lastMcRefreshAt.set(w.mint, now);
   let h1Change: number | null = null;
   try {
@@ -1070,27 +1116,43 @@ async function refreshWatchMarket(
     /* keep last */
   }
 
-  // Multi-TF S/R confluence (Mode B parity) — fail soft
+  const hasLevelsAlready = watchHasFibOrSupportLevels(w);
+  const lastOhlcv = lastOhlcvRefreshAt.get(w.mint) ?? 0;
+  const wantOhlcv =
+    opts?.allowOhlcv !== false &&
+    (opts?.force === true ||
+      !isQuality ||
+      !hasLevelsAlready ||
+      now - lastOhlcv >= QUALITY_OHLCV_REFRESH_MIN_MS);
+
+  // Multi-TF S/R confluence (Mode B parity) — fail soft; skip when throttled
   let multiByTf: Awaited<ReturnType<typeof fetchMultiTfOhlcv>>['byTf'] | null =
     null;
-  try {
-    const multi = await fetchMultiTfOhlcv(w.mint, { solUsd: undefined });
-    if (Object.keys(multi.byTf).length > 0) {
-      multiByTf = multi.byTf;
-      const conf = analyzeSrConfluenceFromCandles(w.mint, multi.byTf, {
-        priceSol: w.lastPriceSol,
+  if (wantOhlcv) {
+    try {
+      const multi = await fetchMultiTfOhlcv(w.mint, {
+        solUsd: undefined,
+        // Quality parks only need 1h/15m for Fib/S — skip full TF fan-out
+        tfs: isQuality ? ['5m', '15m', '1h'] : undefined,
       });
-      if (conf.primarySupport != null && conf.primarySupport > 0) {
-        w.supportPriceSol = conf.primarySupport;
+      lastOhlcvRefreshAt.set(w.mint, now);
+      if (Object.keys(multi.byTf).length > 0) {
+        multiByTf = multi.byTf;
+        const conf = analyzeSrConfluenceFromCandles(w.mint, multi.byTf, {
+          priceSol: w.lastPriceSol,
+        });
+        if (conf.primarySupport != null && conf.primarySupport > 0) {
+          w.supportPriceSol = conf.primarySupport;
+        }
+        const hits = conf.supportTfHits?.length ?? 0;
+        w.multiTfSupportHits = hits;
+        if (conf.nearMultiTfSupport || hits > 0) {
+          w.nearSupport = true;
+        }
       }
-      const hits = conf.supportTfHits?.length ?? 0;
-      w.multiTfSupportHits = hits;
-      if (conf.nearMultiTfSupport || hits > 0) {
-        w.nearSupport = true;
-      }
+    } catch {
+      /* keep last levels */
     }
-  } catch {
-    /* keep last levels */
   }
 
   // Technical Fib / support refresh — seed candles for quality parks so Steady can arm
@@ -1854,6 +1916,7 @@ export async function tickDipSetupWatches(opts?: {
   const maxDrop = m.maxDropFromPeakPct ?? 45;
   const now = Date.now();
   let handed = 0;
+  fullRefreshBudget = MAX_FULL_REFRESH_PER_TICK;
 
   for (const w of watches.values()) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
@@ -1909,8 +1972,14 @@ export async function tickDipSetupWatches(opts?: {
     if (px != null) w.lastPriceSol = px;
     w.targetDipEntries = buildTargetDipEntries(w);
 
-    // Invalidate: flush past max dip
-    if (w.dropFromPeakPct != null && w.dropFromPeakPct > maxDrop) {
+    // Invalidate: flush past max dip — minors only.
+    // Medium/Majors use dead-tape / name-exclude / MC-band rotate (flush % is
+    // often a Dex/peak unit glitch and was mass-invalidating quality parks).
+    if (
+      !isQualityBandSource(w.source) &&
+      w.dropFromPeakPct != null &&
+      w.dropFromPeakPct > maxDrop
+    ) {
       releaseQualitySoftArm(w.mint);
       w.status = 'invalidated';
       w.updatedAt = now;

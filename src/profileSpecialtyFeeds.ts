@@ -68,6 +68,10 @@ function buildCandidate(
   kolCount?: number
 ): ScannerCandidate & { launch: LaunchEvent } {
   const now = Date.now();
+  // Only Migration Sniper specialty may carry migrated=true into lane fight.
+  // Other profiles ingest Jupiter/KOL as normal scanner TA — not migration events.
+  const migratedForLane =
+    profileId === 'migration_sniper' ? Boolean(event.migrated) : false;
   return {
     id: `feed-${profileId}-${event.mint.slice(0, 8)}-${now}`,
     mint: event.mint,
@@ -78,7 +82,7 @@ function buildCandidate(
     rankScore,
     reasons,
     source: event.source,
-    migrated: Boolean(event.migrated),
+    migrated: migratedForLane,
     liquidityUsd: event.liquidityUsd,
     marketCapUsd: event.marketCapUsd,
     volumeUsd: event.volumeUsd,
@@ -96,6 +100,7 @@ function buildCandidate(
     candleSource: event.candleSource ?? 'synthetic',
     launch: {
       ...event,
+      migrated: migratedForLane,
       preferredProfileId: profileId,
       specialtyFeed: feed,
     },
@@ -131,6 +136,24 @@ function kolCandidateToLaunch(c: {
     candleSource: 'synthetic',
     solUsd: solUsd(),
   };
+}
+
+function candidateInProfileMcBand(
+  mc: number | null | undefined,
+  minMc: number | null | undefined,
+  maxMc: number | null | undefined
+): boolean {
+  if (mc == null || !Number.isFinite(mc) || mc <= 0) {
+    // Unknown MC: allow soft profiles; migration/scalper hard-caps need a number
+    return minMc == null && maxMc == null;
+  }
+  if (minMc != null && Number.isFinite(minMc) && minMc > 0 && mc < minMc) {
+    return false;
+  }
+  if (maxMc != null && Number.isFinite(maxMc) && maxMc > 0 && mc > maxMc) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -217,6 +240,24 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
       Math.min(100, Math.round(Number(m.minWalletQuality) || 40))
     );
     let profileHanded = 0;
+    const minMc =
+      m.minMarketCapUsd != null &&
+      Number.isFinite(m.minMarketCapUsd) &&
+      m.minMarketCapUsd > 0
+        ? Number(m.minMarketCapUsd)
+        : null;
+    const maxMc =
+      m.maxMarketCapUsd != null &&
+      Number.isFinite(m.maxMarketCapUsd) &&
+      m.maxMarketCapUsd > 0
+        ? Number(m.maxMarketCapUsd)
+        : null;
+    const minVolH1 =
+      m.minVolumeH1Usd != null &&
+      Number.isFinite(m.minVolumeH1Usd) &&
+      m.minVolumeH1Usd > 0
+        ? Number(m.minVolumeH1Usd)
+        : null;
 
     // Jupiter slice
     const category = normalizeCategory(m.jupiterCategory);
@@ -235,6 +276,27 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           continue;
         }
         if (isScannerMintOnCooldown(ev.mint)) continue;
+        const mc = Number(ev.marketCapUsd);
+        if (!candidateInProfileMcBand(mc, minMc, maxMc)) continue;
+        // Skip dead tape for specialty handoffs (H1 vol known and far below floor)
+        const volH1 = Number(ev.volumeH1Usd);
+        if (
+          minVolH1 != null &&
+          Number.isFinite(volH1) &&
+          volH1 > 0 &&
+          volH1 < minVolH1 * 0.35
+        ) {
+          continue;
+        }
+        // Migration Sniper specialty: never ingest stale high-MC Jupiter names
+        if (p.id === 'migration_sniper') {
+          const ageH =
+            ev.launchedAt > 0
+              ? (Date.now() - ev.launchedAt) / 3_600_000
+              : null;
+          if (ageH != null && ageH > 6) continue;
+          if (!ev.migrated && !ev.isPumpFun) continue;
+        }
         const c = buildCandidate(
           ev,
           p.id,
@@ -251,8 +313,8 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           // Dip minor supply from Jupiter specialty (non-quality MC only).
           // Medium/majors parks stay on majorsUniverse Steady pass.
           try {
-            const mc = Number(c.marketCapUsd) || 0;
-            const isQualityMc = mc >= MEDIUM_MIN_MC_USD;
+            const mcN = Number(c.marketCapUsd) || 0;
+            const isQualityMc = mcN >= MEDIUM_MIN_MC_USD;
             if (!isQualityMc && (p.id === 'dip_buyer' || !softPrefer)) {
               const { offerDipWatchFromCandidate } =
                 require('./dipSetupWatch') as typeof import('./dipSetupWatch');
@@ -300,6 +362,15 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           : 0;
       if (avgQ < minQ) continue;
       const ev = kolCandidateToLaunch(kc);
+      const mc = Number(ev.marketCapUsd);
+      if (!candidateInProfileMcBand(mc, minMc, maxMc)) continue;
+      if (p.id === 'migration_sniper') {
+        const ageH =
+          ev.launchedAt > 0
+            ? (Date.now() - ev.launchedAt) / 3_600_000
+            : null;
+        if (ageH != null && ageH > 6) continue;
+      }
       const c = buildCandidate(
         ev,
         p.id,
