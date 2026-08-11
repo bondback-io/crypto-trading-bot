@@ -3,9 +3,7 @@
  *
  * Priority order (failover pool):
  *   1. Helius Free     — HELIUS_API_KEY or single HELIUS_RPC_URL
- *      (+ optional HELIUS_API_KEY2 same-provider spare after 60m / credits)
  *   2. Alchemy Free    — ALCHEMY_API_KEY or single ALCHEMY_RPC_URL
- *      (+ optional ALCHEMY_API_KEY2 same-provider spare after 60m / credits)
  *   3. QuickNode       — QUICKNODE_RPC_URL (mid-tier paid failover for Critical/Scanners)
  *   4. RPC_URL / RPC_PRIMARY             — Triton api.mainnet.solana.com preferred for Utility
  *   5. Public Solana                     — https://solana-rpc.publicnode.com
@@ -17,7 +15,7 @@
  *   Primary (critical) → Helius — entries, migration, wallet buy detection
  *   Secondary (scanners) → Alchemy — Market / Alpha / Zion
  *   Utility → official mainnet-beta (api.mainnet-beta.solana.com), then publicnode / Triton
- * Paid-lane failover: preferred → same-provider KEY2 (60m/credits) → other paid → QuickNode → public.
+ * Paid-lane failover: preferred → other paid → QuickNode → public (bypass QuickNode if unset).
  * Health monitor + piggyback failover live in connection.ts.
  */
 
@@ -122,16 +120,6 @@ export function buildHeliusRpcUrl(apiKey?: string | null): string | null {
 }
 
 /**
- * Optional Helius spare key (HELIUS_API_KEY2) — same-provider fallback after
- * KEY1 is down ≥60m or credits/quota/auth fail. Never preferred at boot.
- */
-export function buildHeliusRpcUrl2(): string | null {
-  const fromKey = process.env.HELIUS_API_KEY2?.trim();
-  if (!isUsableApiKey(fromKey)) return null;
-  return `https://mainnet.helius-rpc.com/?api-key=${fromKey}`;
-}
-
-/**
  * Build Alchemy Solana mainnet HTTP RPC URL.
  * Prefers ALCHEMY_API_KEY; else a single ALCHEMY_RPC_URL (full URL or bare key).
  * Backup URL env vars are ignored (dual-pool routing removed).
@@ -157,16 +145,6 @@ export function buildAlchemyRpcUrl(apiKey?: string | null): string | null {
     return `https://solana-mainnet.g.alchemy.com/v2/${raw}`;
   }
   return null;
-}
-
-/**
- * Optional Alchemy spare key (ALCHEMY_API_KEY2) — same-provider fallback after
- * KEY1 is down ≥60m or credits/quota/auth fail. Never preferred at boot.
- */
-export function buildAlchemyRpcUrl2(): string | null {
-  const fromKey = process.env.ALCHEMY_API_KEY2?.trim();
-  if (!isUsableApiKey(fromKey)) return null;
-  return `https://solana-mainnet.g.alchemy.com/v2/${fromKey}`;
 }
 
 /** True for QuickNode hosted Solana HTTP endpoints. */
@@ -363,9 +341,7 @@ export function rpcEndpointsFromEnv(
   secondaryEnv?: string | null
 ): NormalizedRpcEndpoint[] {
   const helius = buildHeliusRpcUrl();
-  const helius2 = buildHeliusRpcUrl2();
   const alchemy = buildAlchemyRpcUrl();
-  const alchemy2 = buildAlchemyRpcUrl2();
   const quicknode = buildQuicknodeRpcUrl();
 
   const rpcUrlRaw = (
@@ -401,13 +377,7 @@ export function rpcEndpointsFromEnv(
   const pool: Cand[] = [];
 
   if (helius) pool.push({ url: helius, label: 'helius', role: 'fallback' });
-  if (helius2 && helius2 !== helius) {
-    pool.push({ url: helius2, label: 'helius-2', role: 'fallback' });
-  }
   if (alchemy) pool.push({ url: alchemy, label: 'alchemy', role: 'fallback' });
-  if (alchemy2 && alchemy2 !== alchemy) {
-    pool.push({ url: alchemy2, label: 'alchemy-2', role: 'fallback' });
-  }
   if (quicknode) {
     const qnWs = process.env.QUICKNODE_WSS_URL?.trim();
     pool.push({
@@ -514,9 +484,7 @@ export function rpcEndpointsFromEnv(
 
   const labelFor = (url: string, fallback: string): string => {
     if (url === helius) return 'helius';
-    if (url === helius2) return 'helius-2';
     if (url === alchemy) return 'alchemy';
-    if (url === alchemy2) return 'alchemy-2';
     if (url === quicknode) return 'quicknode';
     if (url === rpcUrl) return 'rpc-url';
     if (url === rpcSecondary) return 'rpc-secondary';
@@ -545,9 +513,7 @@ export function rpcEndpointsFromEnv(
   console.log(
     `[rpc] Multi-RPC chain: ${chain}` +
       (helius ? ' (Helius free primary)' : '') +
-      (helius2 ? ' (Helius KEY2 spare)' : '') +
       (alchemy ? ' (Alchemy free secondary)' : '') +
-      (alchemy2 ? ' (Alchemy KEY2 spare)' : '') +
       (quicknode ? ' (QuickNode mid-tier)' : '') +
       (utilityUrl && isOfficialMainnetBetaRpcUrl(utilityUrl)
         ? ' (mainnet-beta utility)'

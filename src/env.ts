@@ -111,8 +111,6 @@ export function validateDeploymentEnv(): string[] {
   const hasFreeProvider =
     Boolean(process.env.HELIUS_API_KEY?.trim()) ||
     Boolean(process.env.ALCHEMY_API_KEY?.trim()) ||
-    Boolean(process.env.HELIUS_API_KEY2?.trim()) ||
-    Boolean(process.env.ALCHEMY_API_KEY2?.trim()) ||
     Boolean(process.env.HELIUS_RPC_URL?.trim()) ||
     Boolean(process.env.ALCHEMY_RPC_URL?.trim());
   if (

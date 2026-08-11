@@ -109,9 +109,6 @@ let preferredSecondary = 0;
 let preferredUtility = 0;
 /** Mid-tier paid failover (QuickNode); -1 when unset */
 let preferredQuicknode = -1;
-/** Same-provider KEY2 spares (HELIUS_API_KEY2 / ALCHEMY_API_KEY2); -1 when unset */
-let heliusAltIndex = -1;
-let alchemyAltIndex = -1;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
@@ -285,11 +282,6 @@ function meteredFetch(endpointLabel: string) {
 
 /** Default cross-lane piggyback grace — preferred must stay unhealthy this long. */
 const DEFAULT_FAILOVER_DOWN_MS = 30_000;
-/** Same-provider KEY2 promote after preferred stays down this long. */
-const PROVIDER_KEY_FAILOVER_MS = 60 * 60_000;
-/** Don't re-log KEY1↔KEY2 switches more often than this. */
-const PROVIDER_KEY_SWITCH_LOG_THROTTLE_MS = 60_000;
-let lastProviderKeySwitchLogAt = 0;
 /** Floor so env typos cannot collapse failover to zero. */
 const MIN_FAILOVER_DOWN_MS = 5_000;
 /** After a 429, leave the hot endpoint alone so failover can breathe. */
@@ -336,65 +328,6 @@ function latencyStressGraceMs(state: EndpointState | undefined): number {
  */
 function isRpcRateLimitMessage(error: string): boolean {
   return /429|rate.?limit|-32429|too many requests/i.test(error);
-}
-
-function isRpcQuotaMessage(error: string): boolean {
-  return /credit|quota|insufficient|payment.?required|exceeded.*limit|out of credits|usage limit/i.test(
-    error
-  );
-}
-
-function isRpcAuthMessage(error: string): boolean {
-  return /\b401\b|\b403\b|unauthorized|forbidden|invalid api|invalid.?key|api[- ]?key.*(invalid|missing|denied)/i.test(
-    error
-  );
-}
-
-/** Promote away from this key: credits/quota/auth immediately, or down ≥60m. */
-function shouldPromoteProviderKey(state: EndpointState | undefined): boolean {
-  if (!state) return true;
-  const err = state.lastError || '';
-  if (isRpcQuotaMessage(err) || isRpcAuthMessage(err)) return true;
-  if (isEndpointUsable(state)) return false;
-  return downForMs(state) >= PROVIDER_KEY_FAILOVER_MS;
-}
-
-function sameProviderAltIndex(role: RpcRole): number {
-  if (role === 'primary') return heliusAltIndex;
-  if (role === 'secondary') return alchemyAltIndex;
-  return -1;
-}
-
-function activeIndexForRole(role: RpcRole): number {
-  if (role === 'primary') return activePrimary;
-  if (role === 'secondary') return activeSecondary;
-  return activeUtility;
-}
-
-function logProviderKeySwitch(
-  role: RpcRole,
-  fromLabel: string,
-  toLabel: string,
-  reason: string
-): void {
-  const now = Date.now();
-  if (now - lastProviderKeySwitchLogAt < PROVIDER_KEY_SWITCH_LOG_THROTTLE_MS) {
-    return;
-  }
-  lastProviderKeySwitchLogAt = now;
-  const lane = role === 'primary' ? 'Critical' : 'Scanners';
-  console.warn(`[rpc] ${lane} lane ${fromLabel} → ${toLabel} (${reason})`);
-}
-
-function promoteReason(state: EndpointState | undefined): string {
-  const err = state?.lastError || '';
-  if (isRpcQuotaMessage(err)) return 'credits/quota';
-  if (isRpcAuthMessage(err)) return 'auth';
-  const down = downForMs(state);
-  if (down >= PROVIDER_KEY_FAILOVER_MS) {
-    return `down ${Math.round(down / 60_000)}m ≥ 60m`;
-  }
-  return 'promote';
 }
 
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {
@@ -643,8 +576,6 @@ function ensureEndpoints(): void {
     (e) =>
       e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
   );
-  heliusAltIndex = endpoints.findIndex((e) => e.endpoint.label === 'helius-2');
-  alchemyAltIndex = endpoints.findIndex((e) => e.endpoint.label === 'alchemy-2');
   activePrimary = preferredPrimary;
   activeSecondary = preferredSecondary;
   activeUtility = preferredUtility;
@@ -666,13 +597,6 @@ function ensureEndpoints(): void {
       (preferredQuicknode >= 0
         ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
         : '') +
-      (heliusAltIndex >= 0
-        ? ` · helius-KEY2→${endpoints[heliusAltIndex]?.endpoint.label}`
-        : '') +
-      (alchemyAltIndex >= 0
-        ? ` · alchemy-KEY2→${endpoints[alchemyAltIndex]?.endpoint.label}`
-        : '') +
-      ` · KEY2 promote after ${Math.round(PROVIDER_KEY_FAILOVER_MS / 60_000)}m or credits` +
       ` · cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
       (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
   );
@@ -887,77 +811,6 @@ function resolveIndexForRole(role: RpcRole): number {
       if (!e?.healthy || !isStrongUtilityEndpoint(e)) continue;
       setActiveForRole(role, i);
       return i;
-    }
-  }
-
-  // Same-provider KEY2 (Helius/Alchemy) — sticky, 60m / credits promote, no RR.
-  if (role === 'primary' || role === 'secondary') {
-    const alt = sameProviderAltIndex(role);
-    const cur = activeIndexForRole(role);
-    const curState = endpoints[cur];
-    const altState = alt >= 0 ? endpoints[alt] : undefined;
-
-    // Stay on current KEY1/KEY2 while usable and not promote-eligible.
-    if (
-      (cur === preferred || cur === alt) &&
-      isEndpointUsable(curState) &&
-      !shouldPromoteProviderKey(curState) &&
-      !(cur === preferred && latencySoft)
-    ) {
-      setActiveForRole(role, cur);
-      return cur;
-    }
-
-    // Preferred KEY1 healthy — use it unless sticky on healthy KEY2.
-    if (isEndpointUsable(pref) && !latencySoft) {
-      if (
-        cur === alt &&
-        isEndpointUsable(altState) &&
-        !shouldPromoteProviderKey(altState)
-      ) {
-        setActiveForRole(role, alt);
-        return alt;
-      }
-      setActiveForRole(role, preferred);
-      return preferred;
-    }
-
-    // KEY1 → KEY2 (credits/auth immediate, or down ≥60m).
-    if (alt >= 0 && isEndpointUsable(altState) && shouldPromoteProviderKey(pref)) {
-      logProviderKeySwitch(
-        role,
-        pref?.endpoint.label || 'key1',
-        altState!.endpoint.label,
-        promoteReason(pref)
-      );
-      setActiveForRole(role, alt);
-      return alt;
-    }
-
-    // KEY2 → KEY1 when KEY2 promote-eligible and KEY1 usable.
-    if (
-      cur === alt &&
-      shouldPromoteProviderKey(altState) &&
-      isEndpointUsable(pref)
-    ) {
-      logProviderKeySwitch(
-        role,
-        altState?.endpoint.label || 'key2',
-        pref!.endpoint.label,
-        promoteReason(altState)
-      );
-      setActiveForRole(role, preferred);
-      return preferred;
-    }
-
-    // KEY1 down but <60m / no credits signal — hold KEY1 (don't burn cross-lane yet).
-    if (
-      alt >= 0 &&
-      pref &&
-      !isEndpointUsable(pref) &&
-      !shouldPromoteProviderKey(pref)
-    ) {
-      return preferred;
     }
   }
 
@@ -1302,10 +1155,6 @@ function recordFailure(index: number, error: string): void {
 
   if (isRateLimit) {
     state.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
-  } else if (isRpcQuotaMessage(error) || isRpcAuthMessage(error)) {
-    // Credits / auth — mark down immediately so KEY2 promote can fire.
-    state.healthy = false;
-    if (!state.unhealthySince) state.unhealthySince = Date.now();
   } else if (
     /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|probe timeout/i.test(
       error
@@ -1320,10 +1169,7 @@ function recordFailure(index: number, error: string): void {
     enterQuarantine(state, error.slice(0, 120));
   }
 
-  const threshold =
-    isRateLimit || isRpcQuotaMessage(error) || isRpcAuthMessage(error)
-      ? 1
-      : config.rpc?.failureThreshold ?? 3;
+  const threshold = isRateLimit ? 1 : config.rpc?.failureThreshold ?? 3;
   if (state.consecutiveFailures < threshold) return;
 
   const wasHealthy = state.healthy;
@@ -1788,9 +1634,6 @@ export function getRpcStats(): {
     };
   };
 
-  const heliusOnKey2 = /helius-2/i.test(pActive?.endpoint.label || '');
-  const alchemyOnKey2 = /alchemy-2/i.test(sActive?.endpoint.label || '');
-
   const heliusPool = buildClassicPool(
     'helius',
     pPref,
@@ -1801,14 +1644,6 @@ export function getRpcStats(): {
     sPref,
     /alchemy/i.test(sActive?.endpoint.label || '')
   );
-  if (heliusOnKey2) {
-    heliusPool.shareLabel = `KEY2 spare active (${pActive?.endpoint.label}) · KEY1 promote back after KEY2 down 60m/credits`;
-    heliusPool.shareMode = 'failover';
-  }
-  if (alchemyOnKey2) {
-    alchemyPool.shareLabel = `KEY2 spare active (${sActive?.endpoint.label}) · KEY1 promote back after KEY2 down 60m/credits`;
-    alchemyPool.shareMode = 'failover';
-  }
 
   const heliusDown = heliusPool.state === 'down';
   const alchemyDown = alchemyPool.state === 'down';
@@ -1831,22 +1666,10 @@ export function getRpcStats(): {
 
   const plainParts: string[] = [];
   if (heliusConfigured) {
-    plainParts.push(
-      heliusDown
-        ? 'Helius down'
-        : heliusOnKey2
-          ? 'Helius on KEY2 spare'
-          : 'Helius Critical (solo)'
-    );
+    plainParts.push(heliusDown ? 'Helius down' : 'Helius Critical (solo)');
   }
   if (alchemyConfigured) {
-    plainParts.push(
-      alchemyDown
-        ? 'Alchemy down'
-        : alchemyOnKey2
-          ? 'Alchemy on KEY2 spare'
-          : 'Alchemy Scanners (solo)'
-    );
+    plainParts.push(alchemyDown ? 'Alchemy down' : 'Alchemy Scanners (solo)');
   }
   if (uActive) {
     plainParts.push(`Utility ${uActive.endpoint.label}`);
@@ -2224,8 +2047,6 @@ export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>
   push(preferredSecondary);
   push(preferredUtility);
   push(preferredQuicknode);
-  push(heliusAltIndex);
-  push(alchemyAltIndex);
   push(activePrimary);
   push(activeSecondary);
   push(activeUtility);
@@ -2322,8 +2143,6 @@ export function startRpcHealthMonitor(): void {
       }
       push(preferredPrimary);
       push(preferredSecondary);
-      push(heliusAltIndex);
-      push(alchemyAltIndex);
       push(preferredQuicknode);
     } else {
       for (let i = 0; i < endpoints.length; i++) push(i);
@@ -2351,9 +2170,7 @@ export function startRpcHealthMonitor(): void {
           i === preferredPrimary ||
           i === preferredSecondary ||
           i === preferredUtility ||
-          i === preferredQuicknode ||
-          i === heliusAltIndex ||
-          i === alchemyAltIndex;
+          i === preferredQuicknode;
         if (gateSnap.stressed && !isActive && !isPreferred) {
           continue;
         }
