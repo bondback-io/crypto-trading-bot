@@ -3885,32 +3885,41 @@ export function createServer(): express.Application {
 
   /** Full AI-readable system diagnostics export (read-only). */
   app.get('/api/system-diagnostics-export', (req: Request, res: Response) => {
-    try {
-      const { buildSystemDiagnosticsExport } =
-        require('./systemDiagnosticsExport') as typeof import('./systemDiagnosticsExport');
-      const report = buildSystemDiagnosticsExport(req.query.window);
-      res.json(report);
-    } catch (err) {
-      res.status(500).json({
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Defer so /health can still answer while the sync build runs.
+    setImmediate(() => {
+      try {
+        const { buildSystemDiagnosticsExport } =
+          require('./systemDiagnosticsExport') as typeof import('./systemDiagnosticsExport');
+        const report = buildSystemDiagnosticsExport(req.query.window);
+        res.json(report);
+      } catch (err) {
+        if (!res.headersSent) {
+          res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    });
   });
 
   /** Learning Report — last 50/100 closed trades evaluation package (read-only). */
   app.get('/api/learning-report', (req: Request, res: Response) => {
-    try {
-      const { buildLearningReport } =
-        require('./learningReportExport') as typeof import('./learningReportExport');
-      const report = buildLearningReport(req.query.window);
-      res.json(report);
-    } catch (err) {
-      res.status(500).json({
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    setImmediate(() => {
+      try {
+        const { buildLearningReport } =
+          require('./learningReportExport') as typeof import('./learningReportExport');
+        const report = buildLearningReport(req.query.window);
+        res.json(report);
+      } catch (err) {
+        if (!res.headersSent) {
+          res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    });
   });
 
   /** Admission Baseline — v235 observe-only expectancy vs governed throttles. */

@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.276',
+    title: 'Stats mobile UX + Export timeout + quieter persistence banners',
+    sections: ['overview', 'knobs', 'backup'],
+    items: [
+      'Stats tab strip: scroll arrows jump to start/end; RPC Health stacks cleanly on mobile.',
+      'Export Data / Learning Report leads and controls use full-width stacked layout on mobile.',
+      'Export/Learning report client timeout raised to 90s; no auto-generate on tab open; clearer timeout errors.',
+      'Removed page-bottom DATA_DIR disk-not-mounted banner and boot toast; Backup tab keeps calm status.',
+    ],
+  },
+  {
     version: '1.2.275',
     title: 'RPC backup env hardening + health labels',
     sections: ['overview', 'execution', 'knobs'],

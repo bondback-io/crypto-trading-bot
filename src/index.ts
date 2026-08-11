@@ -9,9 +9,6 @@ import {
   logPersistenceStatus,
   migrateLegacyRenderDataDir,
   touchPersistMarker,
-  getPersistenceStatus,
-  isCloudHost,
-  PREFERRED_RENDER_DATA_DIR,
 } from './dataDir';
 import { testConnection } from './connection';
 import { paperTrader } from './paperTrader';
@@ -156,7 +153,7 @@ async function main(): Promise<void> {
 
   try {
     const { getAppVersion } = require('./version') as typeof import('./version');
-    const { maybeNotifyAppVersionUpdate, pushDashboardNotification } =
+    const { maybeNotifyAppVersionUpdate } =
       require('./dashboardNotifications') as typeof import('./dashboardNotifications');
     const app = getAppVersion();
     maybeNotifyAppVersionUpdate(app.label || `v${app.version}`);
@@ -166,16 +163,6 @@ async function main(): Promise<void> {
       ingestBotInfoGrowthNotes(false);
     } catch {
       /* optional */
-    }
-    const persist = getPersistenceStatus();
-    if (isCloudHost() && !persist.volumeMounted) {
-      pushDashboardNotification({
-        kind: 'system',
-        title: 'Persistence at risk — disk not mounted',
-        body:
-          `DATA_DIR (${persist.dataDir}) is not a volume. All Config / Micro Bots / learning saves wipe on the next deploy. ` +
-          `Attach a Starter+ Disk at ${PREFERRED_RENDER_DATA_DIR} (or Fly /data) matching DATA_DIR.`,
-      });
     }
   } catch {
     /* optional */

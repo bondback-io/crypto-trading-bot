@@ -328,6 +328,117 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-size: 0.75rem;
       color: #94a3b8;
     }
+    .rpc-health-panel .rpc-prov-meta {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      width: 100%;
+      flex-basis: 100%;
+      margin: 0;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    @media (max-width: 640px) {
+      .rpc-health-panel .rpc-prov-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.35rem;
+        padding: 0.55rem 0;
+      }
+      .rpc-health-panel .rpc-prov-name {
+        min-width: 0;
+        font-size: 0.8rem;
+      }
+      .rpc-health-panel .rpc-prov-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        width: 100%;
+      }
+      .rpc-health-panel .rpc-ep-pill {
+        max-width: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: unset;
+        line-height: 1.3;
+        padding: 0.25rem 0.45rem;
+      }
+      .rpc-health-panel .rpc-share-mode {
+        margin-left: 0;
+        margin-bottom: 0.15rem;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+      .rpc-health-panel .rpc-health-chips {
+        gap: 0.3rem;
+      }
+      .rpc-health-panel .rpc-health-chip {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.4rem;
+      }
+    }
+    .stats-export-lead {
+      width: 100%;
+      max-width: 100%;
+      margin: 0 0 0.75rem;
+      line-height: 1.45;
+      color: #94a3b8;
+      font-size: 0.75rem;
+    }
+    .stats-export-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: flex-end;
+      width: 100%;
+      margin-bottom: 0.65rem;
+    }
+    .botperf-subtabs-wrap {
+      display: flex;
+      align-items: stretch;
+      gap: 0.35rem;
+      margin-bottom: 0.75rem;
+      min-width: 0;
+    }
+    .botperf-subtabs-wrap .botperf-subtabs {
+      flex: 1 1 auto;
+      min-width: 0;
+      margin-bottom: 0;
+    }
+    .botperf-tab-arrow {
+      flex: 0 0 auto;
+      width: 2.1rem;
+      min-height: 2.25rem;
+      border-radius: 0.45rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.85);
+      color: #e2e8f0;
+      font-size: 1.15rem;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .botperf-tab-arrow:hover,
+    .botperf-tab-arrow:focus-visible {
+      border-color: rgba(52, 211, 153, 0.45);
+      color: #6ee7b7;
+      outline: none;
+    }
+    .botperf-tab-arrow:disabled {
+      opacity: 0.35;
+      cursor: default;
+      border-color: rgba(71, 85, 105, 0.4);
+      color: #64748b;
+    }
+    @media (min-width: 900px) {
+      .botperf-tab-arrow {
+        display: none;
+      }
+    }
     .active-profile-extras {
       display: inline-flex;
       flex-wrap: wrap;
@@ -10287,15 +10398,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <p class="text-xs text-slate-400 mb-0">Tune bots on <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button>. Recovery stages live under Micro Bots → Learning.</p>
           </div>
         </div>
-        <div class="botperf-subtabs closed-filter" role="tablist" aria-label="Stats sections">
-          <button type="button" role="tab" class="closed-filter-btn is-active" id="botperf-tab-performance" data-botperf-tab="performance" aria-selected="true" aria-controls="botperf-panel-performance" onclick="setBotPerfTab('performance')">Performance</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-expectancy" data-botperf-tab="expectancy" aria-selected="false" aria-controls="botperf-panel-expectancy" onclick="setBotPerfTab('expectancy')">Expectancy Lift</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-tradecraft" data-botperf-tab="tradecraft" aria-selected="false" aria-controls="botperf-panel-tradecraft" onclick="setBotPerfTab('tradecraft')">Trade Craft</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-exportdata" data-botperf-tab="exportdata" aria-selected="false" aria-controls="botperf-panel-exportdata" onclick="setBotPerfTab('exportdata')">Export Data</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-rpc" data-botperf-tab="rpc" aria-selected="false" aria-controls="botperf-panel-rpc" onclick="setBotPerfTab('rpc')">RPC</button>
+        <div class="botperf-subtabs-wrap">
+          <button type="button" class="botperf-tab-arrow" id="botperf-tab-arrow-left" aria-label="Scroll Stats tabs to start" title="Jump to start of tabs" onclick="scrollBotPerfTabs('start')">‹</button>
+          <div class="botperf-subtabs closed-filter" id="botperf-subtabs" role="tablist" aria-label="Stats sections">
+            <button type="button" role="tab" class="closed-filter-btn is-active" id="botperf-tab-performance" data-botperf-tab="performance" aria-selected="true" aria-controls="botperf-panel-performance" onclick="setBotPerfTab('performance')">Performance</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-expectancy" data-botperf-tab="expectancy" aria-selected="false" aria-controls="botperf-panel-expectancy" onclick="setBotPerfTab('expectancy')">Expectancy Lift</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-tradecraft" data-botperf-tab="tradecraft" aria-selected="false" aria-controls="botperf-panel-tradecraft" onclick="setBotPerfTab('tradecraft')">Trade Craft</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-exportdata" data-botperf-tab="exportdata" aria-selected="false" aria-controls="botperf-panel-exportdata" onclick="setBotPerfTab('exportdata')">Export Data</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-rpc" data-botperf-tab="rpc" aria-selected="false" aria-controls="botperf-panel-rpc" onclick="setBotPerfTab('rpc')">RPC</button>
+          </div>
+          <button type="button" class="botperf-tab-arrow" id="botperf-tab-arrow-right" aria-label="Scroll Stats tabs to end" title="Jump to end of tabs" onclick="scrollBotPerfTabs('end')">›</button>
         </div>
       </div>
 
@@ -10669,49 +10784,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-exportdata" data-botperf-panel="exportdata" role="tabpanel" aria-labelledby="botperf-tab-exportdata">
         <div class="card" id="export-data-card">
-          <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
-            <div style="min-width:0;flex:1">
-              <div class="section-title">Export Data <span class="tip" tabindex="0" data-tip="Read-only plain-text system report for AI agents (Grok / Cursor). Snapshot, profiles, governors, craft, Target Gap, Exit/Harvest, Entry Timing, Size/Risk, Lane Inventory, Learning Mutations, and operator flags. No trading side effects."></span></div>
-              <p class="text-xs text-slate-400 mb-0">Generate a full AI-readable diagnostics dump. Copy and paste into Grok or Cursor for next-upgrade prompts.</p>
-            </div>
-            <div class="flex flex-wrap gap-2 items-end">
-              <label class="ctl ctl-fit">
-                <span>Window</span>
-                <select id="export-window" onchange="syncExpectancyLiftWindow('export-window')">
-                  <option value="20">Last 20</option>
-                  <option value="50" selected>Last 50</option>
-                  <option value="100">Last 100</option>
-                </select>
-              </label>
-              <button type="button" class="btn btn-primary btn-sm" onclick="generateSystemDiagnosticsExport()">Generate report</button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="copySystemDiagnosticsExport()">Copy</button>
-              <button type="button" class="btn btn-sm" onclick="generateSystemDiagnosticsExport()">Refresh</button>
-            </div>
+          <div class="section-title">Export Data <span class="tip" tabindex="0" data-tip="Read-only plain-text system report for AI agents (Grok / Cursor). Snapshot, profiles, governors, craft, Target Gap, Exit/Harvest, Entry Timing, Size/Risk, Lane Inventory, Learning Mutations, and operator flags. No trading side effects."></span></div>
+          <p class="stats-export-lead">Generate a full AI-readable diagnostics dump. Copy and paste into Grok or Cursor for next-upgrade prompts.</p>
+          <div class="stats-export-actions">
+            <label class="ctl ctl-fit">
+              <span>Window</span>
+              <select id="export-window" onchange="syncExpectancyLiftWindow('export-window')">
+                <option value="20">Last 20</option>
+                <option value="50" selected>Last 50</option>
+                <option value="100">Last 100</option>
+              </select>
+            </label>
+            <button type="button" class="btn btn-primary btn-sm" onclick="generateSystemDiagnosticsExport()">Generate report</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copySystemDiagnosticsExport()">Copy</button>
+            <button type="button" class="btn btn-sm" onclick="generateSystemDiagnosticsExport()">Refresh</button>
           </div>
           <p class="mint text-xs mb-2" id="export-data-stamp">Snapshot: —</p>
           <pre id="export-data-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate report to build a snapshot…</pre>
         </div>
 
         <div class="card" id="learning-report-card">
-          <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
-            <div style="min-width:0;flex:1">
-              <div class="section-title">Learning Report <span class="tip" tabindex="0" data-tip="Read-only last 50/100 closed-trade evaluation package for Cursor. Summary, per-profile table, trade sample, quality diagnostics, and learning-relevant config. dashboard_reset closes are excluded from learning by default. Copy Cursor package starts in Plan mode. Does not change trading."></span></div>
-              <p class="text-xs text-slate-400 mb-0">Generate a clean trade-learning package to paste into Cursor. Separate from the full system diagnostics export above.</p>
-            </div>
-            <div class="flex flex-wrap gap-2 items-end">
-              <label class="ctl ctl-fit">
-                <span>Window</span>
-                <select id="learning-report-window">
-                  <option value="50" selected>Last 50</option>
-                  <option value="100">Last 100</option>
-                </select>
-              </label>
-              <button type="button" class="btn btn-primary btn-sm" id="learning-report-generate" onclick="generateLearningReport()">Generate Learning Report</button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReport()">Copy report</button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReportCursorPackage()" title="Plan-mode evaluation instructions + report">Copy Cursor package</button>
-              <button type="button" class="btn btn-sm" onclick="downloadLearningReport('md')">Download .md</button>
-              <button type="button" class="btn btn-sm" onclick="downloadLearningReport('json')">Download .json</button>
-            </div>
+          <div class="section-title">Learning Report <span class="tip" tabindex="0" data-tip="Read-only last 50/100 closed-trade evaluation package for Cursor. Summary, per-profile table, trade sample, quality diagnostics, and learning-relevant config. dashboard_reset closes are excluded from learning by default. Copy Cursor package starts in Plan mode. Does not change trading."></span></div>
+          <p class="stats-export-lead">Generate a clean trade-learning package to paste into Cursor. Separate from the full system diagnostics export above.</p>
+          <div class="stats-export-actions">
+            <label class="ctl ctl-fit">
+              <span>Window</span>
+              <select id="learning-report-window">
+                <option value="50" selected>Last 50</option>
+                <option value="100">Last 100</option>
+              </select>
+            </label>
+            <button type="button" class="btn btn-primary btn-sm" id="learning-report-generate" onclick="generateLearningReport()">Generate Learning Report</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReport()">Copy report</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReportCursorPackage()" title="Plan-mode evaluation instructions + report">Copy Cursor package</button>
+            <button type="button" class="btn btn-sm" onclick="downloadLearningReport('md')">Download .md</button>
+            <button type="button" class="btn btn-sm" onclick="downloadLearningReport('json')">Download .json</button>
           </div>
           <p class="mint text-xs mb-2" id="learning-report-stamp">Learning report: —</p>
           <pre id="learning-report-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate Learning Report to build a package…</pre>
@@ -10730,16 +10837,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-health-providers">
             <div class="rpc-prov-row" data-provider="helius">
               <span class="rpc-prov-name">Helius</span>
-              <span class="rpc-ep-pill" id="rpc-helius-primary">primary —</span>
-              <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
-              <span class="mint text-xs" id="rpc-helius-meta">—</span>
+              <div class="rpc-prov-pills">
+                <span class="rpc-ep-pill" id="rpc-helius-primary">primary —</span>
+                <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
+              </div>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-helius-meta">—</span>
             </div>
             <div class="rpc-share-mode" id="rpc-helius-share">—</div>
             <div class="rpc-prov-row" data-provider="alchemy">
               <span class="rpc-prov-name">Alchemy</span>
-              <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
-              <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
-              <span class="mint text-xs" id="rpc-alchemy-meta">—</span>
+              <div class="rpc-prov-pills">
+                <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
+                <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
+              </div>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-alchemy-meta">—</span>
             </div>
             <div class="rpc-share-mode" id="rpc-alchemy-share">—</div>
           </div>
@@ -10884,7 +10995,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Micro Bots Self-Learning Data <span class="tip" tabindex="0" data-tip="Durable knobs, episode files, and the learning save journal for Trade Profiles."></span></div>
         <div id="learning-durability-banner" class="hidden text-xs rounded-md px-3 py-2 mb-2 border border-red-600/70 bg-red-950/50 text-red-100" role="alert"></div>
-        <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
+        <p class="mint text-xs mb-2">Learning knobs, episodes, and the save journal live under the bot data directory (same place as settings).</p>
         <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
         <div class="filters-row mb-2" id="learning-saves-filters">
           <label class="ctl ctl-date" title="Filter by calendar day">
@@ -18313,11 +18424,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const viewer = document.getElementById('export-data-viewer');
       const stamp = document.getElementById('export-data-stamp');
       try {
-        if (viewer) viewer.textContent = 'Generating report…';
+        if (viewer) viewer.textContent = 'Generating report… (can take up to ~90s on large histories)';
         const win = syncExpectancyLiftWindow('export-window');
         const data = await fetchJSON(
           '/api/system-diagnostics-export?window=' +
-            encodeURIComponent(String(win))
+            encodeURIComponent(String(win)),
+          { timeoutMs: 90000 }
         );
         __exportDataReportText =
           data && data.reportText ? String(data.reportText) : '';
@@ -18348,9 +18460,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       } catch (err) {
         __exportDataReportText = '';
+        let msg = err && err.message ? String(err.message) : String(err);
+        if (/timed out|AbortError/i.test(msg)) {
+          msg =
+            'Timed out building report — try Last 20, or retry when the bot is quieter';
+        } else if (/HTTP 503/i.test(msg)) {
+          msg =
+            'Service busy (HTTP 503) — retry in a few seconds; report build is heavy';
+        }
         if (viewer) {
-          viewer.textContent =
-            'Export failed: ' + (err.message || String(err));
+          viewer.textContent = 'Export failed: ' + msg;
         }
         if (stamp) stamp.textContent = 'Snapshot: error';
       }
@@ -18456,7 +18575,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (viewer) viewer.textContent = 'Generating learning report…';
         if (stamp) stamp.textContent = 'Learning report: generating…';
         const data = await fetchJSON(
-          '/api/learning-report?window=' + encodeURIComponent(String(win))
+          '/api/learning-report?window=' + encodeURIComponent(String(win)),
+          { timeoutMs: 90000 }
         );
         if (!data || data.ok === false) {
           throw new Error(
@@ -19736,7 +19856,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const on = btn.getAttribute('data-botperf-tab') === next;
         btn.classList.toggle('is-active', on);
         btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        if (on) {
+          try {
+            btn.scrollIntoView({
+              behavior: 'smooth',
+              inline: 'nearest',
+              block: 'nearest',
+            });
+          } catch (_) {}
+        }
       });
+      try {
+        updateBotPerfTabArrows();
+      } catch (_) {}
       document.querySelectorAll('[data-botperf-panel]').forEach(function (panel) {
         const on = panel.getAttribute('data-botperf-panel') === next;
         panel.classList.toggle('is-active', on);
@@ -19758,7 +19890,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         } else if (next === 'decisions') {
           try { loadAgentDecisionLog(); } catch (_) {}
         } else if (next === 'exportdata') {
-          try { generateSystemDiagnosticsExport(); } catch (_) {}
+          /* Manual Generate only — auto-build was timing out on busy hosts. */
         } else if (next === 'rpc') {
           try {
             if (typeof refresh === 'function') refresh();
@@ -19775,6 +19907,46 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (_) {}
     }
     window.setBotPerfTab = setBotPerfTab;
+
+    function updateBotPerfTabArrows() {
+      const scroller = document.getElementById('botperf-subtabs');
+      const left = document.getElementById('botperf-tab-arrow-left');
+      const right = document.getElementById('botperf-tab-arrow-right');
+      if (!scroller) return;
+      const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      const atStart = scroller.scrollLeft <= 2;
+      const atEnd = scroller.scrollLeft >= max - 2;
+      if (left) left.disabled = max <= 0 || atStart;
+      if (right) right.disabled = max <= 0 || atEnd;
+    }
+
+    function scrollBotPerfTabs(where) {
+      const scroller = document.getElementById('botperf-subtabs');
+      if (!scroller) return;
+      const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      const target =
+        where === 'end' ? max : where === 'start' ? 0 : scroller.scrollLeft;
+      try {
+        scroller.scrollTo({ left: target, behavior: 'smooth' });
+      } catch (_) {
+        scroller.scrollLeft = target;
+      }
+      setTimeout(updateBotPerfTabArrows, 280);
+    }
+    window.scrollBotPerfTabs = scrollBotPerfTabs;
+    window.updateBotPerfTabArrows = updateBotPerfTabArrows;
+
+    (function initBotPerfTabScroller() {
+      const scroller = document.getElementById('botperf-subtabs');
+      if (!scroller) return;
+      scroller.addEventListener('scroll', function () {
+        updateBotPerfTabArrows();
+      }, { passive: true });
+      window.addEventListener('resize', function () {
+        updateBotPerfTabArrows();
+      });
+      setTimeout(updateBotPerfTabArrows, 50);
+    })();
 
     function setWatchlistSetupTab(tab, opts) {
       const allowed = ['dip', 'modeb', 'trend', 'grad', 'mirror', 'skips'];
@@ -25978,39 +26150,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       const persistEl = document.getElementById('persist-banner');
       const persistDetail = document.getElementById('persist-status-detail');
-      if (persistEl || persistDetail) {
+      if (persistEl) {
+        // Disk / DATA_DIR deploy warnings no longer shown as a page-bottom banner.
+        persistEl.style.display = 'none';
+        persistEl.textContent = '';
+      }
+      if (persistDetail) {
         const p = status.persistence;
-        if (persistEl) {
-          if (p && p.warning) {
-            persistEl.style.display = 'block';
-            persistEl.innerHTML =
-              '<strong>Settings / wallets will reset on deploy</strong> — ' +
-              String(p.warning).replace(/</g, '&lt;') +
-              ' <span class="mint">(' + String(p.dataDir || '').replace(/</g, '&lt;') + ')</span>';
-          } else {
-            persistEl.style.display = 'none';
-            persistEl.textContent = '';
-          }
-        }
-        if (persistDetail && p) {
+        if (p) {
           const last =
             p.lastSettingsSavedAt != null
               ? new Date(p.lastSettingsSavedAt).toLocaleString()
               : '—';
           const durable = p.durableLikely
             ? '<span style="color:#4ade80">Durable — volume mounted; saves should survive deploys</span>'
-            : '<span style="color:#f87171">At risk — DATA_DIR is not a mounted disk; next deploy will wipe saves</span>';
+            : '<span style="color:#94a3b8">Ephemeral filesystem — use Back Up / GitHub Backup before deploys</span>';
           const vol =
             p.volumeMounted === true
               ? '<span style="color:#4ade80">yes</span>'
               : p.onRender
-                ? '<span style="color:#f87171">NO</span>'
+                ? '<span style="color:#94a3b8">no</span>'
                 : 'n/a (local)';
           const survived =
             p.survivedLastDeploy === 'yes'
               ? '<span style="color:#4ade80">yes</span>'
               : p.survivedLastDeploy === 'no'
-                ? '<span style="color:#f87171">no</span>'
+                ? '<span style="color:#94a3b8">no</span>'
                 : 'unknown';
           persistDetail.innerHTML =
             durable +
@@ -26020,9 +26185,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<br>config.json: ' + (p.settingsExists ? 'yes' : 'MISSING') +
             ' · trade-profiles-user.json: ' + (p.tradeProfilesUserExists ? 'yes' : 'none yet') +
             ' · learning episodes: ' + (p.profileLearningExists ? 'yes' : 'none') +
-            '<br>Last saved: ' + last +
-            '<br><span style="color:#64748b">Email, micro-bot knobs, and learning episodes all share this DATA_DIR. ' +
-            'On Render: Disks → mount path must equal DATA_DIR (prefer /var/data). Env alone does not create a volume.</span>';
+            '<br>Last saved: ' + last;
         }
       }
       try { refreshSiteBackupStatus(); } catch (_) {}
@@ -36042,17 +36205,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const statusEl = document.getElementById('learning-health-status');
       const banner = document.getElementById('learning-durability-banner');
       if (banner && data) {
-        const p = data.persistence || {};
-        const show =
-          data.health === 'at_risk' ||
-          data.episodesDroppedLikely ||
-          data.learningFilesMissing ||
-          (p.onRender && !p.durableLikely);
-        if (show) {
+        const showDrop =
+          data.episodesDroppedLikely || data.learningFilesMissing;
+        if (showDrop) {
           banner.classList.remove('hidden');
           banner.innerHTML =
-            '<strong style="color:#fecaca">Self-learning may not persist</strong> — ' +
-            escHtml(data.reason || p.warning || 'Mount DATA_DIR on a durable disk.') +
+            '<strong style="color:#fecaca">Learning files look incomplete</strong> — ' +
+            escHtml(data.reason || 'Episode files may be missing.') +
             ' <span style="color:#fca5a5">Episodes: ' +
             escHtml(String(data.totalEpisodes || 0)) +
             (data.episodesDroppedLikely
@@ -36074,9 +36233,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               escHtml(String(prev)) +
               ', now ' +
               escHtml(String(cur)) +
-              '. Learning files may have wiped — check Disk / DATA_DIR and restore a backup.';
+              '. Restore a backup if learning progress looks wiped.';
           }
         } catch (_) {}
+      } else if (banner && !data) {
+        banner.classList.add('hidden');
+        banner.textContent = '';
       }
       if (!statusEl || !data) return;
       const color = learningHealthColor(data.health);
