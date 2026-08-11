@@ -238,11 +238,21 @@ function resolveProviderPoolMembers(opts: {
       break;
     }
   }
+  const primaryPresentKey = firstPresentEnvKey(...primaryKeys);
   if (!primary) {
-    const fromKey = buildFromApiKey();
-    if (fromKey) {
-      primary = fromKey;
-      primarySource = apiKeyEnv;
+    // Present-but-invalid URL must NOT silently fall through to API_KEY —
+    // that hides misconfigured Render HELIUS/ALCHEMY_RPC_URL values.
+    if (primaryPresentKey) {
+      console.warn(
+        `rpc_env_invalid provider=${provider} source=${primaryPresentKey} — ` +
+          `value present but not a usable https URL / bare key; ignoring ${apiKeyEnv}`
+      );
+    } else {
+      const fromKey = buildFromApiKey();
+      if (fromKey) {
+        primary = fromKey;
+        primarySource = apiKeyEnv;
+      }
     }
   }
 

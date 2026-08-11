@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.285',
+    title: 'Stop dual-RPC failover storms (sticky backup + probe backoff)',
+    sections: ['overview', 'copy', 'execution'],
+    items: [
+      'Status polls no longer resolve/failover; health probes use a mutex and sparse backoff for down endpoints.',
+      'Recovery needs 2 consecutive successes; soft-sticky keeps backup active until preferred recovers cleanly.',
+      'Invalid HELIUS/ALCHEMY_RPC_URL no longer silently falls through to API_KEY; Favourites auto-tighten under Critical shed.',
+      'Stats → RPC shows sticky remaining, cooldowns, and failure windows; Failover active stays truthful while on backup.',
+    ],
+  },
+  {
     version: '1.2.284',
     title: 'Fix dashboard JS syntax break (stuck UI)',
     sections: ['overview'],

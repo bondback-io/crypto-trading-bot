@@ -96,6 +96,10 @@ export interface RpcPoolMemberStats {
   lastSuccessAgeMs: number | null;
   latencyEwmaMs: number | null;
   isActive: boolean;
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  /** Hard-fail / rate-limit cooldown remaining (ms). */
+  cooldownRemainingMs: number;
 }
 
 /** How primary+backup are used within a provider pool. */
@@ -127,6 +131,9 @@ export interface RpcProviderPoolStats {
   /** Env keys present (not values) — helps diagnose “not configured” when Render vars exist but are invalid. */
   envPrimaryPresent: boolean;
   envBackupPresent: boolean;
+  /** Soft-sticky remaining for this provider (Critical/Scanners lanes). */
+  softStickyRemainingMs: number;
+  preferredDownForMs: number;
 }
 
 export type RpcHealthSummary =
@@ -148,6 +155,8 @@ interface EndpointState {
   lastError?: string;
   lastCheckedAt: number | null;
   consecutiveFailures: number;
+  /** Consecutive successes while recovering (need ≥2 to clear quarantine / re-arm). */
+  consecutiveSuccesses: number;
   unhealthySince: number | null;
   role: RpcLaneRole;
   /** Skip this endpoint until this time after a 429 (immediate failover). */
@@ -207,6 +216,10 @@ const rpcGateDepthAls = new AsyncLocalStorage<number>();
 const keypairCache = new Map<string, Keypair>();
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let started = false;
+/** Prevent overlapping health probe cycles (boot / interval / probeRpcRecovery). */
+let healthProbeRunning = false;
+/** Successes required before clearing quarantine / unhealthy. */
+const RECOVERY_SUCCESS_NEEDED = 2;
 
 /** HTTP JSON-RPC call meter — counts real CU burn (getConnection path included). */
 export type RpcCallTrafficRow = {
@@ -523,6 +536,32 @@ function isEndpointUsable(state: EndpointState | undefined): boolean {
   if (!state) return false;
   if (isEndpointRateLimited(state) || isEndpointHardFailed(state)) return false;
   return state.healthy;
+}
+
+/** Preferred fully recovered after quarantine/unhealthy — needs repeated successes. */
+function isFullyRecovered(state: EndpointState | undefined): boolean {
+  if (!isEndpointUsable(state)) return false;
+  return (state!.consecutiveSuccesses || 0) >= RECOVERY_SUCCESS_NEEDED;
+}
+
+function endpointCooldownRemainingMs(state: EndpointState): number {
+  const now = Date.now();
+  return Math.max(
+    0,
+    Math.max(state.hardFailUntil || 0, state.rateLimitedUntil || 0) - now
+  );
+}
+
+function softStickyRemainingMsForProvider(
+  provider: 'helius' | 'alchemy'
+): number {
+  const now = Date.now();
+  let maxRem = 0;
+  for (const role of ['primary', 'secondary'] as RpcRole[]) {
+    const until = softStickyUntil.get(softStickyKey(role, provider)) || 0;
+    maxRem = Math.max(maxRem, until - now);
+  }
+  return Math.max(0, maxRem);
 }
 
 function poolIndicesFor(provider: 'helius' | 'alchemy'): number[] {
@@ -860,6 +899,7 @@ function ensureEndpoints(): void {
       failureCount: 0,
       lastCheckedAt: null,
       consecutiveFailures: 0,
+      consecutiveSuccesses: 0,
       unhealthySince: null,
       role,
       rateLimitedUntil: 0,
@@ -1154,25 +1194,31 @@ function resolveIndexForRole(role: RpcRole): number {
   if (preferProvider && shareLoad) {
     const stickyKey = softStickyKey(role, preferProvider);
     const stickyUntil = softStickyUntil.get(stickyKey) || 0;
+    const cur =
+      role === 'primary'
+        ? activePrimary
+        : role === 'secondary'
+          ? activeSecondary
+          : activeUtility;
+    const curUsableSibling =
+      cur !== preferred &&
+      cur >= 0 &&
+      endpoints[cur] &&
+      isEndpointUsable(endpoints[cur]) &&
+      endpoints[cur]!.provider === preferProvider;
+
     if (stickyUntil > Date.now()) {
       // Stay on last active sibling during soft-sticky window (stops RR flip-back).
-      const cur =
-        role === 'primary'
-          ? activePrimary
-          : role === 'secondary'
-            ? activeSecondary
-            : activeUtility;
-      if (
-        cur !== preferred &&
-        cur >= 0 &&
-        endpoints[cur] &&
-        isEndpointUsable(endpoints[cur]) &&
-        endpoints[cur]!.provider === preferProvider
-      ) {
+      if (curUsableSibling) {
         return cur;
       }
     } else if (stickyUntil) {
       softStickyUntil.delete(stickyKey);
+    }
+
+    // Prefer stay on backup/sibling until preferred fully recovers (2 successes).
+    if (curUsableSibling && !isFullyRecovered(pref)) {
+      return cur;
     }
 
     const feature = rpcFeatureAls.getStore() || '';
@@ -1527,6 +1573,7 @@ function recordSuccess(index: number, latencyMs: number): void {
     state.rateLimitedUntil > Date.now() ||
     state.hardFailUntil > Date.now();
   state.successCount += 1;
+  state.consecutiveSuccesses = (state.consecutiveSuccesses || 0) + 1;
   const sample = Math.min(LATENCY_SAMPLE_CAP_MS, Math.max(0, latencyMs));
   state.lastCallLatencyMs = sample;
   // EWMA so a single slow getTransaction does not paint the whole endpoint as 800ms+.
@@ -1537,13 +1584,22 @@ function recordSuccess(index: number, latencyMs: number): void {
           LATENCY_EWMA_ALPHA * sample + (1 - LATENCY_EWMA_ALPHA) * state.latencyMs
         );
   updateLatencyStress(state);
-  state.healthy = true;
   state.consecutiveFailures = 0;
-  state.unhealthySince = null;
   state.lastCheckedAt = Date.now();
   state.lastSuccessAt = Date.now();
   state.lastError = undefined;
-  // Clear cooldowns after a real success (including mid-cooldown recovery).
+
+  // Recovery hysteresis: one lucky getSlot must not re-arm a bad primary.
+  if (
+    wasUnhealthy &&
+    state.consecutiveSuccesses < RECOVERY_SUCCESS_NEEDED
+  ) {
+    return;
+  }
+
+  state.healthy = true;
+  state.unhealthySince = null;
+  // Clear cooldowns after repeated successes (including mid-cooldown recovery).
   state.rateLimitedUntil = 0;
   if (state.hardFailUntil) {
     const wasQ = state.hardFailUntil > 0;
@@ -1552,7 +1608,7 @@ function recordSuccess(index: number, latencyMs: number): void {
       if (now - state.lastQuarantineLogAt >= 5_000) {
         state.lastQuarantineLogAt = now;
         console.log(
-          `[rpc-quarantine] EXIT ${state.endpoint.label} — probe/call succeeded` +
+          `[rpc-quarantine] EXIT ${state.endpoint.label} — ${RECOVERY_SUCCESS_NEEDED} consecutive successes` +
             (state.quarantineStreak
               ? ` (streak was ${state.quarantineStreak})`
               : '')
@@ -1628,6 +1684,7 @@ function recordFailure(index: number, error: string): void {
   if ((isRateLimit || isQuota) && alreadyCooling) {
     state.failureCount += 1;
     state.consecutiveFailures += 1;
+    state.consecutiveSuccesses = 0;
     state.lastError = error;
     state.lastCheckedAt = Date.now();
     state.healthy = false;
@@ -1636,6 +1693,7 @@ function recordFailure(index: number, error: string): void {
 
   state.failureCount += 1;
   state.consecutiveFailures += 1;
+  state.consecutiveSuccesses = 0;
   state.lastError = error;
   state.lastCheckedAt = Date.now();
 
@@ -1969,12 +2027,20 @@ export function getRpcStats(): {
     warning =
       'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Set HELIUS_RPC_URL (+ backup) and ALCHEMY_RPC_URL (+ backup).';
   } else if (pIdx !== preferredPrimary) {
-    warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
+    const stickyRem = softStickyRemainingMsForProvider('helius');
+    warning =
+      stickyRem > 0 || pActive?.slot === 'backup'
+        ? `Primary on ${pActive?.endpoint.label} (sticky backup / soft latency — preferred recovering).`
+        : `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
   } else if (
     preferredSecondary !== preferredPrimary &&
     sIdx !== preferredSecondary
   ) {
-    warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
+    const stickyRem = softStickyRemainingMsForProvider('alchemy');
+    warning =
+      stickyRem > 0 || sActive?.slot === 'backup'
+        ? `Secondary on ${sActive?.endpoint.label} (sticky backup / soft latency — preferred recovering).`
+        : `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
   } else if (share) {
     warning =
       'Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. Set a distinct RPC_SECONDARY.';
@@ -2005,6 +2071,9 @@ export function getRpcStats(): {
           s.lastSuccessAt != null ? Date.now() - s.lastSuccessAt : null,
         latencyEwmaMs: s.latencyMs,
         isActive: i === activeIdx,
+        consecutiveFailures: s.consecutiveFailures || 0,
+        consecutiveSuccesses: s.consecutiveSuccesses || 0,
+        cooldownRemainingMs: endpointCooldownRemainingMs(s),
       };
     });
     let state: RpcProviderPoolStats['state'] = 'empty';
@@ -2077,6 +2146,11 @@ export function getRpcStats(): {
               (process.env.ALCHEMY_RPC_BACKUP || '').trim()
           );
 
+    const stickyRem = softStickyRemainingMsForProvider(provider);
+    const prefIdx =
+      provider === 'helius' ? preferredPrimary : preferredSecondary;
+    const preferredDownMs = downForMs(endpoints[prefIdx]);
+
     let shareLabel = 'not configured';
     if (shareMode === 'solo') {
       shareLabel = `primary configured · backup unset · solo · active ${activeMem?.label || '—'}`;
@@ -2087,9 +2161,21 @@ export function getRpcStats(): {
         errHint(backupMem) ? ` ${errHint(backupMem)}` : ''
       }) · active ${activeMem?.label || '—'}`;
     } else if (shareMode === 'failover') {
+      const stickyBit =
+        stickyRem > 0
+          ? ` · sticky ${Math.ceil(stickyRem / 1000)}s`
+          : activeMem?.slot === 'backup'
+            ? ' · backup active (by design)'
+            : '';
+      const coolBit =
+        primaryMem && primaryMem.cooldownRemainingMs > 0
+          ? ` · primary cool ${Math.ceil(primaryMem.cooldownRemainingMs / 1000)}s`
+          : preferredDownMs > 0
+            ? ` · primary down ${Math.round(preferredDownMs / 1000)}s`
+            : '';
       shareLabel = `FAILOVER on backup · primary ${
         errHint(primaryMem) || primaryMem?.state || 'down'
-      } · backup ready · active ${activeMem?.label || '—'}`;
+      } · backup ready${stickyBit}${coolBit} · active ${activeMem?.label || '—'}`;
     } else if (shareMode === 'down') {
       shareLabel = hasBackup
         ? 'pool down · backup was configured — traffic on other providers'
@@ -2123,6 +2209,8 @@ export function getRpcStats(): {
       backupStatus: hasBackup ? 'ready' : 'unset',
       envPrimaryPresent,
       envBackupPresent,
+      softStickyRemainingMs: stickyRem,
+      preferredDownForMs: preferredDownMs,
     };
   };
 
@@ -2138,6 +2226,10 @@ export function getRpcStats(): {
   const anyFailover =
     heliusPoolStats.failoverCountRecent > 0 ||
     alchemyPoolStats.failoverCountRecent > 0 ||
+    heliusPoolStats.softStickyRemainingMs > 0 ||
+    alchemyPoolStats.softStickyRemainingMs > 0 ||
+    heliusPoolStats.shareMode === 'failover' ||
+    alchemyPoolStats.shareMode === 'failover' ||
     pIdx !== preferredPrimary ||
     (preferredSecondary !== preferredPrimary && sIdx !== preferredSecondary);
   // Red "Provider down" only when every configured paid pool is down.
@@ -2288,8 +2380,8 @@ export function getRpcStats(): {
   };
 
   return {
-    active: getActiveEndpointLabel('primary'),
-    activeUrl: maskUrl(getRpcUrl('primary')),
+    active: pActive?.endpoint.label || 'primary',
+    activeUrl: maskUrl(pActive?.endpoint.url || ''),
     primary: {
       label: pActive?.endpoint.label || 'primary',
       url: maskUrl(pActive?.endpoint.url || ''),
@@ -2667,22 +2759,30 @@ export async function testConnection(): Promise<boolean> {
 export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>> {
   ensureEndpoints();
   startRpcHealthMonitor();
-  const order: number[] = [];
-  const push = (i: number) => {
-    if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
-  };
-  push(preferredPrimary);
-  push(preferredSecondary);
-  push(preferredUtility);
-  push(preferredQuicknode);
-  push(activePrimary);
-  push(activeSecondary);
-  push(activeUtility);
-  for (const i of order) {
-    await probeEndpoint(i, 8_000);
-    await new Promise((r) => setTimeout(r, 200));
+  if (healthProbeRunning) {
+    return getRpcStats();
   }
-  await maybeSwitchEndpoints();
+  healthProbeRunning = true;
+  try {
+    const order: number[] = [];
+    const push = (i: number) => {
+      if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
+    };
+    push(preferredPrimary);
+    push(preferredSecondary);
+    push(preferredUtility);
+    push(preferredQuicknode);
+    push(activePrimary);
+    push(activeSecondary);
+    push(activeUtility);
+    for (const i of order) {
+      await probeEndpoint(i, 8_000);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    await maybeSwitchEndpoints();
+  } finally {
+    healthProbeRunning = false;
+  }
   return getRpcStats();
 }
 
@@ -2706,12 +2806,39 @@ export function startRpcHealthMonitor(): void {
       // Non-share: never probe while quarantined (window must elapse first).
       const st = endpoints[index];
       if (st && isEndpointHardFailed(st)) return false;
+      // Unhealthy / rate-limited: sparse probes only.
+      if (
+        st &&
+        (!st.healthy || isEndpointRateLimited(st)) &&
+        cycle % 8 !== 0
+      ) {
+        return false;
+      }
       return true;
     }
     const state = endpoints[index];
     if (!state) return false;
     // Quarantine: no probes until cooldown elapses (prevents retry storms).
     if (isEndpointHardFailed(state)) return false;
+    const downish = !state.healthy || isEndpointRateLimited(state);
+    // Down preferred/backup: at most every 8th cycle; backups rarer if primary also down.
+    if (downish) {
+      const prefOfPool =
+        state.provider === 'helius'
+          ? preferredPrimary
+          : state.provider === 'alchemy'
+            ? preferredSecondary
+            : -1;
+      const prefDown =
+        prefOfPool >= 0 &&
+        endpoints[prefOfPool] &&
+        (!endpoints[prefOfPool]!.healthy ||
+          isEndpointRateLimited(endpoints[prefOfPool]!));
+      if (state.slot === 'backup' && prefDown) {
+        return cycle % 12 === 0;
+      }
+      return cycle % 8 === 0;
+    }
     const isPublic = isPublicRpcUrl(state.endpoint.url);
     const isUtil = index === preferredUtility;
     const isPrimary = index === preferredPrimary;
@@ -2770,36 +2897,36 @@ export function startRpcHealthMonitor(): void {
     return cycle % 5 === 0;
   }
 
-  // Boot: probe utility/public first, then preferred paid lanes once (not all fallbacks).
-  void (async () => {
-    const order: number[] = [];
-    const push = (i: number) => {
-      if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
-    };
-    if (Boolean(config.rpc?.shareLoad)) {
-      push(preferredUtility);
-      for (let i = 0; i < endpoints.length; i++) {
-        if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) push(i);
+  async function runHealthProbeCycle(opts?: {
+    boot?: boolean;
+  }): Promise<void> {
+    if (healthProbeRunning) return;
+    healthProbeRunning = true;
+    try {
+      if (opts?.boot) {
+        const order: number[] = [];
+        const push = (i: number) => {
+          if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
+        };
+        if (Boolean(config.rpc?.shareLoad)) {
+          push(preferredUtility);
+          for (let i = 0; i < endpoints.length; i++) {
+            if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) push(i);
+          }
+          push(preferredPrimary);
+          push(preferredSecondary);
+          push(preferredQuicknode);
+        } else {
+          for (let i = 0; i < endpoints.length; i++) push(i);
+        }
+        for (const i of order) {
+          await probeEndpoint(i);
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        return;
       }
-      push(preferredPrimary);
-      push(preferredSecondary);
-      push(preferredQuicknode);
-    } else {
-      for (let i = 0; i < endpoints.length; i++) push(i);
-    }
-    for (const i of order) {
-      await probeEndpoint(i);
-      await new Promise((r) => setTimeout(r, 400));
-    }
-  })();
-
-  healthTimer = setInterval(() => {
-    void (async () => {
       healthCycle += 1;
       const gateSnap = getRpcGateSnapshot();
-      // During overload, skip inactive fallbacks — but ALWAYS keep probing
-      // preferred lane endpoints so a failed-over preferred can recover.
-      // (Previously preferred stayed sticky-DOWN for hours while stressed.)
       for (let i = 0; i < endpoints.length; i++) {
         if (!shouldProbeIndex(i, healthCycle)) continue;
         const isActive =
@@ -2839,7 +2966,16 @@ export function startRpcHealthMonitor(): void {
       } catch {
         /* */
       }
-    })();
+    } finally {
+      healthProbeRunning = false;
+    }
+  }
+
+  // Boot: probe utility/public first, then preferred paid lanes once (not all fallbacks).
+  void runHealthProbeCycle({ boot: true });
+
+  healthTimer = setInterval(() => {
+    void runHealthProbeCycle();
   }, interval);
 
   console.log(

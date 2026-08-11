@@ -350,8 +350,8 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
     out.utility.queued > 0 ||
     out.utility.inFlight >= Math.max(1, out.utility.maxConcurrent) ||
     out.secondary.queued > 2 ||
-    out.primary.hitConcurrency > 0 ||
-    out.primary.queued > 0;
+    out.primary.queued > 0 ||
+    out.primary.inFlight >= Math.max(1, out.primary.maxConcurrent);
   return { lanes: out, backlog, stressed };
 }
 
@@ -381,10 +381,16 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
       reason: load.reasons[0] || 'adaptive shed for Critical',
     };
   }
-  if (kind === 'utility' && load.utilitySlowFactor >= 3) {
+  // Favourites must yield during Critical shed (utilitySlowFactor tops out ~2.5).
+  if (
+    kind === 'utility' &&
+    (load.shedBackground || load.utilitySlowFactor >= 2)
+  ) {
     return {
       defer: true,
-      reason: `utility adaptive×${load.utilitySlowFactor}`,
+      reason: load.shedBackground
+        ? load.reasons[0] || 'adaptive shed for Critical'
+        : `utility adaptive×${load.utilitySlowFactor}`,
     };
   }
   } catch {

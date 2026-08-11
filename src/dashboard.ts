@@ -26615,6 +26615,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 : mem.slot === 'solo'
                   ? ' (solo)'
                   : '';
+            const failBit =
+              mem.consecutiveFailures > 0
+                ? ' · fails×' + mem.consecutiveFailures
+                : mem.consecutiveSuccesses > 0 && mem.consecutiveSuccesses < 2
+                  ? ' · recover ' + mem.consecutiveSuccesses + '/2'
+                  : '';
+            const coolBit =
+              mem.cooldownRemainingMs > 0
+                ? ' · cool ' + Math.ceil(mem.cooldownRemainingMs / 1000) + 's'
+                : '';
             el.textContent =
               slotLabel +
               readyBit +
@@ -26625,7 +26635,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 ? ' · ' + Math.round(mem.latencyEwmaMs) + 'ms'
                 : '') +
               ' · ' +
-              st;
+              st +
+              failBit +
+              coolBit;
             el.title =
               (mem.label || '') +
               ' · ' +
@@ -26633,7 +26645,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               (mem.lastError && mem.lastError !== 'none'
                 ? ' · last ' + mem.lastError
                 : '') +
-              (mem.lastErrorDetail ? ' · ' + mem.lastErrorDetail : '');
+              (mem.lastErrorDetail ? ' · ' + mem.lastErrorDetail : '') +
+              failBit +
+              coolBit;
           };
           paintPill('rpc-' + name + '-primary', primary, 'primary');
           paintPill('rpc-' + name + '-backup', backup, 'backup');
@@ -26646,7 +26660,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 : 'fo —';
             const cnt =
               pool.failoverCountRecent != null && pool.failoverCountRecent > 0
-                ? '×' + pool.failoverCountRecent
+                ? '×' + pool.failoverCountRecent + '/10m'
                 : '';
             const errMem =
               members.find(function (m) {
@@ -26654,6 +26668,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               }) || null;
             const bak =
               pool.backupStatus === 'ready' ? 'backup ready' : 'backup unset';
+            const stickyBit =
+              pool.softStickyRemainingMs > 0
+                ? ' · sticky ' +
+                  Math.ceil(Number(pool.softStickyRemainingMs) / 1000) +
+                  's'
+                : pool.shareMode === 'failover'
+                  ? ' · backup active'
+                  : '';
+            const downBit =
+              pool.preferredDownForMs > 0
+                ? ' · pref down ' +
+                  Math.round(Number(pool.preferredDownForMs) / 1000) +
+                  's'
+                : '';
             const errBit = errMem
               ? ' · err ' +
                 errMem.lastError +
@@ -26669,6 +26697,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               bak +
               ' · active ' +
               (pool.activeLabel || '—') +
+              stickyBit +
+              downBit +
               ' · ' +
               fo +
               (cnt ? ' ' + cnt : '') +

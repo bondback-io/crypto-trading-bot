@@ -1590,48 +1590,60 @@ export function resolveSoftWatchCap(): {
   paused: boolean;
   shareLoad: boolean;
   defaultCap: number;
+  /** Cap after RPC-pressure auto-tighten (may be lower than configured). */
+  pressureTightened: boolean;
 } {
   const shareLoad = Boolean(config.rpc?.shareLoad);
   const defaultCap = shareLoad ? 8 : 16;
+  let effectiveCap = defaultCap;
+  let source: 'env' | 'config' | 'default' = 'default';
   if (
     process.env.RPC_SOFT_WATCH_CAP != null &&
     process.env.RPC_SOFT_WATCH_CAP !== '' &&
     Number.isFinite(Number(process.env.RPC_SOFT_WATCH_CAP))
   ) {
-    const effectiveCap = Math.max(
+    effectiveCap = Math.max(
       0,
       Math.min(200, Math.round(Number(process.env.RPC_SOFT_WATCH_CAP)))
     );
-    return {
-      effectiveCap,
-      source: 'env',
-      paused: effectiveCap === 0,
-      shareLoad,
-      defaultCap,
-    };
-  }
-  if (
+    source = 'env';
+  } else if (
     config.rpc?.softWatchCap != null &&
     Number.isFinite(Number(config.rpc.softWatchCap))
   ) {
-    const effectiveCap = Math.max(
+    effectiveCap = Math.max(
       0,
       Math.min(200, Math.round(Number(config.rpc.softWatchCap)))
     );
-    return {
-      effectiveCap,
-      source: 'config',
-      paused: effectiveCap === 0,
-      shareLoad,
-      defaultCap,
-    };
+    source = 'config';
   }
+
+  let pressureTightened = false;
+  try {
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    const { getRpcGateSnapshot } =
+      require('./rpcGate') as typeof import('./rpcGate');
+    const load = getRpcLoadControlSnapshot();
+    const gate = getRpcGateSnapshot();
+    if (load.shedBackground || gate.stressed) {
+      const tightened = Math.min(effectiveCap, 4);
+      if (tightened < effectiveCap) {
+        effectiveCap = tightened;
+        pressureTightened = true;
+      }
+    }
+  } catch {
+    /* */
+  }
+
   return {
-    effectiveCap: defaultCap,
-    source: 'default',
-    paused: false,
+    effectiveCap,
+    source,
+    paused: effectiveCap === 0,
     shareLoad,
     defaultCap,
+    pressureTightened,
   };
 }
 
