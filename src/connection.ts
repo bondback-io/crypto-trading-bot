@@ -428,6 +428,80 @@ function isStrongUtilityEndpoint(state: EndpointState | undefined): boolean {
   return false;
 }
 
+/** Min absolute EWMA gap for “clearly better” Utility escape (ms). */
+const CLEAR_UTILITY_LATENCY_GAP_MS = 120;
+
+/** a is clearly healthier/faster than b — used for Share+Utility public escape. */
+function isClearlyBetterUtility(
+  a: EndpointState | undefined,
+  b: EndpointState | undefined
+): boolean {
+  if (!a || !isEndpointUsable(a)) return false;
+  if (!b || !isEndpointUsable(b)) return true;
+  const aTotal = a.successCount + a.failureCount;
+  const bTotal = b.successCount + b.failureCount;
+  const aRate = aTotal > 0 ? a.successCount / aTotal : 1;
+  const bRate = bTotal > 0 ? b.successCount / bTotal : 1;
+  if (aRate > bRate + 0.12) return true;
+  const aMs = a.latencyMs;
+  const bMs = b.latencyMs;
+  if (aMs == null) return false;
+  if (bMs == null) return true;
+  if (aMs <= LATENCY_RECOVER_MS && bMs > LATENCY_RECOVER_MS) return true;
+  return aMs < bMs * 0.7 && bMs - aMs >= CLEAR_UTILITY_LATENCY_GAP_MS;
+}
+
+function isPaidCriticalOrScannerUrl(url: string): boolean {
+  const u = (url || '').toLowerCase();
+  return (
+    u.includes('helius') ||
+    u.includes('alchemy') ||
+    u.includes('helius-rpc') ||
+    u.includes('g.alchemy')
+  );
+}
+
+/**
+ * Share+Utility: leave very slow preferred weak public when a clearly faster
+ * healthy public / rpc-url / utility exists (never Helius/Alchemy/QN here).
+ */
+function pickClearlyBetterUtilityAlt(preferredIdx: number): number {
+  const pref = endpoints[preferredIdx];
+  if (!pref || !isEndpointUsable(pref)) return -1;
+  // Only escape weak publics — strong rpc-url preferred stays.
+  if (!isWeakPublicUtilityUrl(pref.endpoint.url)) return -1;
+  let best = -1;
+  for (let i = 0; i < endpoints.length; i++) {
+    if (i === preferredIdx) continue;
+    const e = endpoints[i];
+    if (!e || !isEndpointUsable(e)) continue;
+    const label = (e.endpoint.label || '').toLowerCase();
+    if (
+      label === 'quicknode' ||
+      label === 'helius' ||
+      label === 'alchemy' ||
+      isQuicknodeRpcUrl(e.endpoint.url) ||
+      isPaidCriticalOrScannerUrl(e.endpoint.url)
+    ) {
+      continue;
+    }
+    // Official mainnet-beta is never the escape target (wallet polls stay slow).
+    if (isOfficialMainnetBetaRpcUrl(e.endpoint.url)) continue;
+    const isAltPublic =
+      isPublicRpcUrl(e.endpoint.url) ||
+      e.role === 'fallback' ||
+      e.role === 'utility' ||
+      label === 'rpc-url' ||
+      label === 'publicnode' ||
+      label === 'mainnet' ||
+      label === 'mainnet-triton';
+    if (!isAltPublic) continue;
+    if (!isClearlyBetterUtility(e, pref)) continue;
+    if (best < 0 || isClearlyBetterUtility(e, endpoints[best]!)) best = i;
+  }
+  return best;
+}
+
 function pickPreferredUtilityIndex(): number {
   // 1) Dedicated utility role that is not weak public
   for (let i = 0; i < endpoints.length; i++) {
@@ -811,6 +885,46 @@ function resolveIndexForRole(role: RpcRole): number {
       if (!e?.healthy || !isStrongUtilityEndpoint(e)) continue;
       setActiveForRole(role, i);
       return i;
+    }
+  }
+
+  // Share+Utility: leave very slow usable weak public when a clearly better
+  // public / rpc-url exists (never burn Helius/Alchemy). Runs even while
+  // preferred still looks "healthy" so sticky mainnet-beta/publicnode cannot pin.
+  const shareLoadEarly = Boolean(config.rpc?.shareLoad);
+  if (
+    shareLoadEarly &&
+    role === 'utility' &&
+    pref &&
+    isEndpointUsable(pref) &&
+    isWeakPublicUtilityUrl(pref.endpoint.url)
+  ) {
+    const alt = pickClearlyBetterUtilityAlt(preferred);
+    if (alt >= 0 && alt !== preferred) {
+      const other = endpoints[alt]!;
+      const now = Date.now();
+      if (
+        now - lastUtilityFailoverAt < UTILITY_FAILOVER_STICKY_MS &&
+        lastUtilityFailoverIdx === alt
+      ) {
+        setActiveForRole(role, alt);
+        return alt;
+      }
+      if (
+        now - (pref.lastLatencyFailoverLogAt || 0) >=
+        LATENCY_FAILOVER_LOG_THROTTLE_MS
+      ) {
+        pref.lastLatencyFailoverLogAt = now;
+        console.warn(
+          `[rpc] utility escape → ${other.endpoint.label}` +
+            ` (clearly better than ${pref.endpoint.label}` +
+            ` EWMA ${pref.latencyMs ?? '—'}ms → ${other.latencyMs ?? '—'}ms)`
+        );
+      }
+      lastUtilityFailoverAt = now;
+      lastUtilityFailoverIdx = alt;
+      setActiveForRole(role, alt);
+      return alt;
     }
   }
 

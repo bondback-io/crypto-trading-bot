@@ -10899,12 +10899,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Classic three-lane RPC (Share ON)</strong> — Helius Critical (<code>HELIUS_RPC_URL</code> or <code>HELIUS_API_KEY</code>) · Alchemy Scanners (<code>ALCHEMY_RPC_URL</code> or <code>ALCHEMY_API_KEY</code>) · Utility mainnet (<code>RPC_URL</code> / <code>api.mainnet-beta.solana.com</code>). Health probes auto-failover across lanes; preferred lane recovers when healthy. Dual <code>*_BACKUP</code> pools are not used.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius pool (primary then backup).</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy pool.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers publicnode.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Classic three-lane RPC (Share ON)</strong> — Helius Critical (<code>HELIUS_RPC_URL</code> or <code>HELIUS_API_KEY</code>) · Alchemy Scanners (<code>ALCHEMY_RPC_URL</code> or <code>ALCHEMY_API_KEY</code>) · Utility publicnode first (<code>RPC_URL</code> / Triton, official mainnet-beta last resort). Health probes auto-failover across lanes; preferred lane recovers when healthy. Dual <code>*_BACKUP</code> pools are not used.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers publicnode; escapes sticky slow weak publics to a healthier public/rpc-url (never burns Helius/Alchemy).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: sibling in the same provider pool first, then cross-provider, then mid-tier/public. Soft latency uses paid ≥1400ms / sticky; 429 fails over immediately.</div>
+            <div class="mint">Failover: preferred → other paid lane → QuickNode → public. Utility soft-escape stays on public/rpc-url only under Share ON.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>

@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.293',
+    title: 'Utility prefers publicnode + Share escape from sticky weak publics',
+    sections: ['overview', 'execution'],
+    items: [
+      'Utility lane prefers publicnode / Triton before official mainnet-beta (undoes 1.2.287 preference that hung Favourites from cloud hosts).',
+      'Share+Utility soft-escape: leave a clearly slower weak public for a healthier public/rpc-url without burning Helius/Alchemy — cools Critical/Secondary EWMA drag while scanners stay freer.',
+    ],
+  },
+  {
     version: '1.2.292',
     title: 'Steady medium hot lane — structure seed + stagnant rotate',
     sections: ['overview', 'scanners', 'microbots', 'zion'],
