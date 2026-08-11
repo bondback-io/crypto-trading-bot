@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.288',
+    title: 'Helius/Alchemy KEY2 same-provider spares (60m / credits)',
+    sections: ['overview', 'copy', 'execution', 'zion'],
+    items: [
+      'Optional HELIUS_API_KEY2 / ALCHEMY_API_KEY2 promote when KEY1 is down ≥60 minutes or hits credits/quota/auth — vice versa back to KEY1.',
+      'No dual-pool RR thrash: stay sticky on the active key until a promote rule fires; cross-lane piggyback remains last resort.',
+      'Classic three-lane Share ON unchanged (Critical=Helius, Scanners=Alchemy, Utility=mainnet).',
+    ],
+  },
+  {
     version: '1.2.287',
     title: 'Restore classic Helius / Alchemy / mainnet three-lane RPC',
     sections: ['overview', 'copy', 'execution', 'zion'],
