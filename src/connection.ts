@@ -234,6 +234,18 @@ const callMeter = new Map<
   }
 >();
 let callMeterStartedAt = Date.now();
+/** Soft sticky: stay on sibling after latency failover (key = role:provider). */
+const softStickyUntil = new Map<string, number>();
+
+function softStickyKey(role: RpcRole, provider: string): string {
+  return `${role}:${provider}`;
+}
+
+function trimCallMeterIfNeeded(): void {
+  if (callMeter.size <= CALL_METER_MAX_KEYS) return;
+  callMeter.clear();
+  callMeterStartedAt = Date.now();
+}
 
 function callMeterKey(
   endpoint: string,
@@ -269,6 +281,7 @@ function recordHttpRpcCall(opts: {
   row.calls += 1;
   if (!opts.ok) row.errors += 1;
   row.totalMs += Math.max(0, opts.latencyMs);
+  trimCallMeterIfNeeded();
 }
 
 export function getRpcCallTraffic(limit = 40): {
@@ -389,22 +402,43 @@ function withRpcMaxAttemptsOther(): number {
 const UNHEALTHY_LOG_THROTTLE_MS = 15_000;
 /** EWMA weight for new samples — dampens single getTransaction spikes in the UI. */
 const LATENCY_EWMA_ALPHA = 0.22;
-/** EWMA above this → start latency-stress timer (matches rpcDiagnostic). */
-const LATENCY_STRESS_MS = 500;
-/** EWMA below this → clear latency stress (hysteresis). */
-const LATENCY_RECOVER_MS = 320;
+/**
+ * Paid Helius/Alchemy from Render often sit ~800–1200ms. Old 500ms threshold
+ * kept soft-failover armed forever and thrashed primary↔backup.
+ */
+const LATENCY_STRESS_MS_PAID = 1_400;
+const LATENCY_STRESS_MS_PUBLIC = 500;
+/** Hysteresis clear — must be below stress so a ~1s plateau can recover. */
+const LATENCY_RECOVER_MS_PAID = 1_000;
+const LATENCY_RECOVER_MS_PUBLIC = 320;
 /**
  * Utility may soft-fail onto QuickNode only when preferred EWMA is this hot
  * (after public/fallback alternatives) and QN is not already serving Critical/Scanners.
  */
 const UTILITY_QUICKNODE_STRESS_MS = 1000;
 /** Prefer piggyback after preferred stays latency-stressed this long. */
-const LATENCY_STRESS_GRACE_MS = 15_000;
+const LATENCY_STRESS_GRACE_MS = 20_000;
 /** Public Solana is often chronically slow from cloud hosts — fail over sooner. */
 const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
-/** Don't re-log latency piggyback more often than this. */
-const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
+/** Don't re-log latency / pool failover more often than this. */
+const LATENCY_FAILOVER_LOG_THROTTLE_MS = 60_000;
+/** Cap single samples so one 8s probe timeout cannot pin EWMA forever. */
+const LATENCY_SAMPLE_CAP_MS = 2_500;
+/** After a latency soft-failover to sibling, stay put this long (no RR flip-back). */
+const LATENCY_SOFT_STICKY_MS = 90_000;
 const FAILOVER_COUNT_WINDOW_MS = 10 * 60_000;
+/** Reset call-meter map when it grows past this (unbounded feature×method keys). */
+const CALL_METER_MAX_KEYS = 180;
+
+function latencyStressMs(state: EndpointState | undefined): number {
+  if (state && isPublicRpcUrl(state.endpoint.url)) return LATENCY_STRESS_MS_PUBLIC;
+  return LATENCY_STRESS_MS_PAID;
+}
+
+function latencyRecoverMs(state: EndpointState | undefined): number {
+  if (state && isPublicRpcUrl(state.endpoint.url)) return LATENCY_RECOVER_MS_PUBLIC;
+  return LATENCY_RECOVER_MS_PAID;
+}
 
 function latencyStressGraceMs(state: EndpointState | undefined): number {
   if (state && isPublicRpcUrl(state.endpoint.url)) {
@@ -549,19 +583,33 @@ function logPoolFailover(
   const from = endpoints[fromIdx];
   const to = endpoints[toIdx];
   if (!from || !to) return;
-  const toBackup =
-    to.slot === 'backup' ||
-    (from.provider === to.provider && from.slot !== to.slot);
-  if (toBackup && from.provider === to.provider) {
-    console.warn(
-      `rpc_failover_to_backup provider=${provider} from=${slotLabel(from.slot)} to=${slotLabel(to.slot)} reason=${reason}`
-    );
-  } else {
-    console.warn(
-      `rpc_failover_to_provider from=${from.provider} to=${to.provider} reason=${reason}`
-    );
+  const now = Date.now();
+  const throttleMs =
+    reason === 'latency'
+      ? LATENCY_FAILOVER_LOG_THROTTLE_MS
+      : Math.min(30_000, LATENCY_FAILOVER_LOG_THROTTLE_MS);
+  const skipLog =
+    now - (from.lastLatencyFailoverLogAt || 0) < throttleMs &&
+    reason === 'latency';
+  if (!skipLog) {
+    from.lastLatencyFailoverLogAt = now;
+    const toBackup =
+      to.slot === 'backup' ||
+      (from.provider === to.provider && from.slot !== to.slot);
+    if (toBackup && from.provider === to.provider) {
+      console.warn(
+        `rpc_failover_to_backup provider=${provider} from=${slotLabel(from.slot)} to=${slotLabel(to.slot)} reason=${reason}`
+      );
+    } else {
+      console.warn(
+        `rpc_failover_to_provider from=${from.provider} to=${to.provider} reason=${reason}`
+      );
+    }
   }
-  noteFailoverEvent(provider);
+  // Count at most once per throttle window for latency (stops UI ×38 spam).
+  if (reason !== 'latency' || !skipLog) {
+    noteFailoverEvent(provider);
+  }
 }
 
 function logCrossProviderFailover(
@@ -1060,7 +1108,7 @@ function acceptFailoverTarget(
     const reason = rateLimited
       ? 'rate-limited'
       : latencySoft
-        ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${LATENCY_STRESS_MS}ms for ${Math.round(latencyStressGraceMs(pref) / 1000)}s`
+        ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${latencyStressMs(pref)}ms for ${Math.round(latencyStressGraceMs(pref) / 1000)}s`
         : `preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s`;
     const now = Date.now();
     if (
@@ -1100,6 +1148,29 @@ function resolveIndexForRole(role: RpcRole): number {
         : null;
 
   if (preferProvider && shareLoad) {
+    const stickyKey = softStickyKey(role, preferProvider);
+    const stickyUntil = softStickyUntil.get(stickyKey) || 0;
+    if (stickyUntil > Date.now()) {
+      // Stay on last active sibling during soft-sticky window (stops RR flip-back).
+      const cur =
+        role === 'primary'
+          ? activePrimary
+          : role === 'secondary'
+            ? activeSecondary
+            : activeUtility;
+      if (
+        cur !== preferred &&
+        cur >= 0 &&
+        endpoints[cur] &&
+        isEndpointUsable(endpoints[cur]) &&
+        endpoints[cur]!.provider === preferProvider
+      ) {
+        return cur;
+      }
+    } else if (stickyUntil) {
+      softStickyUntil.delete(stickyKey);
+    }
+
     const feature = rpcFeatureAls.getStore() || '';
     const sendish = /send|confirm|rawTransaction|legacy/i.test(feature);
     const poolPick = sendish
@@ -1112,7 +1183,7 @@ function resolveIndexForRole(role: RpcRole): number {
         !isEndpointRateLimited(picked) &&
         !(poolPick === preferred && latencySoft)
       ) {
-        // Soft latency on preferred: still allow sibling RR if sibling healthier
+        // Soft latency on preferred: only RR to sibling if meaningfully faster
         if (latencySoft && poolPick === preferred) {
           const sib = pickSibling(preferred, preferProvider);
           if (sib >= 0 && isFasterAlternate(pref!, endpoints[sib]!)) {
@@ -1122,9 +1193,16 @@ function resolveIndexForRole(role: RpcRole): number {
               sib,
               'latency'
             );
+            softStickyUntil.set(
+              softStickyKey(role, preferProvider),
+              Date.now() + LATENCY_SOFT_STICKY_MS
+            );
             setActiveForRole(role, sib);
             return sib;
           }
+          // Sibling not faster — stay on preferred (no thrash)
+          setActiveForRole(role, preferred);
+          return preferred;
         } else if (!latencySoft || poolPick !== preferred) {
           setActiveForRole(role, poolPick);
           return poolPick;
@@ -1159,6 +1237,17 @@ function resolveIndexForRole(role: RpcRole): number {
     if (hard || latencySoft) {
       const sib = pickSibling(preferred, preferProvider);
       if (sib >= 0) {
+        const sibState = endpoints[sib]!;
+        // Latency soft-failover only when sibling is meaningfully faster —
+        // otherwise both ~1s endpoints thrash forever with zero benefit.
+        if (
+          latencySoft &&
+          !hard &&
+          !isFasterAlternate(pref, sibState)
+        ) {
+          setActiveForRole(role, preferred);
+          return preferred;
+        }
         const reason = rateLimited
           ? '429'
           : isRpcQuotaMessage(pref.lastError || '')
@@ -1166,7 +1255,13 @@ function resolveIndexForRole(role: RpcRole): number {
             : latencySoft
               ? 'latency'
               : classifyRpcError(pref.lastError);
-        logPoolFailover(preferProvider, preferred, sib, reason);
+        logPoolFailover(preferProvider, preferred, sib, String(reason));
+        if (latencySoft && !hard) {
+          softStickyUntil.set(
+            softStickyKey(role, preferProvider),
+            Date.now() + LATENCY_SOFT_STICKY_MS
+          );
+        }
         setActiveForRole(role, sib);
         return sib;
       }
@@ -1427,7 +1522,7 @@ function recordSuccess(index: number, latencyMs: number): void {
     state.rateLimitedUntil > Date.now() ||
     state.hardFailUntil > Date.now();
   state.successCount += 1;
-  const sample = Math.max(0, latencyMs);
+  const sample = Math.min(LATENCY_SAMPLE_CAP_MS, Math.max(0, latencyMs));
   state.lastCallLatencyMs = sample;
   // EWMA so a single slow getTransaction does not paint the whole endpoint as 800ms+.
   state.latencyMs =
@@ -1474,11 +1569,11 @@ function updateLatencyStress(state: EndpointState): void {
     state.latencyStressedSince = null;
     return;
   }
-  if (ewma < LATENCY_RECOVER_MS) {
+  if (ewma < latencyRecoverMs(state)) {
     state.latencyStressedSince = null;
     return;
   }
-  if (ewma >= LATENCY_STRESS_MS) {
+  if (ewma >= latencyStressMs(state)) {
     if (state.latencyStressedSince == null) {
       state.latencyStressedSince = Date.now();
       console.warn(
@@ -1491,7 +1586,12 @@ function updateLatencyStress(state: EndpointState): void {
 /** Preferred is OK on errors but EWMA has stayed hot long enough to piggyback. */
 function latencyFailoverReady(state: EndpointState | undefined): boolean {
   if (!state?.latencyStressedSince) return false;
-  if (state.latencyMs == null || state.latencyMs < LATENCY_STRESS_MS) return false;
+  if (
+    state.latencyMs == null ||
+    state.latencyMs < latencyStressMs(state)
+  ) {
+    return false;
+  }
   return Date.now() - state.latencyStressedSince >= latencyStressGraceMs(state);
 }
 
@@ -1503,7 +1603,11 @@ function isFasterAlternate(
   const otherMs = other.latencyMs;
   if (prefMs == null) return false;
   if (otherMs == null) return other.healthy;
-  return otherMs <= LATENCY_RECOVER_MS || otherMs < prefMs * 0.65;
+  // Require clear win — ~same ~1s RTT must NOT flip.
+  return (
+    otherMs <= latencyRecoverMs(preferred) ||
+    otherMs < prefMs * 0.7
+  );
 }
 
 function recordFailure(index: number, error: string): void {
@@ -1831,9 +1935,13 @@ export function getRpcStats(): {
   plainLanguage: string;
 } {
   ensureEndpoints();
-  const pIdx = resolveIndexForRole('primary');
-  const sIdx = resolveIndexForRole('secondary');
-  const uIdx = resolveIndexForRole('utility');
+  // Use last active indices — do NOT call resolveIndexForRole here.
+  // Status polls every 5s were side-effecting soft-failover + log storms.
+  const clampIdx = (i: number, fallback: number) =>
+    i >= 0 && i < endpoints.length ? i : fallback;
+  const pIdx = clampIdx(activePrimary, preferredPrimary);
+  const sIdx = clampIdx(activeSecondary, preferredSecondary);
+  const uIdx = clampIdx(activeUtility, preferredUtility);
   const pPref = endpoints[preferredPrimary];
   const sPref = endpoints[preferredSecondary];
   const uPref = endpoints[preferredUtility];
@@ -2627,14 +2735,14 @@ export function startRpcHealthMonitor(): void {
         index !== activeUtility &&
         state.latencyStressedSince != null &&
         state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
+        state.latencyMs >= latencyStressMs(state)
       ) {
         return cycle % 4 === 0;
       }
       if (
         state.latencyStressedSince != null &&
         state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
+        state.latencyMs >= latencyStressMs(state)
       ) {
         return cycle % 2 === 0;
       }

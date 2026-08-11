@@ -26101,12 +26101,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     async function refresh() {
       if (window._refreshInFlight) return;
+      // Under RPC stress, skip every other poll to cut /api/status fan-out load.
+      if (window._rpcStressed) {
+        window._rpcStressSkip = (window._rpcStressSkip || 0) + 1;
+        if (window._rpcStressSkip % 2 === 1) return;
+      }
       window._refreshInFlight = true;
       const positionsGenAtStart = window._openPositionsGen || 0;
       try {
       const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
         fetchJSON('/api/status'),
-        fetchJSON('/api/positions'),
+        fetchJSON('/api/positions?fast=1'),
         fetchJSON('/api/logs?limit=50'),
         fetchJSON('/api/activity'),
         fetchJSON('/api/config'),
@@ -26118,6 +26123,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
         fetchJSON('/api/zion').catch(() => null),
       ]);
+      try {
+        const rpc = status && status.rpc;
+        window._rpcStressed = Boolean(
+          rpc &&
+            (rpc.summary === 'failover_active' ||
+              rpc.summary === 'provider_down' ||
+              rpc.summary === 'degraded' ||
+              (rpc.gate && rpc.gate.stressed))
+        );
+      } catch (_) {
+        window._rpcStressed = false;
+      }
       try { if (zionData) handleZionRefresh(zionData); } catch (_) {}
       try { refreshDashboardNotifications(); } catch (_) {}
       try {

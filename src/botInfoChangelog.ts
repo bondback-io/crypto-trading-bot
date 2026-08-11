@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.279',
+    title: 'Stop RPC latency failover thrash (Render lag/crashes)',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Paid RPC soft-failover threshold raised (~1.4s); sibling flip only if meaningfully faster; 90s sticky after latency failover.',
+      'Throttle rpc_failover_to_backup logs; /api/status no longer side-effects resolve/failover every poll.',
+      'Dashboard backs off refresh under RPC stress; positions poll uses fast path; call-meter map capped.',
+    ],
+  },
+  {
     version: '1.2.278',
     title: 'Fix bad RPC URL coercion + clearer pool health',
     sections: ['overview', 'execution', 'knobs'],
