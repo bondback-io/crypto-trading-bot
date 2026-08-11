@@ -538,10 +538,51 @@ function isEndpointUsable(state: EndpointState | undefined): boolean {
   return state.healthy;
 }
 
-/** Preferred fully recovered after quarantine/unhealthy — needs repeated successes. */
+/** Preferred fully recovered after quarantine/unhealthy — needs repeated successes + latency OK. */
 function isFullyRecovered(state: EndpointState | undefined): boolean {
   if (!isEndpointUsable(state)) return false;
-  return (state!.consecutiveSuccesses || 0) >= RECOVERY_SUCCESS_NEEDED;
+  if ((state!.consecutiveSuccesses || 0) < RECOVERY_SUCCESS_NEEDED) return false;
+  const ewma = state!.latencyMs;
+  if (ewma != null && ewma >= latencyRecoverMs(state)) return false;
+  return true;
+}
+
+function endpointSuccessRate(state: EndpointState | undefined): number {
+  if (!state) return 0;
+  const ok = state.successCount || 0;
+  const fail = state.failureCount || 0;
+  const total = ok + fail;
+  if (total <= 0) return state.healthy ? 1 : 0;
+  return ok / total;
+}
+
+/** Min absolute EWMA gap so ~same RTT does not flip. */
+const CLEAR_LATENCY_GAP_MS = 250;
+
+/** True when `a` is clearly better than `b` (success rate and/or latency). */
+function isClearlyBetter(
+  a: EndpointState | undefined,
+  b: EndpointState | undefined
+): boolean {
+  if (!a || !isEndpointUsable(a)) return false;
+  if (!b || !isEndpointUsable(b)) return true;
+  const aRate = endpointSuccessRate(a);
+  const bRate = endpointSuccessRate(b);
+  if (aRate > bRate + 0.12) return true;
+  const aMs = a.latencyMs;
+  const bMs = b.latencyMs;
+  if (aMs == null) return false;
+  if (bMs == null) return true;
+  if (aMs <= latencyRecoverMs(b) && bMs > latencyRecoverMs(b)) return true;
+  return aMs < bMs * 0.7 && bMs - aMs >= CLEAR_LATENCY_GAP_MS;
+}
+
+/** Active is clearly worse than preferred — demote sticky backup. */
+function isClearlyWorse(
+  active: EndpointState | undefined,
+  preferred: EndpointState | undefined
+): boolean {
+  return isClearlyBetter(preferred, active);
 }
 
 function endpointCooldownRemainingMs(state: EndpointState): number {
@@ -584,18 +625,46 @@ function pickRoundRobinFromPool(provider: 'helius' | 'alchemy'): number {
   return -1;
 }
 
-/** Lowest EWMA among healthy (send / critical confirm path). */
+/** Best pool member: success rate → lower EWMA → primary slot tie-break. */
 function pickHealthiestFromPool(provider: 'helius' | 'alchemy'): number {
   const idxs = poolIndicesFor(provider);
   let best = -1;
+  let bestRate = -1;
   let bestMs = Number.POSITIVE_INFINITY;
+  let bestPrimary = false;
   for (const i of idxs) {
     const e = endpoints[i];
     if (!isEndpointUsable(e)) continue;
+    const rate = endpointSuccessRate(e);
     const ms = e!.latencyMs ?? 9999;
-    if (ms < bestMs) {
-      bestMs = ms;
+    const isPrimary = e!.slot === 'primary' || e!.slot === 'solo';
+    if (best < 0) {
       best = i;
+      bestRate = rate;
+      bestMs = ms;
+      bestPrimary = isPrimary;
+      continue;
+    }
+    if (rate > bestRate + 0.08) {
+      best = i;
+      bestRate = rate;
+      bestMs = ms;
+      bestPrimary = isPrimary;
+      continue;
+    }
+    if (rate < bestRate - 0.08) continue;
+    if (ms + 1 < bestMs) {
+      best = i;
+      bestRate = rate;
+      bestMs = ms;
+      bestPrimary = isPrimary;
+      continue;
+    }
+    if (Math.abs(ms - bestMs) <= 80 && isPrimary && !bestPrimary) {
+      best = i;
+      bestRate = rate;
+      bestMs = ms;
+      bestPrimary = isPrimary;
     }
   }
   return best;
@@ -775,6 +844,38 @@ function isStrongUtilityEndpoint(state: EndpointState | undefined): boolean {
     return !isPublicRpcUrl(state.endpoint.url) || label === 'rpc-url';
   }
   return false;
+}
+
+/**
+ * Share+Utility: leave very slow preferred publicnode when a clearly faster
+ * healthy public / rpc-url / utility exists (never Helius/Alchemy/QN here).
+ */
+function pickClearlyBetterUtilityAlt(preferredIdx: number): number {
+  const pref = endpoints[preferredIdx];
+  if (!pref || !isEndpointUsable(pref)) return -1;
+  let best = -1;
+  for (let i = 0; i < endpoints.length; i++) {
+    if (i === preferredIdx) continue;
+    const e = endpoints[i];
+    if (!e || !isEndpointUsable(e)) continue;
+    if (
+      e.endpoint.label === 'quicknode' ||
+      isQuicknodeRpcUrl(e.endpoint.url)
+    ) {
+      continue;
+    }
+    if (isOfficialMainnetBetaRpcUrl(e.endpoint.url)) continue;
+    const isAltPublic =
+      isPublicRpcUrl(e.endpoint.url) ||
+      e.role === 'fallback' ||
+      e.role === 'utility';
+    if (!isAltPublic) continue;
+    // Never promote paid Critical/Scanners hosts under Share+Utility.
+    if (e.provider === 'helius' || e.provider === 'alchemy') continue;
+    if (!isClearlyBetter(e, pref)) continue;
+    if (best < 0 || isClearlyBetter(e, endpoints[best]!)) best = i;
+  }
+  return best;
 }
 
 function pickPreferredUtilityIndex(): number {
@@ -1207,6 +1308,13 @@ function resolveIndexForRole(role: RpcRole): number {
       isEndpointUsable(endpoints[cur]) &&
       endpoints[cur]!.provider === preferProvider;
 
+    // Escape sticky/backup when preferred is clearly healthier/faster.
+    if (curUsableSibling && isClearlyWorse(endpoints[cur], pref)) {
+      softStickyUntil.delete(stickyKey);
+      setActiveForRole(role, preferred);
+      return preferred;
+    }
+
     if (stickyUntil > Date.now()) {
       // Stay on last active sibling during soft-sticky window (stops RR flip-back).
       if (curUsableSibling) {
@@ -1216,16 +1324,30 @@ function resolveIndexForRole(role: RpcRole): number {
       softStickyUntil.delete(stickyKey);
     }
 
-    // Prefer stay on backup/sibling until preferred fully recovers (2 successes).
+    // Prefer stay on backup/sibling until preferred fully recovers (2 successes + latency).
     if (curUsableSibling && !isFullyRecovered(pref)) {
       return cur;
     }
 
+    // Preferred recovered: promote primary (no RR to backup) unless backup is clearly better.
+    if (isFullyRecovered(pref) && !latencySoft) {
+      if (curUsableSibling && isClearlyBetter(endpoints[cur], pref)) {
+        setActiveForRole(role, cur);
+        return cur;
+      }
+      setActiveForRole(role, preferred);
+      return preferred;
+    }
+
     const feature = rpcFeatureAls.getStore() || '';
     const sendish = /send|confirm|rawTransaction|legacy/i.test(feature);
-    const poolPick = sendish
-      ? pickHealthiestFromPool(preferProvider)
-      : pickRoundRobinFromPool(preferProvider);
+    // Reads: prefer recovered primary; only RR when preferred is not fully recovered.
+    const poolPick =
+      isFullyRecovered(pref) && !latencySoft
+        ? preferred
+        : sendish
+          ? pickHealthiestFromPool(preferProvider)
+          : pickRoundRobinFromPool(preferProvider);
     if (poolPick >= 0) {
       const picked = endpoints[poolPick]!;
       if (
@@ -1254,6 +1376,15 @@ function resolveIndexForRole(role: RpcRole): number {
           setActiveForRole(role, preferred);
           return preferred;
         } else if (!latencySoft || poolPick !== preferred) {
+          // Prefer primary over equal RR peer when preferred is usable.
+          if (
+            poolPick !== preferred &&
+            isEndpointUsable(pref) &&
+            !isClearlyBetter(picked, pref!)
+          ) {
+            setActiveForRole(role, preferred);
+            return preferred;
+          }
           setActiveForRole(role, poolPick);
           return poolPick;
         }
@@ -1269,6 +1400,15 @@ function resolveIndexForRole(role: RpcRole): number {
       if (!e?.healthy || !isStrongUtilityEndpoint(e)) continue;
       setActiveForRole(role, i);
       return i;
+    }
+  }
+
+  // Share+Utility: leave very slow usable publicnode when a clearly better public/rpc-url exists.
+  if (shareLoad && role === 'utility' && pref && isEndpointUsable(pref)) {
+    const alt = pickClearlyBetterUtilityAlt(preferred);
+    if (alt >= 0) {
+      setActiveForRole(role, alt);
+      return alt;
     }
   }
 
@@ -1429,9 +1569,14 @@ function resolveIndexForRole(role: RpcRole): number {
       setActiveForRole(role, preferredQuicknode);
       return preferredQuicknode;
     }
-    // Share ON: stay sticky on preferred only while it is still usable.
-    // Dead/quarantined publicnode must not pin Favourites forever.
+    // Share ON: stay sticky on preferred only while it is still usable —
+    // and no clearly better public/rpc-url alt exists.
     if (shareLoad && isEndpointUsable(pref)) {
+      const alt = pickClearlyBetterUtilityAlt(preferred);
+      if (alt >= 0) {
+        setActiveForRole(role, alt);
+        return alt;
+      }
       setActiveForRole(role, preferred);
       return preferred;
     }
@@ -1528,9 +1673,13 @@ function resolveIndexForRole(role: RpcRole): number {
   }
 
   // Last resort: any healthy endpoint (even public for critical)
-  // Share+Utility: stay on preferred only when it is still usable — otherwise
-  // allow any healthy host so Favourites are not pinned to a dead publicnode.
+  // Share+Utility: stay on preferred only when usable and no clearly better alt.
   if (shareLoad && role === 'utility' && isEndpointUsable(endpoints[preferred])) {
+    const alt = pickClearlyBetterUtilityAlt(preferred);
+    if (alt >= 0) {
+      setActiveForRole(role, alt);
+      return alt;
+    }
     setActiveForRole(role, preferred);
     return preferred;
   }
@@ -2093,11 +2242,8 @@ export function getRpcStats(): {
     if (!members.length) shareMode = 'empty';
     else if (state === 'down') shareMode = 'down';
     else if (!hasBackup) shareMode = 'solo';
-    else if (
-      activeMem?.slot === 'backup' &&
-      primaryMem &&
-      primaryMem.state !== 'healthy'
-    ) {
+    else if (activeMem?.slot === 'backup') {
+      // Traffic truly on backup — Failover active (even if primary looks healthy).
       shareMode = 'failover';
     } else if (
       primaryMem?.state === 'healthy' &&
@@ -2106,7 +2252,10 @@ export function getRpcStats(): {
       shareMode = 'sharing';
     } else if (primaryMem?.state === 'healthy') {
       shareMode = 'primary_only';
-    } else if (backupMem?.state === 'healthy' || (backupMem && backupMem.state !== 'down')) {
+    } else if (
+      backupMem?.state === 'healthy' ||
+      (backupMem && backupMem.state !== 'down')
+    ) {
       shareMode = 'failover';
     } else {
       shareMode = 'down';
@@ -2161,12 +2310,19 @@ export function getRpcStats(): {
         errHint(backupMem) ? ` ${errHint(backupMem)}` : ''
       }) · active ${activeMem?.label || '—'}`;
     } else if (shareMode === 'failover') {
+      const prefState = endpoints[prefIdx];
+      const actState = activeIdx >= 0 ? endpoints[activeIdx] : undefined;
+      const backupByDesign =
+        primaryMem?.state === 'healthy' &&
+        isClearlyBetter(actState, prefState);
       const stickyBit =
-        stickyRem > 0
+        stickyRem > 0 && !backupByDesign && primaryMem?.state !== 'healthy'
           ? ` · sticky ${Math.ceil(stickyRem / 1000)}s`
-          : activeMem?.slot === 'backup'
+          : backupByDesign
             ? ' · backup active (by design)'
-            : '';
+            : primaryMem?.state === 'healthy'
+              ? ' · recovering to primary'
+              : '';
       const coolBit =
         primaryMem && primaryMem.cooldownRemainingMs > 0
           ? ` · primary cool ${Math.ceil(primaryMem.cooldownRemainingMs / 1000)}s`
@@ -2223,15 +2379,31 @@ export function getRpcStats(): {
   const anyDegraded =
     heliusPoolStats.state === 'degraded' ||
     alchemyPoolStats.state === 'degraded';
+  const heliusBackupActive = heliusPoolStats.members.some(
+    (m) => m.isActive && m.slot === 'backup'
+  );
+  const alchemyBackupActive = alchemyPoolStats.members.some(
+    (m) => m.isActive && m.slot === 'backup'
+  );
+  const primaryCrossProvider =
+    pIdx !== preferredPrimary &&
+    !(heliusPoolIndices.length
+      ? heliusPoolIndices.includes(pIdx)
+      : false);
+  const secondaryCrossProvider =
+    preferredSecondary !== preferredPrimary &&
+    sIdx !== preferredSecondary &&
+    !(alchemyPoolIndices.length
+      ? alchemyPoolIndices.includes(sIdx)
+      : false);
+  // Truthful failover: backup-active or real cross-provider — not soft-sticky/count alone.
   const anyFailover =
-    heliusPoolStats.failoverCountRecent > 0 ||
-    alchemyPoolStats.failoverCountRecent > 0 ||
-    heliusPoolStats.softStickyRemainingMs > 0 ||
-    alchemyPoolStats.softStickyRemainingMs > 0 ||
     heliusPoolStats.shareMode === 'failover' ||
     alchemyPoolStats.shareMode === 'failover' ||
-    pIdx !== preferredPrimary ||
-    (preferredSecondary !== preferredPrimary && sIdx !== preferredSecondary);
+    heliusBackupActive ||
+    alchemyBackupActive ||
+    primaryCrossProvider ||
+    secondaryCrossProvider;
   // Red "Provider down" only when every configured paid pool is down.
   // One pool down + other serving → failover_active (expected, not total outage).
   const heliusConfigured = heliusPoolStats.configured;
@@ -2280,12 +2452,23 @@ export function getRpcStats(): {
         'error';
       return `Helius primary ${err === '429' ? 'rate-limited' : err === 'quota' ? 'out of credits' : 'degraded'} — using Helius backup`;
     }
+    if (
+      heliusPoolStats.members.length > 1 &&
+      hActive &&
+      hActive.slot === 'backup'
+    ) {
+      return 'Helius on backup — recovering to primary';
+    }
     const aActive = alchemyPoolStats.members.find((m) => m.isActive);
     if (
       alchemyPoolStats.members.length > 1 &&
       aActive &&
       aActive.slot === 'backup'
     ) {
+      const aPrimary = alchemyPoolStats.members.find((m) => m.slot === 'primary');
+      if (aPrimary?.state === 'healthy') {
+        return 'Alchemy on backup — recovering to primary';
+      }
       return 'Alchemy primary degraded — using Alchemy backup';
     }
     const parts: string[] = [];
@@ -2386,14 +2569,22 @@ export function getRpcStats(): {
       label: pActive?.endpoint.label || 'primary',
       url: maskUrl(pActive?.endpoint.url || ''),
       healthy: Boolean(pPref?.healthy),
-      failover: pIdx !== preferredPrimary,
+      failover:
+        pIdx !== preferredPrimary &&
+        (pActive?.slot === 'backup' ||
+          pActive?.provider !== pPref?.provider ||
+          !heliusPoolIndices.includes(pIdx)),
       downForMs: downForMs(pPref),
     },
     secondary: {
       label: sActive?.endpoint.label || 'secondary',
       url: maskUrl(sActive?.endpoint.url || ''),
       healthy: Boolean(sPref?.healthy),
-      failover: sIdx !== preferredSecondary,
+      failover:
+        sIdx !== preferredSecondary &&
+        (sActive?.slot === 'backup' ||
+          sActive?.provider !== sPref?.provider ||
+          !alchemyPoolIndices.includes(sIdx)),
       downForMs: downForMs(sPref),
     },
     utility: {
@@ -2951,10 +3142,20 @@ export function startRpcHealthMonitor(): void {
         const gateAfter = getRpcGateSnapshot();
         const p = endpoints[activePrimary];
         const s = endpoints[activeSecondary];
+        const sPrefHeal = endpoints[preferredSecondary];
         const u = endpoints[activeUtility];
         updateRpcLoadSignals({
           primaryLatencyMs: p?.latencyMs ?? null,
-          secondaryLatencyMs: s?.latencyMs ?? null,
+          // Prefer recovered secondary primary latency when sticky still on worse backup —
+          // avoids inflated scanner×N / secondary skip pressure after Alchemy recovers.
+          secondaryLatencyMs:
+            sPrefHeal &&
+            isFullyRecovered(sPrefHeal) &&
+            s &&
+            activeSecondary !== preferredSecondary &&
+            isClearlyWorse(s, sPrefHeal)
+              ? (sPrefHeal.latencyMs ?? null)
+              : (s?.latencyMs ?? null),
           utilityLatencyMs: u?.latencyMs ?? null,
           utilityWeakPublic: isWeakPublicUtilityUrl(u?.endpoint.url),
           utilityFailover: activeUtility !== preferredUtility,

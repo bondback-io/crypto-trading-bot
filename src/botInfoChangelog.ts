@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.286',
+    title: 'Prefer fast healthy primaries over sticky slow backups',
+    sections: ['overview', 'copy', 'execution'],
+    items: [
+      'Demote clearly-worse Helius/Alchemy backups and promote recovered primaries (2 successes + latency OK) — scanners return to alchemy-primary.',
+      'Share+Utility leaves very slow publicnode when a healthier public/rpc-url exists (still no paid Critical/Scanners burn).',
+      'Failover / preferred DOWN only when traffic is truly on backup or preferred is unhealthy; helius-backup quarantine unchanged.',
+      'Secondary skip / scanner×N pressure eases once Alchemy primary is active again (honest recovered latency for load control).',
+    ],
+  },
+  {
     version: '1.2.285',
     title: 'Stop dual-RPC failover storms (sticky backup + probe backoff)',
     sections: ['overview', 'copy', 'execution'],
