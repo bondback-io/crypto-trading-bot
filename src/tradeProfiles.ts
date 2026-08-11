@@ -4473,6 +4473,8 @@ function scoreProfile(
     }
 
     // Social / KOL specialty may hold quieter tape; discretionary needs live volume.
+    // Collapsed (and decaying without uptick) must soft-skip for discretionary even
+    // when specialtyQuietOk — only armed Trend watches may ride quiet collapsed tape.
     const specialtyQuietOk =
       ctx.specialtyFeed === 'kolscan' ||
       ctx.specialtyFeed === 'jupiter' ||
@@ -4503,19 +4505,20 @@ function scoreProfile(
         /* optional */
       }
     }
+    const discTrend = ctx.armedWatch !== true;
+    if (discTrend && decay === 'collapsed' && !volUptick) {
+      return {
+        score: 0,
+        reason: 'trend_rider: volume collapsed (stale tape)',
+      };
+    }
+    if (discTrend && decay === 'decaying' && !volUptick) {
+      return {
+        score: 0,
+        reason: 'trend_rider: volume decaying (soft-skip stale tape)',
+      };
+    }
     if (!specialtyQuietOk) {
-      if (decay === 'collapsed' && !volUptick) {
-        return {
-          score: 0,
-          reason: 'trend_rider: volume collapsed (stale tape)',
-        };
-      }
-      if (decay === 'decaying' && !volUptick) {
-        return {
-          score: 0,
-          reason: 'trend_rider: volume decaying (soft-skip stale tape)',
-        };
-      }
       // Soft continuation / momentum: flat extension without pattern affinity
       const patterns = ctx.chartPatternIds || [];
       const hasContinuation = patterns.some((id) =>
@@ -4530,11 +4533,12 @@ function scoreProfile(
           reason: 'trend_rider: flat momentum without continuation pattern',
         };
       }
-    } else if (decay === 'collapsed' || decay === 'decaying') {
+    } else if (
+      ctx.armedWatch === true &&
+      (decay === 'collapsed' || decay === 'decaying')
+    ) {
       bits.push(
-        specialtyQuietOk
-          ? `quiet tape ok (${ctx.specialtyFeed || `${kolN} KOLs`})`
-          : 'quiet tape'
+        `quiet tape ok (${ctx.specialtyFeed || `${kolN} KOLs`})`
       );
     }
 

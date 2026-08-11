@@ -43,6 +43,29 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.292',
+    title: 'Steady medium hot lane — structure seed + stagnant rotate',
+    sections: ['overview', 'scanners', 'microbots', 'zion'],
+    items: [
+      'Medium/majors parks seed OHLCV into technical Fib/S so Steady can arm on real structure (not empty no_level statues).',
+      'Steady/HWR watching without levels now rotates (medium ~60m, majors ~80m; mega-caps ≥$500M still park to TTL).',
+      'Majors CYCLE/watch caps lowered (45/50) so selective majors do not crowd the medium hot lane; medium ranking prefers movement + |H1|/|24h|.',
+      'Watchlist chips (armed / near trigger / has level / no level / low movement / rotating) + honest no_levels funnel + Zion plain language for structure/rotate/arm counts.',
+    ],
+  },
+  {
+    version: '1.2.291',
+    title: 'Learning safe patches: late-chase Grad harden + MS/Trend/Dip/PCL',
+    sections: ['overview', 'execution', 'copy'],
+    items: [
+      'Harden Grad armed-reclaim late-chase relief — keep lateChaseAtEntry when detector fires; deny LC relief when extension ≥8% or secondary is late_chase.',
+      'MS: earlier first-spike bank (8% / 1.25× vol) + 180s post-mig max hold.',
+      'PCL: tighter fast/dip_trend peak giveback (24% / 36%) and slightly earlier MS armed partial.',
+      'Trend Rider: block collapsed/decaying disc specialty bypass; faster DOA flat+collapsed cut for discretionary (15m).',
+      'Dip: restricted support_dip_reclaim soft-allow requires armed reclaim while Dip E strongly negative.',
+    ],
+  },
+  {
     version: '1.2.290',
     title: 'Fix Closed Trades empty list + Zion mobile mic',
     sections: ['overview', 'zion'],

@@ -5501,6 +5501,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       color: #94a3b8;
       font-style: italic;
     }
+    .setup-watch-chips {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.2rem;
+      margin-left: 0.35rem;
+      vertical-align: middle;
+    }
+    .setup-watch-chip {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      padding: 0.08rem 0.35rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      background: rgba(30, 41, 59, 0.7);
+      text-transform: lowercase;
+    }
+    .setup-watch-chip.is-armed { color: #fbbf24; border-color: #a16207; }
+    .setup-watch-chip.is-near { color: #a5b4fc; border-color: #6366f1; }
+    .setup-watch-chip.is-level { color: #86efac; border-color: #16a34a; }
+    .setup-watch-chip.is-nolevel { color: #fca5a5; border-color: #b91c1c; }
+    .setup-watch-chip.is-lowmov { color: #fdba74; border-color: #c2410c; }
+    .setup-watch-chip.is-rotating { color: #e2e8f0; border-color: #64748b; }
     .setup-watch-row.is-terminal {
       opacity: 0.72;
     }
@@ -13810,6 +13835,62 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               escHtml(String(e.lastReason).slice(0, 48)) +
               '</span>'
             : '';
+        // Medium/majors quality chips: armed / near / has-level / no-level / low-mov / rotating
+        let qualityChips = '';
+        if (
+          kind === 'dip' &&
+          (String(e.source || '') === 'medium' ||
+            String(e.source || '') === 'majors')
+        ) {
+          const chipBits = [];
+          const hasLvl =
+            (e.fib05PriceSol != null && Number(e.fib05PriceSol) > 0) ||
+            (e.fib618PriceSol != null && Number(e.fib618PriceSol) > 0) ||
+            (e.supportPriceSol != null && Number(e.supportPriceSol) > 0) ||
+            e.nearKeyFib === true ||
+            e.nearSupport === true ||
+            (Number(e.multiTfSupportHits) || 0) > 0;
+          if (status === 'armed') {
+            chipBits.push(
+              '<span class="setup-watch-chip is-armed">armed</span>'
+            );
+          }
+          if (e.nearKeyFib === true || e.nearSupport === true) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-near">near trigger</span>'
+            );
+          }
+          if (hasLvl) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-level">has level</span>'
+            );
+          } else if (
+            e.qualityChip === 'no_level' ||
+            status === 'watching' ||
+            status === 'armed'
+          ) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-nolevel">no level</span>'
+            );
+          }
+          if (
+            e.movementActive === false ||
+            e.qualityChip === 'low_movement'
+          ) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-lowmov">low movement</span>'
+            );
+          }
+          if (e.qualityChip === 'rotated_stale') {
+            chipBits.push(
+              '<span class="setup-watch-chip is-rotating">rotating out</span>'
+            );
+          }
+          if (chipBits.length) {
+            qualityChips =
+              '<span class="setup-watch-chips">' + chipBits.join('') + '</span>';
+          }
+        }
         const actions =
           status === 'watching' || status === 'armed'
             ? '<div class="setup-watch-actions">' +
@@ -13853,6 +13934,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '">' +
           escHtml(status) +
           '</span>' +
+          qualityChips +
           (kind === 'dip' && String(e.source || '') === 'majors'
             ? '<span class="setup-watch-badge is-majors" title="High-MC majors feed (circulating MC)">' +
               (e.majorsBand
@@ -13923,20 +14005,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               return src !== 'majors' && src !== 'medium';
             })
             .sort(function (a, b) {
+              function hasLevel(e) {
+                return (
+                  (e.fib05PriceSol != null && Number(e.fib05PriceSol) > 0) ||
+                  (e.fib618PriceSol != null && Number(e.fib618PriceSol) > 0) ||
+                  (e.supportPriceSol != null && Number(e.supportPriceSol) > 0) ||
+                  e.nearKeyFib === true ||
+                  e.nearSupport === true ||
+                  (Number(e.multiTfSupportHits) || 0) > 0
+                );
+              }
               function rank(e) {
                 if (e.status === 'armed') return 0;
-                var near =
-                  e.nearKeyFib === true || e.nearSupport === true ? 1 : 2;
-                if (
+                var stagnant =
                   e.movementActive === false ||
                   e.qualityChip === 'low_movement' ||
-                  e.qualityChip === 'rotated_stale'
-                )
-                  return 4;
-                if (near === 1) return 1;
-                if (e.movementActive === true || e.qualityChip === 'active')
-                  return 2;
-                return 3;
+                  e.qualityChip === 'rotated_stale' ||
+                  e.qualityChip === 'no_level';
+                if (stagnant && !hasLevel(e)) return 5;
+                if (stagnant) return 4;
+                var near =
+                  e.nearKeyFib === true || e.nearSupport === true;
+                var mov =
+                  e.movementActive === true || e.qualityChip === 'active';
+                // has-level + movement before near-only / activity-only
+                if (hasLevel(e) && mov) return 1;
+                if (near) return 2;
+                if (mov) return 3;
+                if (hasLevel(e)) return 3;
+                return 4;
               }
               var ra = rank(a);
               var rb = rank(b);
@@ -14098,6 +14195,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (dipF.medium_candidates_seen || 0) +
                     '/' +
                     (dipF.majors_candidates_seen || 0) +
+                    ' · watch ' +
+                    ((dipF.mediumWatchingNow || 0) +
+                      (dipF.mediumArmedNow || 0)) +
+                    '/' +
+                    ((dipF.majorsWatchingNow || 0) +
+                      (dipF.majorsArmedNow || 0)) +
                     ' · armNow ' +
                     (dipF.mediumArmedNow || 0) +
                     '/' +
@@ -14106,10 +14209,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (dipF.medium_triggered || 0) +
                     '/' +
                     (dipF.majors_triggered || 0) +
+                    ' · open ' +
+                    (dipF.medium_opened || 0) +
+                    '/' +
+                    (dipF.majors_opened || 0) +
                     ' · exp ' +
                     (dipF.medium_expired || 0) +
                     '/' +
-                    (dipF.majors_expired || 0)
+                    (dipF.majors_expired || 0) +
+                    (dipF.no_levels_rotate
+                      ? ' · nlRot×' + dipF.no_levels_rotate
+                      : '')
                   : '') +
                 (dipF.minors_candidates_seen != null ||
                 dipF.minorsArmedNow != null

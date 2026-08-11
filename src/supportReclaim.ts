@@ -53,7 +53,8 @@ export interface SupportReclaimResult {
 }
 
 const DEFAULT_RECLAIM_TRIGGER_PCT = 1.5;
-const DEFAULT_LATE_CHASE_EXT_PCT = 8;
+/** Extension ≥ this % above level = late chase (shared Entry Skill / stamp). */
+export const DEFAULT_LATE_CHASE_EXT_PCT = 8;
 const DEFAULT_NEAR_BAND_PCT = 3;
 const DEFAULT_UNDERCUT_BAND_PCT = 1.5;
 

@@ -329,9 +329,9 @@ export function getShortTermParams(id: ShortTermStrategyId): ShortTermParams {
         minVolumeUsd: 0,
         minBuyPressureUsd: 0,
         maxHoldMs: 12 * 60_000,
-        spikePct: 10,
-        volumeMult: 1.45,
-        maxHoldAfterMigrateMs: 4 * 60_000,
+        spikePct: 8,
+        volumeMult: 1.25,
+        maxHoldAfterMigrateMs: 3 * 60_000,
       };
     }
     case 'reversal_scalp': {
@@ -713,13 +713,13 @@ export function evaluateMigrationEventExit(
   const SL_GRACE_RUG_PCT = -35;
   const slPct = view.slPct > 0 ? -Math.abs(view.slPct) : view.slPct;
   const spikePct =
-    view.spikePct != null && view.spikePct > 0 ? view.spikePct : 10;
+    view.spikePct != null && view.spikePct > 0 ? view.spikePct : 8;
   const volumeMult =
-    view.volumeMult != null && view.volumeMult > 1 ? view.volumeMult : 1.45;
+    view.volumeMult != null && view.volumeMult > 1 ? view.volumeMult : 1.25;
   const maxAfter =
     view.maxHoldAfterMigrateMs != null && view.maxHoldAfterMigrateMs > 0
       ? view.maxHoldAfterMigrateMs
-      : 4 * 60_000;
+      : 3 * 60_000;
   const hardDeadlineMs =
     view.hardDeadlineMs != null && view.hardDeadlineMs > view.deadlineMs
       ? view.hardDeadlineMs

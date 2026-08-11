@@ -956,7 +956,9 @@ export function evaluateAdaptiveProfileExit(input: {
     Math.abs(pnl) <= 2.5
   ) {
     const holdMs = Math.max(0, now - (Number(input.openedAt) || now));
-    const TREND_FLAT_COLLAPSED_DWELL_MS = 25 * 60_000;
+    // Armed holds get 25m; discretionary DOA cut sooner (learning: dead-tape disc bleed).
+    const TREND_FLAT_COLLAPSED_DWELL_MS =
+      input.armedWatch === true ? 25 * 60_000 : 15 * 60_000;
     if (holdMs >= TREND_FLAT_COLLAPSED_DWELL_MS) {
       return {
         type: 'full',

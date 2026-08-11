@@ -479,11 +479,16 @@ function stampEntryStyleOnBuyOpts(
       (buyOpts as { entryStyleSecondary?: string }).entryStyleSecondary =
         'late_chase';
     }
-    // Armed handoff with a reclaim hint is not a late-chase primary admit
-    (buyOpts as { lateChaseAtEntry?: boolean }).lateChaseAtEntry =
-      armed && hint && String(hint).toLowerCase() !== 'late_chase'
-        ? false
-        : lateChase;
+    // Keep lateChaseAtEntry when detector fired — reclaim hint only remaps primary
+    // style (learning / DNA), it must not erase the late-chase flag (Grad leak fix).
+    (buyOpts as { lateChaseAtEntry?: boolean }).lateChaseAtEntry = lateChase;
+    if (
+      lateChase &&
+      !(buyOpts as { entryStyleSecondary?: string }).entryStyleSecondary
+    ) {
+      (buyOpts as { entryStyleSecondary?: string }).entryStyleSecondary =
+        'late_chase';
+    }
     if (
       signal.dipWatchTriggered === true ||
       (Array.isArray(signal.scannerReasons) &&

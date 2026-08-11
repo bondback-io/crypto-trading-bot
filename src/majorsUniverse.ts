@@ -79,17 +79,19 @@ export const MEDIUM_MAJORS_MIN_AGE_HOURS = 30 * 24;
 /** Soft prefer ranking bonus ≥ 90 days */
 export const MEDIUM_MAJORS_PREFER_AGE_HOURS = 90 * 24;
 const FETCH_LIMIT = 100;
-/** Separate caps so majors do not starve medium (1.2.261: 80) */
-const CYCLE_CAP_MEDIUM = 80;
-const CYCLE_CAP_MAJORS = 80;
-const REFRESH_MS = 5 * 60_000;
-/** Time-gated no-levels: +1 streak every 20m without levels; rotate after 4 (~80m) */
+/** Time-gated no-levels: +1 streak every 20m without levels; majors rotate after 4 (~80m) */
 export const NO_LEVELS_ROTATE_AFTER = 4;
+/** Medium watches rotate sooner (~60m) so Steady inventory stays hot */
+export const NO_LEVELS_ROTATE_AFTER_MEDIUM = 3;
 const NO_LEVELS_STREAK_TICK_MS = 20 * 60_000;
 /** Park mega-caps without Fib/S until watch TTL — do not rotate on no-levels */
 export const NO_LEVELS_SKIP_ROTATE_MC_USD = 500_000_000;
 /** Reserve ~40% of CYCLE seats for mid-MC bands (20m/50m/100m) */
 const MID_BAND_SEAT_FRAC = 0.4;
+/** Separate caps — majors selective so they do not crowd medium (1.2.292) */
+const CYCLE_CAP_MEDIUM = 80;
+const CYCLE_CAP_MAJORS = 45;
+const REFRESH_MS = 5 * 60_000;
 
 /** Jupiter feeds to merge (each ≤100). Wider discovery than single toptraded/organic. */
 const DISCOVERY_FEEDS: Array<{
@@ -556,6 +558,8 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     mov: Number(c.movementScore) || 0,
     active: c.movementActive === false ? 0 : 1,
     vol: Number(c.volumeH1Usd) || 0,
+    absH1: Math.abs(Number(c.priceChangeH1Pct) || 0),
+    abs24: Math.abs(Number(c.priceChange24hPct) || 0),
     aged:
       c.tokenAgeHours != null &&
       c.tokenAgeHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS
@@ -568,6 +572,8 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     if (b.near !== a.near) return b.near - a.near;
     if (b.mov !== a.mov) return b.mov - a.mov;
     if (b.vol !== a.vol) return b.vol - a.vol;
+    if (b.absH1 !== a.absH1) return b.absH1 - a.absH1;
+    if (b.abs24 !== a.abs24) return b.abs24 - a.abs24;
     if (b.aged !== a.aged) return b.aged - a.aged;
     if (b.knownAge !== a.knownAge) return b.knownAge - a.knownAge;
     return b.c.marketCapUsd - a.c.marketCapUsd;
@@ -612,13 +618,15 @@ function pickCycleWithMidSeats(
 }
 
 /**
- * Time-gated no-levels rotate: +1 streak every 20 min without levels; rotate after 4 (~80m).
+ * Time-gated no-levels rotate: +1 streak every 20 min without levels.
+ * Medium: rotate after 3 (~60m). Majors: after 4 (~80m).
  * MC ≥ $500M: never rotate on no-levels (park until watch TTL).
  */
 export function noteMajorsLevelsPresence(
   mint: string,
   hasLevels: boolean,
-  marketCapUsd?: number | null
+  marketCapUsd?: number | null,
+  opts?: { watchBand?: 'medium' | 'majors' }
 ): { rotate: boolean; streak: number } {
   const key = String(mint || '').trim();
   if (!key) return { rotate: false, streak: 0 };
@@ -630,6 +638,10 @@ export function noteMajorsLevelsPresence(
   if (Number.isFinite(mc) && mc >= NO_LEVELS_SKIP_ROTATE_MC_USD) {
     return { rotate: false, streak: noLevelsStreak.get(key)?.streak || 0 };
   }
+  const rotateAfter =
+    opts?.watchBand === 'medium'
+      ? NO_LEVELS_ROTATE_AFTER_MEDIUM
+      : NO_LEVELS_ROTATE_AFTER;
   const now = Date.now();
   const prev = noLevelsStreak.get(key);
   if (!prev) {
@@ -638,13 +650,13 @@ export function noteMajorsLevelsPresence(
   }
   if (now - prev.lastTickAt < NO_LEVELS_STREAK_TICK_MS) {
     return {
-      rotate: prev.streak >= NO_LEVELS_ROTATE_AFTER,
+      rotate: prev.streak >= rotateAfter,
       streak: prev.streak,
     };
   }
   const next = prev.streak + 1;
   noLevelsStreak.set(key, { streak: next, lastTickAt: now });
-  return { rotate: next >= NO_LEVELS_ROTATE_AFTER, streak: next };
+  return { rotate: next >= rotateAfter, streak: next };
 }
 
 export function clearMajorsNoLevelsStreak(mint: string): void {

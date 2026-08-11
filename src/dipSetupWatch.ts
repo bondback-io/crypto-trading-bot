@@ -84,7 +84,7 @@ export interface DipWatchEntry {
  * Separate caps so majors/medium (liberal admit + 10h TTL + frequent refresh)
  * cannot starve memecoin / scanner minors. Medium/Majors ≤80 (1.2.261).
  */
-const MAX_MAJORS_WATCHES = 80;
+const MAX_MAJORS_WATCHES = 50;
 const MAX_MEDIUM_WATCHES = 80;
 const MAX_MINORS_WATCHES = 16;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
@@ -106,6 +106,9 @@ const TERMINAL_UI_MS = 60_000;
 
 const watches = new Map<string, DipWatchEntry>();
 let lastMcRefreshAt = new Map<string, number>();
+/** Dedup no_levels funnel: last noted streak tick per mint */
+const noLevelsFunnelNotedAt = new Map<string, number>();
+const NO_LEVELS_FUNNEL_DEDUP_MS = 20 * 60_000;
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
 /** mint → last H1-vol rotation eviction/admit (debounce) */
@@ -357,6 +360,7 @@ function deleteDipWatch(mint: string): void {
   releaseQualitySoftArm(mint);
   watches.delete(mint);
   lastMcRefreshAt.delete(mint);
+  noLevelsFunnelNotedAt.delete(mint);
 }
 
 function activeWatches(bucket: DipWatchBucket): DipWatchEntry[] {
@@ -713,13 +717,14 @@ function pruneTerminal(): void {
   enforceBucketCap('minors', MAX_MINORS_WATCHES);
 }
 
-function watchHasFibOrSupportLevels(w: DipWatchEntry): boolean {
+export function watchHasFibOrSupportLevels(w: DipWatchEntry): boolean {
   return (
     (w.fib05PriceSol != null && w.fib05PriceSol > 0) ||
     (w.fib618PriceSol != null && w.fib618PriceSol > 0) ||
     (w.supportPriceSol != null && w.supportPriceSol > 0) ||
     w.nearKeyFib === true ||
-    w.nearSupport === true
+    w.nearSupport === true ||
+    (w.multiTfSupportHits != null && w.multiTfSupportHits > 0)
   );
 }
 
@@ -1055,9 +1060,12 @@ async function refreshWatchMarket(
   }
 
   // Multi-TF S/R confluence (Mode B parity) — fail soft
+  let multiByTf: Awaited<ReturnType<typeof fetchMultiTfOhlcv>>['byTf'] | null =
+    null;
   try {
     const multi = await fetchMultiTfOhlcv(w.mint, { solUsd: undefined });
     if (Object.keys(multi.byTf).length > 0) {
+      multiByTf = multi.byTf;
       const conf = analyzeSrConfluenceFromCandles(w.mint, multi.byTf, {
         priceSol: w.lastPriceSol,
       });
@@ -1074,13 +1082,32 @@ async function refreshWatchMarket(
     /* keep last levels */
   }
 
-  // Technical Fib / support refresh when candles available — fail soft
+  // Technical Fib / support refresh — seed candles for quality parks so Steady can arm
   try {
     const { getTechnicalLevelsForStrategy } =
       require('./technicalLevels') as typeof import('./technicalLevels');
+    // Prefer 1h candles, then 15m/5m — quality parks need Fib/S to arm
+    const candlePick =
+      (multiByTf &&
+        (multiByTf['1h'] ||
+          multiByTf['15m'] ||
+          multiByTf['5m'] ||
+          multiByTf['4h'] ||
+          multiByTf['30m'])) ||
+      null;
     const tech = getTechnicalLevelsForStrategy({
       mint: w.mint,
       priceSol: w.lastPriceSol ?? undefined,
+      candles:
+        isQualityBandSource(w.source) &&
+        candlePick &&
+        candlePick.length >= 8
+          ? candlePick.map((c) => ({
+              time: c.time,
+              priceSol: c.priceSol,
+              volume: c.volume,
+            }))
+          : undefined,
     });
     if (tech) {
       if (tech.nearFibZone) w.nearKeyFib = true;
@@ -1127,7 +1154,16 @@ async function refreshWatchMarket(
   recomputeProximityFromLevels(w);
 
   const hasLevels = watchHasFibOrSupportLevels(w);
-  if (!hasLevels) noteDipFunnel('no_levels');
+  // Count once per mint per ~20m streak tick — avoid noLvl×1497 inflation
+  if (!hasLevels) {
+    const lastNoted = noLevelsFunnelNotedAt.get(w.mint) ?? 0;
+    if (now - lastNoted >= NO_LEVELS_FUNNEL_DEDUP_MS) {
+      noteDipFunnel('no_levels');
+      noLevelsFunnelNotedAt.set(w.mint, now);
+    }
+  } else {
+    noLevelsFunnelNotedAt.delete(w.mint);
+  }
 
   // Medium/Majors: name/class + MC-band rotate, then dead-tape / no-levels
   if (isQualityBandSource(w.source)) {
@@ -1159,7 +1195,9 @@ async function refreshWatchMarket(
       w.movementActive = mov.active;
       if (!mov.active) {
         w.qualityChip = 'low_movement';
-        const { rotate } = noteDeadTapeObservation(w.mint, true, now);
+        const { rotate } = noteDeadTapeObservation(w.mint, true, now, {
+          watchBand: isMajorsSource(w.source) ? 'majors' : 'medium',
+        });
         if (rotate && w.status !== 'armed') {
           const pid =
             w.preferredProfileId === 'high_win_rate'
@@ -1194,6 +1232,11 @@ async function refreshWatchMarket(
         if (w.qualityChip === 'low_movement' || w.qualityChip === 'rotated_stale') {
           w.qualityChip = 'active';
         }
+        if (!hasLevels && w.qualityChip !== 'rotated_stale') {
+          w.qualityChip = 'no_level';
+        } else if (hasLevels && w.qualityChip === 'no_level') {
+          w.qualityChip = 'active';
+        }
       }
     } catch {
       /* optional */
@@ -1203,26 +1246,39 @@ async function refreshWatchMarket(
         noteMajorsLevelsPresence,
         clearMajorsNoLevelsStreak,
       } = require('./majorsUniverse') as typeof import('./majorsUniverse');
-      if (hasLevels) {
-        clearMajorsNoLevelsStreak(w.mint);
-      } else if (
-        w.preferredProfileId === 'steady_compounder' ||
-        w.preferredProfileId === 'high_win_rate'
-      ) {
+      // Armed or structure present → clear streak. Watching without levels rotates
+      // (Steady/HWR no longer exempt — that pinned statues for 10h).
+      if (hasLevels || w.status === 'armed') {
         clearMajorsNoLevelsStreak(w.mint);
       } else {
         const { rotate, streak } = noteMajorsLevelsPresence(
           w.mint,
           false,
-          w.marketCapUsd
+          w.marketCapUsd,
+          { watchBand: isMajorsSource(w.source) ? 'majors' : 'medium' }
         );
         if (rotate) {
           noteDipFunnel('no_levels_rotate');
           noteQualityBandFunnel(w.source, 'expired');
+          const pid =
+            w.preferredProfileId === 'high_win_rate'
+              ? 'high_win_rate'
+              : 'steady_compounder';
+          try {
+            const { noteQualityParkFunnel } =
+              require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+            noteQualityParkFunnel(pid, 'rotated_stale');
+          } catch {
+            /* optional */
+          }
+          noteDipFunnel(
+            pid === 'high_win_rate' ? 'hwr_rotated_stale' : 'steady_rotated_stale'
+          );
           releaseQualitySoftArm(w.mint);
           w.status = 'expired';
           w.updatedAt = now;
           w.lastReason = `no levels ×${streak} (~20m) — rotate`;
+          w.qualityChip = 'rotated_stale';
           console.log(
             `[dip-watch] ROTATE ${w.symbol} [${w.source}] — no Fib/S after ${streak}×20m ticks`
           );
@@ -1234,6 +1290,7 @@ async function refreshWatchMarket(
             /* optional */
           }
           clearMajorsNoLevelsStreak(w.mint);
+          noLevelsFunnelNotedAt.delete(w.mint);
         }
       }
     } catch {

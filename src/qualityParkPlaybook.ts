@@ -23,6 +23,8 @@ export const QUALITY_MIN_RANGE_24H_PCT = 2.5;
 export const QUALITY_MIN_SWING_H1_PCT = 1.0;
 export const QUALITY_MIN_SWING_H6_PCT = 1.75;
 export const QUALITY_DEAD_RANGE_MS = 50 * 60_000;
+/** Medium dead-tape rotates sooner so Steady inventory stays hot */
+export const QUALITY_DEAD_RANGE_MEDIUM_MS = 40 * 60_000;
 export const QUALITY_MIN_VOL_ALIVE_MULT = 0.9;
 /** Soft-movement tier (1.2.268): below hard floor but not dead tape */
 export const QUALITY_SOFT_RANGE_24H_PCT = 1.5;
@@ -216,7 +218,8 @@ export function clearDeadTapeStreak(mint: string): void {
 export function noteDeadTapeObservation(
   mint: string,
   isDead: boolean,
-  now = Date.now()
+  now = Date.now(),
+  opts?: { watchBand?: 'medium' | 'majors' }
 ): { rotate: boolean; deadForMs: number } {
   const key = String(mint || '').trim();
   if (!key) return { rotate: false, deadForMs: 0 };
@@ -230,8 +233,12 @@ export function noteDeadTapeObservation(
     return { rotate: false, deadForMs: 0 };
   }
   const deadForMs = now - prev;
+  const threshold =
+    opts?.watchBand === 'medium'
+      ? QUALITY_DEAD_RANGE_MEDIUM_MS
+      : QUALITY_DEAD_RANGE_MS;
   return {
-    rotate: deadForMs >= QUALITY_DEAD_RANGE_MS,
+    rotate: deadForMs >= threshold,
     deadForMs,
   };
 }

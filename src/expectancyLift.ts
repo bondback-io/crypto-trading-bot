@@ -229,6 +229,8 @@ function discShareCapRelief(): number {
  * 1.2.248: all profiles under Entry Skill (not only quality/fast set).
  * Armed reclaim relief still bypasses via isArmedReclaimRelief.
  */
+/** Match supportReclaim.DEFAULT_LATE_CHASE_EXT_PCT (avoid circular import). */
+const LATE_CHASE_EXT_PCT_LIM = 8;
 const QUALITY_LATE_CHASE_PROFILES = new Set([
   'dip_buyer',
   'trend_rider',
@@ -1721,6 +1723,23 @@ export function shouldSkipFamilyGovernor(input: {
     if (input.armedWatch === true || armed) {
       return { skip: false, state, family: effective };
     }
+    // Dip restricted + strongly negative E: unarmed discretionary soft-pass blocked
+    // (learning: hard-SL bleed on disc support_dip_reclaim). Armed reclaim still ok above.
+    if (
+      effective === 'support_dip_reclaim' &&
+      (pid === 'dip_buyer' ||
+        profileMatchesFamilyNative(input.profileId, 'support_dip_reclaim')) &&
+      isStronglyNegativeExpectancy('support_dip_reclaim')
+    ) {
+      return {
+        skip: true,
+        reason:
+          'Dip: restricted support_dip_reclaim requires armed reclaim while Dip E strongly negative',
+        state,
+        family: effective,
+        reasonCode: 'gov_dip_armed_required',
+      };
+    }
     // Native-style soft-pass: primary/allowed DNA — down-rank via permission/size only
     // MS unarmed already handled above when family gov is weak.
     if (profileMatchesFamilyNative(input.profileId, effective)) {
@@ -1741,6 +1760,16 @@ export function shouldSkipFamilyGovernor(input: {
     // Dip native metrics beat peer families, soft-pass Dip-native (and close
     // reclaim handoffs) instead of broad off-style kill.
     if (effective === 'support_dip_reclaim') {
+      if (isStronglyNegativeExpectancy('support_dip_reclaim')) {
+        return {
+          skip: true,
+          reason:
+            'Dip: comparative soft-allow blocked — armed reclaim required while Dip E strongly negative',
+          state,
+          family: effective,
+          reasonCode: 'gov_dip_armed_required',
+        };
+      }
       const cmp = evaluateDipComparativeSoftAllow();
       if (cmp.allow) {
         const dipNative =
@@ -1845,28 +1874,41 @@ function evaluateDipComparativeSoftAllow(): {
 }
 
 /** Armed reclaim near level — not true late chase for ceiling / hard-skip.
- * Under strongly negative E: deny relief for primary late_chase with ext > 4%. */
+ * Deny relief when detector fired, secondary is late_chase, or extension ≥ late-chase lim.
+ * True near-level reclaim (ext in [−2, +4]) may still relief. */
 function isArmedReclaimRelief(input: {
   armedWatch?: boolean;
   entryStyle?: string | null;
+  entryStyleSecondary?: string | null;
   extensionFromLevelPct?: number | null;
   lateChase?: boolean;
+  profileId?: string | null;
 }): boolean {
   if (input.armedWatch !== true) return false;
   const style = String(input.entryStyle || '').toLowerCase();
+  const secondary = String(input.entryStyleSecondary || '').toLowerCase();
   const ext =
     input.extensionFromLevelPct != null &&
     Number.isFinite(Number(input.extensionFromLevelPct))
       ? Number(input.extensionFromLevelPct)
       : null;
-  const primaryLate =
-    input.lateChase === true || /late.?chase/i.test(style);
-  // Strongly negative E: only true near-level reclaim (ext ≤4%) may relief
-  if (isStronglyNegativeExpectancy('late_chase') && primaryLate) {
+  const detectorLate = input.lateChase === true;
+  const secondaryLate = /late.?chase/i.test(secondary);
+  const styleLate = /late.?chase/i.test(style);
+  const extLate =
+    ext != null && ext >= LATE_CHASE_EXT_PCT_LIM;
+  // Remapped Grad/MS reclaim with true late extension must not bypass bans
+  if (detectorLate || secondaryLate || styleLate || extLate) {
+    // Only true near-level reclaim may still relief
     if (ext != null && ext >= -2 && ext <= 4) return true;
     return false;
   }
-  if (/reclaim/i.test(style) && !/late.?chase/i.test(style)) return true;
+  // Strongly negative E: only true near-level reclaim (ext ≤4%) may relief
+  if (isStronglyNegativeExpectancy('late_chase')) {
+    if (ext != null && ext >= -2 && ext <= 4) return true;
+    return false;
+  }
+  if (/reclaim/i.test(style)) return true;
   // Extension ≤4% from level = reclaim / near-level, not chase
   if (ext != null && ext >= -2 && ext <= 4) return true;
   return false;
@@ -1888,9 +1930,11 @@ export function getRecentMixShares(
   const trades = collectExpectancyTrades().slice(-window);
   const total = trades.length || 1;
   const armed = trades.filter((t) => t.armed).length;
-  // Armed reclaim mis-tags do not inflate the late-chase ceiling share
+  // Armed reclaim mis-tags do not inflate the late-chase ceiling share —
+  // but keep detector-true / lateChaseAtEntry rows in the share.
   const late = trades.filter((t) => {
     if (!(t.lateChase || t.family === 'late_chase')) return false;
+    if (t.lateChase === true) return true;
     if (
       t.armed &&
       /reclaim/i.test(String(t.family || t.entryStyle || '')) &&
@@ -1913,6 +1957,7 @@ export function shouldLimitLateChaseShare(input: {
   lateChase?: boolean;
   family?: string | null;
   entryStyle?: string | null;
+  entryStyleSecondary?: string | null;
   armedWatch?: boolean;
   extensionFromLevelPct?: number | null;
   profileId?: string | null;
@@ -1922,8 +1967,10 @@ export function shouldLimitLateChaseShare(input: {
     isArmedReclaimRelief({
       armedWatch: input.armedWatch,
       entryStyle: input.entryStyle,
+      entryStyleSecondary: input.entryStyleSecondary,
       extensionFromLevelPct: input.extensionFromLevelPct,
       lateChase: input.lateChase,
+      profileId: input.profileId,
     })
   ) {
     return { limit: false, reasonCode: 'LC_ARMED_RECLAIM_RELIEF' };
@@ -1931,6 +1978,10 @@ export function shouldLimitLateChaseShare(input: {
   const isLate =
     input.lateChase === true ||
     String(input.entryStyle || '').toLowerCase() === 'late_chase' ||
+    /late.?chase/i.test(String(input.entryStyleSecondary || '')) ||
+    (input.extensionFromLevelPct != null &&
+      Number.isFinite(Number(input.extensionFromLevelPct)) &&
+      Number(input.extensionFromLevelPct) >= LATE_CHASE_EXT_PCT_LIM) ||
     normalizeExpectancyFamily(input.family || input.entryStyle) ===
       'late_chase';
   if (!isLate) return { limit: false };
