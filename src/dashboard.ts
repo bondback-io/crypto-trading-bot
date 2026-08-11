@@ -10827,34 +10827,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card rpc-health-panel" id="rpc-health-panel">
-          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Live Helius + Alchemy endpoint status from the failover list. Hosts only — API keys never shown. Refreshes with the dashboard status poll."></span></div>
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Live Helius/Alchemy pool status: primary+backup load share and failover. Hosts only — API keys never shown. Refreshes with the dashboard status poll."></span></div>
           <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
             <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
             <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
             <span class="rpc-health-chip" id="rpc-chip-failover">Failover active</span>
-            <span class="rpc-health-chip" id="rpc-chip-down">RPC down</span>
+            <span class="rpc-health-chip" id="rpc-chip-down">Provider down</span>
           </div>
           <div id="rpc-health-providers">
             <div class="rpc-prov-row" data-provider="helius">
               <span class="rpc-prov-name">Helius</span>
               <div class="rpc-prov-pills">
-                <span class="rpc-ep-pill" id="rpc-helius-primary">—</span>
+                <span class="rpc-ep-pill" id="rpc-helius-primary">primary —</span>
+                <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
               </div>
               <span class="mint text-xs rpc-prov-meta" id="rpc-helius-meta">—</span>
             </div>
+            <div class="rpc-share-mode" id="rpc-helius-share">—</div>
             <div class="rpc-prov-row" data-provider="alchemy">
               <span class="rpc-prov-name">Alchemy</span>
               <div class="rpc-prov-pills">
-                <span class="rpc-ep-pill" id="rpc-alchemy-primary">—</span>
+                <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
+                <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
               </div>
               <span class="mint text-xs rpc-prov-meta" id="rpc-alchemy-meta">—</span>
             </div>
+            <div class="rpc-share-mode" id="rpc-alchemy-share">—</div>
           </div>
           <p class="rpc-plain" id="rpc-health-plain">—</p>
         </div>
 
         <div class="card" id="rpc-status-card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Includes Helius/Alchemy backup endpoints when configured. Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
           <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
@@ -10870,12 +10874,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code> or <code>HELIUS_RPC_URL</code>) → Alchemy (<code>ALCHEMY_API_KEY</code> or <code>ALCHEMY_RPC_URL</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_RPC_URL</code> + <code>HELIUS_RPC_URL_BACKUP</code>, or legacy <code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_RPC_URL</code> + <code>ALCHEMY_RPC_URL_BACKUP</code>, or legacy <code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius pool (primary then backup).</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy pool.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers publicnode.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred → other paid → QuickNode → public. Soft latency uses ≥30s grace; 429 fails over immediately.</div>
+            <div class="mint">Failover: sibling in the same provider pool first, then cross-provider, then mid-tier/public. Soft latency uses paid ≥1400ms / sticky; 429 fails over immediately.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -26123,10 +26127,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const rpc = status && status.rpc;
         window._rpcStressed = Boolean(
           rpc &&
-            ((rpc.primary && rpc.primary.failover) ||
-              (rpc.secondary && rpc.secondary.failover) ||
-              rpc.ok === false ||
+            (rpc.summary === 'failover_active' ||
+              rpc.summary === 'provider_down' ||
+              rpc.summary === 'degraded' ||
               (rpc.gate && rpc.gate.stressed))
+        )
         );
       } catch (_) {
         window._rpcStressed = false;
@@ -26535,102 +26540,161 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       // RPC status
       const rpc = status.rpc || {};
       function paintRpcHealthPanel(rpcObj) {
-        const eps = (rpcObj && rpcObj.endpoints) || [];
-        const findEp = function (name) {
-          return eps.find(function (e) {
-            const lab = String((e && e.label) || '').toLowerCase();
-            return lab === name || lab.indexOf(name) === 0;
-          });
-        };
-        const helius = findEp('helius');
-        const alchemy = findEp('alchemy');
-        const primaryFo = Boolean(rpcObj && rpcObj.primary && rpcObj.primary.failover);
-        const secondaryFo = Boolean(
-          rpcObj && rpcObj.secondary && rpcObj.secondary.failover
-        );
-        const anyConfigured = Boolean(helius || alchemy);
-        const bothHealthy =
-          (!helius || helius.healthy) && (!alchemy || alchemy.healthy);
-        const anyDown =
-          (helius && !helius.healthy) || (alchemy && !alchemy.healthy);
-        const summary = !anyConfigured
-          ? 'down'
-          : rpcObj && rpcObj.ok === false
-            ? 'down'
-            : primaryFo || secondaryFo
-              ? 'failover'
-              : anyDown
-                ? 'degraded'
-                : bothHealthy
-                  ? 'all'
-                  : 'degraded';
+        const summary = rpcObj && rpcObj.summary;
         const setChip = function (id, on, kind) {
           const el = document.getElementById(id);
           if (!el) return;
           el.classList.remove('is-on', 'is-warn', 'is-bad');
           if (on) el.classList.add(kind || 'is-on');
         };
-        setChip('rpc-chip-all', summary === 'all', 'is-on');
+        setChip('rpc-chip-all', summary === 'all_healthy', 'is-on');
         setChip('rpc-chip-degraded', summary === 'degraded', 'is-warn');
-        setChip('rpc-chip-failover', summary === 'failover', 'is-warn');
-        setChip('rpc-chip-down', summary === 'down', 'is-bad');
+        setChip(
+          'rpc-chip-failover',
+          summary === 'failover_active',
+          'is-warn'
+        );
+        setChip('rpc-chip-down', summary === 'provider_down', 'is-bad');
         const plain = document.getElementById('rpc-health-plain');
         if (plain) {
           plain.textContent =
+            (rpcObj && rpcObj.plainLanguage) ||
             (rpcObj && rpcObj.warning) ||
-            (summary === 'all'
-              ? 'Helius + Alchemy look healthy.'
-              : summary === 'failover'
-                ? 'Lane failover active — preferred endpoint is down or rate-limited.'
-                : summary === 'down'
-                  ? 'RPC unhealthy — check HELIUS_API_KEY / ALCHEMY_API_KEY (or HELIUS_RPC_URL / ALCHEMY_RPC_URL).'
-                  : 'One or more paid endpoints degraded.');
+            '—';
         }
-        function paintProv(name, ep) {
-          const pill = document.getElementById('rpc-' + name + '-primary');
-          const meta = document.getElementById('rpc-' + name + '-meta');
-          if (pill) {
-            pill.classList.remove(
+        function paintProv(name) {
+          const pool =
+            (rpcObj && rpcObj.pools && rpcObj.pools[name]) || {};
+          const members = pool.members || [];
+          const bySlot = function (slot, allowSoloFallback) {
+            const exact = members.find(function (m) {
+              return m.slot === slot;
+            });
+            if (exact) return exact;
+            if (allowSoloFallback && members.length === 1) {
+              return members[0];
+            }
+            return null;
+          };
+          const primary = bySlot('primary', true) || bySlot('solo', true);
+          const backup = bySlot('backup', false);
+          const paintPill = function (elId, mem, emptyLabel) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.classList.remove(
               'is-healthy',
               'is-degraded',
               'is-down',
               'is-active'
             );
-            if (!ep) {
-              pill.textContent = 'unset';
-            } else {
-              const ok = ep.healthy !== false;
-              pill.classList.add(ok ? 'is-healthy' : 'is-down');
-              if (ep.isActive) pill.classList.add('is-active');
-              let host = ep.label || name;
-              try {
-                host = new URL(String(ep.url || '')).hostname || host;
-              } catch (_) {}
-              pill.textContent =
-                (ep.isActive ? 'ACTIVE · ' : '') +
-                host +
-                (ep.latencyMs != null
-                  ? ' · ' + Math.round(ep.latencyMs) + 'ms'
-                  : '') +
-                ' · ' +
-                (ok ? 'healthy' : 'down');
+            if (!mem) {
+              if (emptyLabel === 'backup') {
+                el.textContent = 'backup unset';
+              } else {
+                el.textContent = 'primary unset';
+              }
+              return;
             }
-          }
+            const st = mem.state || 'down';
+            el.classList.add(
+              st === 'healthy'
+                ? 'is-healthy'
+                : st === 'degraded'
+                  ? 'is-degraded'
+                  : 'is-down'
+            );
+            if (mem.isActive) el.classList.add('is-active');
+            const slotLabel =
+              mem.slot === 'solo'
+                ? 'PRIMARY'
+                : mem.slot === 'backup'
+                  ? 'BACKUP'
+                  : 'PRIMARY';
+            const readyBit =
+              mem.slot === 'backup' && st === 'healthy'
+                ? ' ready'
+                : mem.slot === 'solo'
+                  ? ' (solo)'
+                  : '';
+            el.textContent =
+              slotLabel +
+              readyBit +
+              (mem.isActive ? ' ●' : '') +
+              ' · ' +
+              (mem.host || mem.label || '—') +
+              (mem.latencyEwmaMs != null
+                ? ' · ' + Math.round(mem.latencyEwmaMs) + 'ms'
+                : '') +
+              ' · ' +
+              st;
+            el.title =
+              (mem.label || '') +
+              ' · ' +
+              st +
+              (mem.lastError && mem.lastError !== 'none'
+                ? ' · last ' + mem.lastError
+                : '') +
+              (mem.lastErrorDetail ? ' · ' + mem.lastErrorDetail : '');
+          };
+          paintPill('rpc-' + name + '-primary', primary, 'primary');
+          paintPill('rpc-' + name + '-backup', backup, 'backup');
+          const meta = document.getElementById('rpc-' + name + '-meta');
           if (meta) {
-            const need =
-              name === 'alchemy'
-                ? 'set ALCHEMY_API_KEY or ALCHEMY_RPC_URL'
-                : 'set HELIUS_API_KEY or HELIUS_RPC_URL';
-            meta.textContent = ep
-              ? (ep.isActive ? 'in use' : 'standby') +
-                (ep.successRate != null
-                  ? ' · ok ' + Math.round(Number(ep.successRate)) + '%'
+            const fo =
+              pool.lastFailoverAt != null
+                ? 'fo ' +
+                  new Date(pool.lastFailoverAt).toLocaleTimeString()
+                : 'fo —';
+            const cnt =
+              pool.failoverCountRecent != null && pool.failoverCountRecent > 0
+                ? '×' + pool.failoverCountRecent
+                : '';
+            const errMem =
+              members.find(function (m) {
+                return m.lastError && m.lastError !== 'none';
+              }) || null;
+            const bak =
+              pool.backupStatus === 'ready' ? 'backup ready' : 'backup unset';
+            const errBit = errMem
+              ? ' · err ' +
+                errMem.lastError +
+                (errMem.lastErrorDetail
+                  ? ' (' +
+                    String(errMem.lastErrorDetail).slice(0, 48) +
+                    ')'
                   : '')
-              : need;
+              : '';
+            meta.textContent =
+              (pool.primaryConfigured ? 'primary configured' : 'primary unset') +
+              ' · ' +
+              bak +
+              ' · active ' +
+              (pool.activeLabel || '—') +
+              ' · ' +
+              fo +
+              (cnt ? ' ' + cnt : '') +
+              errBit;
+          }
+          const shareEl = document.getElementById('rpc-' + name + '-share');
+          if (shareEl) {
+            shareEl.classList.remove('is-sharing', 'is-failover', 'is-down');
+            const mode = pool.shareMode || 'empty';
+            if (mode === 'sharing') shareEl.classList.add('is-sharing');
+            else if (mode === 'failover') shareEl.classList.add('is-failover');
+            else if (mode === 'down' || mode === 'empty')
+              shareEl.classList.add('is-down');
+            shareEl.textContent =
+              pool.shareLabel ||
+              (mode === 'empty'
+                ? 'not configured — set ' +
+                  (name === 'helius'
+                    ? 'HELIUS_RPC_URL (+ HELIUS_RPC_URL_BACKUP)'
+                    : 'ALCHEMY_RPC_URL (+ ALCHEMY_RPC_URL_BACKUP)')
+                : mode);
           }
         }
-        paintProv('helius', helius);
-        paintProv('alchemy', alchemy);
+        paintProv('helius');
+        paintProv('alchemy');
       }
       const activeEp = (rpc.endpoints || []).find(e => e.isActive) || {};
       const rpcActiveEl = document.getElementById('rpc-active');

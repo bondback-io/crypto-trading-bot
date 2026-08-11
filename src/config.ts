@@ -2696,7 +2696,7 @@ export const config: BotConfig = {
         ? false
         : process.env.RPC_SHARE_LOAD === '1' ||
           process.env.RPC_SHARE_LOAD === 'true' ||
-          // Default ON when both free providers exist (API key or single RPC URL).
+          // Default ON when both free providers exist (API key or full RPC URL).
           Boolean(
             (process.env.HELIUS_API_KEY?.trim() ||
               process.env.HELIUS_RPC_URL?.trim()) &&

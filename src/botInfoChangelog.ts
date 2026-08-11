@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.282',
+    title: 'Safe dual Helius/Alchemy pools + latency thrash guards',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Restores Helius/Alchemy primary+backup pools (HELIUS/ALCHEMY_RPC_URL + _BACKUP) with in-pool RR reads and sibling-first failover.',
+      'Paid soft-latency arms at 1400ms with 90s sticky; /api/status is read-only (no resolve side effects) to stop Render failover thrash.',
+      'Utility prefers publicnode over official mainnet-beta; Stats → RPC shows primary/backup share status again.',
+    ],
+  },
+  {
     version: '1.2.281',
     title: 'Revert dual RPC pools — back to Helius/Alchemy keys',
     sections: ['overview', 'execution', 'knobs'],
