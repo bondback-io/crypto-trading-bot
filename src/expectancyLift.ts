@@ -901,6 +901,28 @@ function windowFingerprint(
 }
 
 function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
+  try {
+    const {
+      isLearningQuarantinedEpisode,
+      isResetLearningQuarantineReason,
+    } = require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    let includeReset = false;
+    try {
+      const { config } = require('./config') as typeof import('./config');
+      includeReset = config.learning?.includeDashboardResetEpisodes === true;
+    } catch {
+      includeReset = false;
+    }
+    if (
+      !includeReset &&
+      (isLearningQuarantinedEpisode(e) ||
+        isResetLearningQuarantineReason(e.exitReason))
+    ) {
+      return null;
+    }
+  } catch {
+    if (/dashboard_reset/i.test(String(e.exitReason || ''))) return null;
+  }
   const profileId = String(e.profileId || '').trim();
   if (!profileId || profileId === 'default') return null;
   if (/^partial:/i.test(String(e.exitReason || ''))) return null;
@@ -965,6 +987,25 @@ function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
 }
 
 function fromClosed(t: Record<string, unknown>): ExpectancyTradeRow | null {
+  try {
+    const { isResetLearningQuarantineReason } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    let includeReset = false;
+    try {
+      const { config } = require('./config') as typeof import('./config');
+      includeReset = config.learning?.includeDashboardResetEpisodes === true;
+    } catch {
+      includeReset = false;
+    }
+    if (
+      !includeReset &&
+      isResetLearningQuarantineReason(String(t.reason || ''))
+    ) {
+      return null;
+    }
+  } catch {
+    if (/dashboard_reset/i.test(String(t.reason || ''))) return null;
+  }
   if (/^partial:/i.test(String(t.reason || ''))) return null;
   const profileId = String(t.tradeProfileId || '').trim();
   if (!profileId || profileId === 'default') return null;

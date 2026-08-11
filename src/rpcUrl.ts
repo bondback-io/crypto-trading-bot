@@ -112,14 +112,29 @@ function normalizeExplicitRpcUrl(raw: string | null | undefined): string | null 
   return u;
 }
 
+/** First usable explicit RPC URL from env keys (supports typo aliases). */
+function firstEnvRpcUrl(...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = normalizeExplicitRpcUrl(process.env[key]);
+    if (v) return v;
+  }
+  return null;
+}
+
 /**
  * Resolve Helius pool members: HELIUS_RPC_URL (+ BACKUP), else HELIUS_API_KEY.
+ * Also accepts HELIUS_RPC_URLBACKUP (no underscore) as used on some Render envs.
  * 0–2 members; duplicate URLs collapsed.
  */
 export function resolveHeliusPoolMembers(): RpcPoolMember[] {
   const primary =
-    normalizeExplicitRpcUrl(process.env.HELIUS_RPC_URL) || buildHeliusRpcUrl();
-  const backup = normalizeExplicitRpcUrl(process.env.HELIUS_RPC_URL_BACKUP);
+    firstEnvRpcUrl('HELIUS_RPC_URL', 'HELIUS_RPC_PRIMARY') ||
+    buildHeliusRpcUrl();
+  const backup = firstEnvRpcUrl(
+    'HELIUS_RPC_URL_BACKUP',
+    'HELIUS_RPC_URLBACKUP',
+    'HELIUS_RPC_BACKUP'
+  );
   const out: RpcPoolMember[] = [];
   const seen = new Set<string>();
   if (primary && !seen.has(primary)) {
@@ -149,12 +164,17 @@ export function resolveHeliusPoolMembers(): RpcPoolMember[] {
 
 /**
  * Resolve Alchemy pool members: ALCHEMY_RPC_URL (+ BACKUP), else ALCHEMY_API_KEY.
+ * Also accepts ALCHEMY_RPC_URLBACKUP (no underscore).
  */
 export function resolveAlchemyPoolMembers(): RpcPoolMember[] {
   const primary =
-    normalizeExplicitRpcUrl(process.env.ALCHEMY_RPC_URL) ||
+    firstEnvRpcUrl('ALCHEMY_RPC_URL', 'ALCHEMY_RPC_PRIMARY') ||
     buildAlchemyRpcUrl();
-  const backup = normalizeExplicitRpcUrl(process.env.ALCHEMY_RPC_URL_BACKUP);
+  const backup = firstEnvRpcUrl(
+    'ALCHEMY_RPC_URL_BACKUP',
+    'ALCHEMY_RPC_URLBACKUP',
+    'ALCHEMY_RPC_BACKUP'
+  );
   const out: RpcPoolMember[] = [];
   const seen = new Set<string>();
   if (primary && !seen.has(primary)) {
@@ -674,8 +694,37 @@ export function rpcEndpointsFromEnv(
   );
   if (!helius && !alchemy) {
     console.warn(
-      '[rpc] HELIUS_API_KEY / ALCHEMY_API_KEY unset — using RPC_URL / public. ' +
-        'Set free Helius + Alchemy keys (or HELIUS_RPC_URL / ALCHEMY_RPC_URL) for better speed and automatic failover.'
+      '[rpc] No Helius/Alchemy pool — using RPC_URL / public. ' +
+        'Set HELIUS_RPC_URL (+ HELIUS_RPC_URL_BACKUP) and ALCHEMY_RPC_URL (+ ALCHEMY_RPC_URL_BACKUP), ' +
+        'or HELIUS_API_KEY / ALCHEMY_API_KEY.'
+    );
+  } else {
+    const hSrc = process.env.HELIUS_RPC_URL?.trim()
+      ? 'HELIUS_RPC_URL'
+      : process.env.HELIUS_API_KEY?.trim()
+        ? 'HELIUS_API_KEY'
+        : '—';
+    const hBak = process.env.HELIUS_RPC_URL_BACKUP?.trim()
+      ? 'HELIUS_RPC_URL_BACKUP'
+      : process.env.HELIUS_RPC_URLBACKUP?.trim()
+        ? 'HELIUS_RPC_URLBACKUP'
+        : process.env.HELIUS_RPC_BACKUP?.trim()
+          ? 'HELIUS_RPC_BACKUP'
+          : 'unset';
+    const aSrc = process.env.ALCHEMY_RPC_URL?.trim()
+      ? 'ALCHEMY_RPC_URL'
+      : process.env.ALCHEMY_API_KEY?.trim()
+        ? 'ALCHEMY_API_KEY'
+        : '—';
+    const aBak = process.env.ALCHEMY_RPC_URL_BACKUP?.trim()
+      ? 'ALCHEMY_RPC_URL_BACKUP'
+      : process.env.ALCHEMY_RPC_URLBACKUP?.trim()
+        ? 'ALCHEMY_RPC_URLBACKUP'
+        : process.env.ALCHEMY_RPC_BACKUP?.trim()
+          ? 'ALCHEMY_RPC_BACKUP'
+          : 'unset';
+    console.log(
+      `[rpc] Pool env — Helius primary←${hSrc} backup←${hBak} · Alchemy primary←${aSrc} backup←${aBak}`
     );
   }
 

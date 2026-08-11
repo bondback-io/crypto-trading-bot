@@ -3348,6 +3348,8 @@ export function createServer(): express.Application {
       }
       config.learning = {
         includeLiveModeEpisodes: body.includeLiveModeEpisodes === true,
+        includeDashboardResetEpisodes:
+          config.learning?.includeDashboardResetEpisodes === true,
       };
       persistUserSettings();
       res.json({

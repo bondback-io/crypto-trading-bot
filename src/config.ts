@@ -2071,10 +2071,16 @@ export interface BotConfig {
   /**
    * Episode learning sources. Live Sim always learns; Live Mode closed
    * episodes are excluded unless includeLiveModeEpisodes is ON.
+   * dashboard_reset closes are quarantined unless includeDashboardResetEpisodes is ON.
    */
   learning: {
     /** When true, Live Mode closed trades feed the same learning as Live Sim. Default OFF. */
     includeLiveModeEpisodes: boolean;
+    /**
+     * When true, dashboard_reset / quarantined episodes feed learning aggregates.
+     * Default OFF — reset closes stay audit-only.
+     */
+    includeDashboardResetEpisodes: boolean;
   };
   /** Soft MARL coordinator (lane ranking / size confidence / low-MC). */
   marl: import('./marlCoordinator').MarlConfig;
@@ -2346,6 +2352,7 @@ export const config: BotConfig = {
 
   learning: {
     includeLiveModeEpisodes: false,
+    includeDashboardResetEpisodes: false,
   },
 
   marl: {
@@ -2689,10 +2696,12 @@ export const config: BotConfig = {
         ? false
         : process.env.RPC_SHARE_LOAD === '1' ||
           process.env.RPC_SHARE_LOAD === 'true' ||
-          // Default ON when both free provider keys exist (survives Render disk wipe).
+          // Default ON when both free providers exist (API key or full RPC URL).
           Boolean(
-            process.env.HELIUS_API_KEY?.trim() &&
-              process.env.ALCHEMY_API_KEY?.trim()
+            (process.env.HELIUS_API_KEY?.trim() ||
+              process.env.HELIUS_RPC_URL?.trim()) &&
+              (process.env.ALCHEMY_API_KEY?.trim() ||
+                process.env.ALCHEMY_RPC_URL?.trim())
           ),
     softWatchCap:
       process.env.RPC_SOFT_WATCH_CAP != null &&
@@ -3125,6 +3134,8 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     learning: {
       includeLiveModeEpisodes:
         config.learning?.includeLiveModeEpisodes === true,
+      includeDashboardResetEpisodes:
+        config.learning?.includeDashboardResetEpisodes === true,
     },
     marl: cloneJson(config.marl || {
       enabled: false,
@@ -4040,6 +4051,9 @@ function applySettingsSnapshot(
     config.learning = {
       includeLiveModeEpisodes:
         saved.learning.includeLiveModeEpisodes === true,
+      includeDashboardResetEpisodes:
+        (saved.learning as { includeDashboardResetEpisodes?: boolean })
+          .includeDashboardResetEpisodes === true,
     };
   }
   if (saved.marl && typeof saved.marl === 'object') {
@@ -6669,6 +6683,8 @@ export function getConfigSnapshot() {
     learning: {
       includeLiveModeEpisodes:
         config.learning?.includeLiveModeEpisodes === true,
+      includeDashboardResetEpisodes:
+        config.learning?.includeDashboardResetEpisodes === true,
     },
     admissionBaseline:
       config.admissionBaseline === 'governed' ? 'governed' : 'v235',

@@ -25,13 +25,20 @@ import { MEDIUM_MIN_MC_USD, MAJORS_MIN_MC_USD } from './majorsUniverse';
 
 export type LearningReportWindow = 50 | 100;
 
-export const CURSOR_LEARNING_REPORT_PREAMBLE = `Evaluate this learning report carefully.
-Propose only small additive improvements toward higher expectancy and more stable 40–45% WR, with stretch path to 60%+.
-Do not rewrite architecture.
-Do not loosen late-chase bans.
-Do not re-open Scalper spam.
-Prefer profile-specific habit fixes, harvest/capture improvements, and quiet-profile arming quality.
-Return exact Cursor-ready patch prompts only if changes are justified by the data.
+export const CURSOR_LEARNING_REPORT_PREAMBLE = `Plan mode only first.
+Do not edit files yet.
+Evaluate this learning report carefully and return:
+1) top 5 bottlenecks ranked by impact
+2) which are safe to patch now
+3) exact Cursor-ready prompts for only the safe patches
+
+Rules:
+- Propose only small additive improvements toward higher expectancy and more stable 40–45% WR, with stretch path to 60%+.
+- Do not rewrite architecture.
+- Do not loosen late-chase bans.
+- Do not re-open Scalper spam.
+- Prefer profile-specific habit fixes, harvest/capture improvements, and quiet-profile arming quality.
+- Return exact Cursor-ready patch prompts only if changes are justified by the data.
 
 ---
 `;
@@ -88,6 +95,8 @@ export interface LearningReportJson {
     lateChaseShare: number | null;
     mfeCapturePct: number | null;
     plainLanguage: string | null;
+    quarantinedResetCloses: number;
+    activeLearningCloses: number;
   };
   profiles: LearningReportProfileRow[];
   trades: LearningTradeSampleRow[];
@@ -111,6 +120,8 @@ export interface LearningReportResult {
     tradeCount: number;
     profileCount: number;
     openCount: number;
+    quarantinedResetCloses: number;
+    activeLearningCloses: number;
   };
 }
 
@@ -323,6 +334,12 @@ function buildConfigSnapshot(el: ReturnType<typeof getExpectancyLiftStatus>): Re
           fairnessBoost: lmStatus.fairnessBoost,
         }
       : null,
+    learningHygiene: {
+      includeDashboardResetEpisodes:
+        config.learning?.includeDashboardResetEpisodes === true,
+      includeLiveModeEpisodes:
+        config.learning?.includeLiveModeEpisodes === true,
+    },
     entrySkill: {
       admissionBaseline: el.admissionBaseline ?? null,
       armedTargetPct: el.entrySkillArmedTargetPct ?? el.targets?.armedTargetPct ?? null,
@@ -376,6 +393,11 @@ function renderMarkdown(json: LearningReportJson): string {
   lines.push(`- Late-chase rate: ${fmtPct(s.lateChaseShare)}`);
   lines.push(`- Sample trades: ${s.tradeCount}`);
   lines.push(`- Open positions: ${s.openCount}`);
+  if (s.quarantinedResetCloses > 0) {
+    lines.push(
+      `- Excluded ${s.quarantinedResetCloses} dashboard_reset closes from learning (active learning closes: ${s.activeLearningCloses})`
+    );
+  }
   if (s.plainLanguage) lines.push(`- Note: ${s.plainLanguage}`);
   lines.push('');
 
@@ -557,6 +579,23 @@ export function buildLearningReport(windowRaw: unknown = 50): LearningReportResu
   }
 
   const topSkipNotes: string[] = [];
+  let quarantinedResetCloses = 0;
+  let activeLearningCloses = 0;
+  try {
+    const { countLearningHygieneEpisodes, ensureLearningHygieneMigration } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    ensureLearningHygieneMigration();
+    const hy = countLearningHygieneEpisodes();
+    quarantinedResetCloses = hy.quarantinedResetCloses;
+    activeLearningCloses = hy.activeLearningCloses;
+    if (quarantinedResetCloses > 0) {
+      topSkipNotes.push(
+        `Excluded ${quarantinedResetCloses} dashboard_reset closes from learning`
+      );
+    }
+  } catch {
+    /* soft */
+  }
   if (el.mix?.lateChaseShare != null && el.mix.lateChaseShare > 0.05) {
     topSkipNotes.push(
       `Late-chase share elevated at ${fmtPct(el.mix.lateChaseShare)} (target ≤5%)`
@@ -594,6 +633,8 @@ export function buildLearningReport(windowRaw: unknown = 50): LearningReportResu
       lateChaseShare: el.mix?.lateChaseShare ?? null,
       mfeCapturePct: overall.mfeCapturePct ?? el.mix?.avgMfeCapture ?? null,
       plainLanguage: el.plainLanguage || lm?.plainLanguage || null,
+      quarantinedResetCloses,
+      activeLearningCloses,
     },
     profiles,
     trades,
@@ -620,6 +661,8 @@ export function buildLearningReport(windowRaw: unknown = 50): LearningReportResu
       tradeCount: reportJson.summary.tradeCount,
       profileCount: profiles.length,
       openCount,
+      quarantinedResetCloses,
+      activeLearningCloses,
     },
   };
 }

@@ -118,6 +118,12 @@ export interface ProfileLearningEpisode {
    */
   tradeMode?: 'paper' | 'live';
   /**
+   * When true, episode is audit-only: excluded from self-learn / RL /
+   * expectancy / governors unless includeDashboardResetEpisodes is ON.
+   * Used for dashboard_reset (and alias) closes.
+   */
+  learningQuarantined?: boolean;
+  /**
    * Entry timing quality 0–100 (cheap proxy from MAE depth vs hold / MFE path).
    * Optional — older episode rings omit this.
    */
@@ -206,9 +212,44 @@ interface EpisodesFile {
 
 const MAX_PER_PROFILE = 400;
 const DIR = () => dataFile('profile-learning');
+const HYGIENE_MARKER = () => dataFile('learning-hygiene-v1.json');
 
 const cache = new Map<string, ProfileLearningEpisode[]>();
 const loaded = new Set<string>();
+
+/** Reset-style exit reasons that must not train bots (audit-only). */
+export function isResetLearningQuarantineReason(
+  reason: string | null | undefined
+): boolean {
+  const r = String(reason || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+  if (!r) return false;
+  if (r === 'dashboard_reset' || r === 'force_reset') return true;
+  if (/dashboard_reset/.test(r)) return true;
+  if (/^force[_-]?reset$/.test(r)) return true;
+  // Human-readable "dashboard reset" already normalized to dashboard_reset above
+  return false;
+}
+
+/** True when episode is audit-only (flag or legacy reset reason). */
+export function isLearningQuarantinedEpisode(
+  e: Pick<ProfileLearningEpisode, 'learningQuarantined' | 'exitReason'> | null | undefined
+): boolean {
+  if (!e) return false;
+  if (e.learningQuarantined === true) return true;
+  return isResetLearningQuarantineReason(e.exitReason);
+}
+
+function includeDashboardResetEpisodesFromConfig(): boolean {
+  try {
+    const { config } = require('./config') as typeof import('./config');
+    return config.learning?.includeDashboardResetEpisodes === true;
+  } catch {
+    return false;
+  }
+}
 
 /** Drop episode caches so next read reloads from disk (e.g. after site restore). */
 export function invalidateProfileLearningEpisodeCache(): void {
@@ -514,7 +555,7 @@ export function patchProfileLearningEpisode(
 export function getProfileLearningEpisodes(
   profileId: string,
   limit = 200,
-  opts?: { includeLiveMode?: boolean }
+  opts?: { includeLiveMode?: boolean; includeQuarantined?: boolean }
 ): ProfileLearningEpisode[] {
   const ring = loadProfile(profileId);
   const n = Math.max(1, Math.min(MAX_PER_PROFILE, limit));
@@ -532,7 +573,136 @@ export function getProfileLearningEpisodes(
   if (!includeLive) {
     out = out.filter((e) => e.tradeMode !== 'live');
   }
+  // Default: exclude dashboard_reset / quarantined episodes unless toggled on
+  let includeQuarantined = opts?.includeQuarantined;
+  if (includeQuarantined == null) {
+    includeQuarantined = includeDashboardResetEpisodesFromConfig();
+  }
+  if (!includeQuarantined) {
+    out = out.filter((e) => !isLearningQuarantinedEpisode(e));
+  }
   return out;
+}
+
+/** Count quarantined vs active learning episodes across specialty profiles. */
+export function countLearningHygieneEpisodes(): {
+  quarantinedResetCloses: number;
+  activeLearningCloses: number;
+} {
+  let quarantinedResetCloses = 0;
+  let activeLearningCloses = 0;
+  try {
+    const { TRADE_PROFILE_CATALOG } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    for (const p of TRADE_PROFILE_CATALOG) {
+      if (p.id === 'default' || p.id === 'zion') continue;
+      const ring = loadProfile(p.id);
+      for (const e of ring) {
+        if (/^partial:/i.test(String(e.exitReason || ''))) continue;
+        if (isLearningQuarantinedEpisode(e)) quarantinedResetCloses += 1;
+        else activeLearningCloses += 1;
+      }
+    }
+  } catch {
+    /* soft */
+  }
+  return { quarantinedResetCloses, activeLearningCloses };
+}
+
+/**
+ * One-shot: mark historical dashboard_reset episodes as learningQuarantined.
+ * Safe to call repeatedly — marker file skips rewrites after first success.
+ */
+export function quarantineHistoricalResetEpisodes(): {
+  quarantined: number;
+  active: number;
+  alreadyDone: boolean;
+} {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(HYGIENE_MARKER())) {
+      const counts = countLearningHygieneEpisodes();
+      return {
+        quarantined: counts.quarantinedResetCloses,
+        active: counts.activeLearningCloses,
+        alreadyDone: true,
+      };
+    }
+  } catch {
+    /* continue and attempt migration */
+  }
+
+  let newlyMarked = 0;
+  let active = 0;
+  try {
+    const { TRADE_PROFILE_CATALOG } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    for (const p of TRADE_PROFILE_CATALOG) {
+      if (p.id === 'default' || p.id === 'zion') continue;
+      const ring = loadProfile(p.id);
+      let dirty = false;
+      for (let i = 0; i < ring.length; i++) {
+        const e = ring[i]!;
+        if (/^partial:/i.test(String(e.exitReason || ''))) continue;
+        if (isResetLearningQuarantineReason(e.exitReason)) {
+          if (e.learningQuarantined !== true) {
+            ring[i] = { ...e, learningQuarantined: true };
+            newlyMarked += 1;
+            dirty = true;
+          }
+        } else if (!isLearningQuarantinedEpisode(e)) {
+          active += 1;
+        }
+      }
+      if (dirty) {
+        cache.set(p.id, ring);
+        persistProfile(p.id);
+      }
+    }
+  } catch (err) {
+    logger.warn(
+      'Learning',
+      'dashboard_reset hygiene migration failed',
+      errorToMeta(err)
+    );
+  }
+
+  const counts = countLearningHygieneEpisodes();
+  try {
+    ensureDataDir();
+    atomicWriteJson(HYGIENE_MARKER(), {
+      version: 1,
+      at: Date.now(),
+      newlyMarked,
+      quarantinedResetCloses: counts.quarantinedResetCloses,
+      activeLearningCloses: counts.activeLearningCloses,
+    });
+  } catch {
+    /* soft */
+  }
+  if (newlyMarked > 0) {
+    logger.info(
+      'Learning',
+      `dashboard_reset hygiene: quarantined ${newlyMarked} historical episode(s) · active=${counts.activeLearningCloses}`
+    );
+  }
+  return {
+    quarantined: counts.quarantinedResetCloses,
+    active: counts.activeLearningCloses,
+    alreadyDone: false,
+  };
+}
+
+/** Run hygiene migration once per process (idempotent via marker file). */
+let hygieneBootstrapped = false;
+export function ensureLearningHygieneMigration(): void {
+  if (hygieneBootstrapped) return;
+  hygieneBootstrapped = true;
+  try {
+    quarantineHistoricalResetEpisodes();
+  } catch {
+    /* soft */
+  }
 }
 
 export function getProfileEpisodeExpectancy(

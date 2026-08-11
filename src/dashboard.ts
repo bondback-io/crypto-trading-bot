@@ -315,6 +315,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .rpc-health-panel .rpc-ep-pill.is-active {
       box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.45);
     }
+    .rpc-health-panel .rpc-share-mode {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin: 0.1rem 0 0.4rem 4.5rem;
+    }
+    .rpc-health-panel .rpc-share-mode.is-sharing { color: #6ee7b7; }
+    .rpc-health-panel .rpc-share-mode.is-failover { color: #fbbf24; }
+    .rpc-health-panel .rpc-share-mode.is-down { color: #fca5a5; }
     .rpc-health-panel .rpc-plain {
       margin: 0.4rem 0 0;
       font-size: 0.75rem;
@@ -10687,7 +10695,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="card" id="learning-report-card">
           <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
             <div style="min-width:0;flex:1">
-              <div class="section-title">Learning Report <span class="tip" tabindex="0" data-tip="Read-only last 50/100 closed-trade evaluation package for Cursor. Summary, per-profile table, trade sample, quality diagnostics, and learning-relevant config. Does not change trading."></span></div>
+              <div class="section-title">Learning Report <span class="tip" tabindex="0" data-tip="Read-only last 50/100 closed-trade evaluation package for Cursor. Summary, per-profile table, trade sample, quality diagnostics, and learning-relevant config. dashboard_reset closes are excluded from learning by default. Copy Cursor package starts in Plan mode. Does not change trading."></span></div>
               <p class="text-xs text-slate-400 mb-0">Generate a clean trade-learning package to paste into Cursor. Separate from the full system diagnostics export above.</p>
             </div>
             <div class="flex flex-wrap gap-2 items-end">
@@ -10700,7 +10708,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               </label>
               <button type="button" class="btn btn-primary btn-sm" id="learning-report-generate" onclick="generateLearningReport()">Generate Learning Report</button>
               <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReport()">Copy report</button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReportCursorPackage()" title="Fixed evaluation instructions + report">Copy Cursor package</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReportCursorPackage()" title="Plan-mode evaluation instructions + report">Copy Cursor package</button>
               <button type="button" class="btn btn-sm" onclick="downloadLearningReport('md')">Download .md</button>
               <button type="button" class="btn btn-sm" onclick="downloadLearningReport('json')">Download .json</button>
             </div>
@@ -10726,12 +10734,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
               <span class="mint text-xs" id="rpc-helius-meta">—</span>
             </div>
+            <div class="rpc-share-mode" id="rpc-helius-share">—</div>
             <div class="rpc-prov-row" data-provider="alchemy">
               <span class="rpc-prov-name">Alchemy</span>
               <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
               <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
               <span class="mint text-xs" id="rpc-alchemy-meta">—</span>
             </div>
+            <div class="rpc-share-mode" id="rpc-alchemy-share">—</div>
           </div>
           <p class="rpc-plain" id="rpc-health-plain">—</p>
         </div>
@@ -10753,7 +10763,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code> / <code>HELIUS_RPC_URL</code>+backup) → Alchemy (<code>ALCHEMY_API_KEY</code> / <code>ALCHEMY_RPC_URL</code>+backup) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_RPC_URL</code> + <code>HELIUS_RPC_URL_BACKUP</code> / <code>HELIUS_RPC_URLBACKUP</code>, or <code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_RPC_URL</code> + <code>ALCHEMY_RPC_URL_BACKUP</code>, or <code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius pool (primary then backup).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy pool.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
@@ -26409,13 +26419,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   : 'is-down'
             );
             if (mem.isActive) el.classList.add('is-active');
+            const slotLabel =
+              mem.slot === 'solo'
+                ? 'solo'
+                : mem.slot === 'backup'
+                  ? 'BACKUP'
+                  : 'PRIMARY';
             el.textContent =
-              (mem.slot || emptyLabel) +
+              slotLabel +
+              (mem.isActive ? ' ●' : '') +
               ' · ' +
               (mem.host || mem.label || '—') +
               (mem.latencyEwmaMs != null
                 ? ' · ' + Math.round(mem.latencyEwmaMs) + 'ms'
-                : '');
+                : '') +
+              ' · ' +
+              st;
             el.title =
               (mem.label || '') +
               ' · ' +
@@ -26434,7 +26453,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   new Date(pool.lastFailoverAt).toLocaleTimeString()
                 : 'fo —';
             const cnt =
-              pool.failoverCountRecent != null
+              pool.failoverCountRecent != null && pool.failoverCountRecent > 0
                 ? '×' + pool.failoverCountRecent
                 : '';
             const errMem =
@@ -26448,6 +26467,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               fo +
               (cnt ? ' ' + cnt : '') +
               (errMem ? ' · err ' + errMem.lastError : '');
+          }
+          const shareEl = document.getElementById('rpc-' + name + '-share');
+          if (shareEl) {
+            shareEl.classList.remove('is-sharing', 'is-failover', 'is-down');
+            const mode = pool.shareMode || 'empty';
+            if (mode === 'sharing') shareEl.classList.add('is-sharing');
+            else if (mode === 'failover') shareEl.classList.add('is-failover');
+            else if (mode === 'down' || mode === 'empty')
+              shareEl.classList.add('is-down');
+            shareEl.textContent =
+              pool.shareLabel ||
+              (mode === 'empty'
+                ? 'not configured — set ' +
+                  (name === 'helius'
+                    ? 'HELIUS_RPC_URL (+ HELIUS_RPC_URLBACKUP)'
+                    : 'ALCHEMY_RPC_URL (+ ALCHEMY_RPC_URL_BACKUP)')
+                : mode);
           }
         }
         paintProv('helius');

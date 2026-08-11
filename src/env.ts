@@ -110,7 +110,13 @@ export function validateDeploymentEnv(): string[] {
   const rawRpc = process.env.RPC_URL?.trim() || '';
   const hasFreeProvider =
     Boolean(process.env.HELIUS_API_KEY?.trim()) ||
-    Boolean(process.env.ALCHEMY_API_KEY?.trim());
+    Boolean(process.env.ALCHEMY_API_KEY?.trim()) ||
+    Boolean(process.env.HELIUS_RPC_URL?.trim()) ||
+    Boolean(process.env.ALCHEMY_RPC_URL?.trim()) ||
+    Boolean(process.env.HELIUS_RPC_URL_BACKUP?.trim()) ||
+    Boolean(process.env.HELIUS_RPC_URLBACKUP?.trim()) ||
+    Boolean(process.env.ALCHEMY_RPC_URL_BACKUP?.trim()) ||
+    Boolean(process.env.ALCHEMY_RPC_URLBACKUP?.trim());
   if (
     rawRpc &&
     /your-helius|your-quicknode|example\.com|changeme/i.test(rawRpc)
@@ -124,7 +130,7 @@ export function validateDeploymentEnv(): string[] {
     !hasFreeProvider
   ) {
     warnings.push(
-      'Using public Solana RPC in production — set HELIUS_API_KEY + ALCHEMY_API_KEY (or a paid RPC_URL) for reliable wallet polling'
+      'Using public Solana RPC in production — set HELIUS_RPC_URL (+ _BACKUP) and ALCHEMY_RPC_URL (+ _BACKUP), or HELIUS_API_KEY + ALCHEMY_API_KEY'
     );
   }
   return warnings;

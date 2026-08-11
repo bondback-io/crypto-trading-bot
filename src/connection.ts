@@ -97,13 +97,28 @@ export interface RpcPoolMemberStats {
   isActive: boolean;
 }
 
+/** How primary+backup are used within a provider pool. */
+export type RpcPoolShareMode =
+  | 'empty'
+  | 'solo'
+  | 'sharing'
+  | 'primary_only'
+  | 'failover'
+  | 'down';
+
 export interface RpcProviderPoolStats {
   provider: 'helius' | 'alchemy';
   members: RpcPoolMemberStats[];
   activeLabel: string | null;
   state: RpcMemberHealthState | 'empty';
+  /** empty | solo | sharing (both healthy) | primary_only | failover (on backup) | down */
+  shareMode: RpcPoolShareMode;
+  /** Short operator line for Stats → RPC. */
+  shareLabel: string;
   lastFailoverAt: number | null;
   failoverCountRecent: number;
+  configured: boolean;
+  hasBackup: boolean;
 }
 
 export type RpcHealthSummary =
@@ -1804,7 +1819,7 @@ export function getRpcStats(): {
     /mainnet-beta\.solana\.com|publicnode\.com/i.test(pActive?.endpoint.url || '')
   ) {
     warning =
-      'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Set HELIUS_API_KEY (+ ALCHEMY_API_KEY) for free faster failover.';
+      'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Set HELIUS_RPC_URL (+ backup) and ALCHEMY_RPC_URL (+ backup).';
   } else if (pIdx !== preferredPrimary) {
     warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
   } else if (
@@ -1850,15 +1865,72 @@ export function getRpcStats(): {
       else if (members.every((m) => m.state === 'down')) state = 'down';
       else state = 'degraded';
     }
+    const primaryMem =
+      members.find((m) => m.slot === 'primary') ||
+      members.find((m) => m.slot === 'solo') ||
+      null;
+    const backupMem = members.find((m) => m.slot === 'backup') || null;
+    const activeMem = members.find((m) => m.isActive) || null;
+    const hasBackup = Boolean(backupMem);
+    let shareMode: RpcPoolShareMode = 'empty';
+    if (!members.length) shareMode = 'empty';
+    else if (state === 'down') shareMode = 'down';
+    else if (!hasBackup) shareMode = 'solo';
+    else if (
+      activeMem?.slot === 'backup' &&
+      primaryMem &&
+      primaryMem.state !== 'healthy'
+    ) {
+      shareMode = 'failover';
+    } else if (
+      primaryMem?.state === 'healthy' &&
+      backupMem?.state === 'healthy'
+    ) {
+      shareMode = 'sharing';
+    } else if (primaryMem?.state === 'healthy') {
+      shareMode = 'primary_only';
+    } else if (backupMem?.state === 'healthy' || (backupMem && backupMem.state !== 'down')) {
+      shareMode = 'failover';
+    } else {
+      shareMode = 'down';
+    }
+    const errHint = (m: RpcPoolMemberStats | null) => {
+      if (!m || !m.lastError || m.lastError === 'none') return '';
+      return m.lastError === '429'
+        ? 'rate-limited'
+        : m.lastError === 'quota'
+          ? 'out of credits'
+          : m.lastError;
+    };
+    let shareLabel = 'not configured';
+    if (shareMode === 'solo') {
+      shareLabel = `solo · ${activeMem?.state || state} · active ${activeMem?.label || '—'}`;
+    } else if (shareMode === 'sharing') {
+      shareLabel = `sharing load · both healthy · active ${activeMem?.label || '—'}`;
+    } else if (shareMode === 'primary_only') {
+      shareLabel = `primary only · backup ${backupMem?.state || 'down'}${
+        errHint(backupMem) ? ` (${errHint(backupMem)})` : ''
+      } · active ${activeMem?.label || '—'}`;
+    } else if (shareMode === 'failover') {
+      shareLabel = `FAILOVER on backup · primary ${
+        errHint(primaryMem) || primaryMem?.state || 'down'
+      } · active ${activeMem?.label || '—'}`;
+    } else if (shareMode === 'down') {
+      shareLabel = 'pool down — traffic on other providers';
+    }
     return {
       provider,
       members,
       activeLabel:
         activeIdx >= 0 ? endpoints[activeIdx]?.endpoint.label ?? null : null,
       state,
+      shareMode,
+      shareLabel,
       lastFailoverAt:
         provider === 'helius' ? lastHeliusFailoverAt : lastAlchemyFailoverAt,
       failoverCountRecent: failoverCountRecent(provider),
+      configured: members.length > 0,
+      hasBackup,
     };
   };
 
@@ -1918,12 +1990,38 @@ export function getRpcStats(): {
     ) {
       return 'Alchemy primary degraded — using Alchemy backup';
     }
-    if (alchemyPoolStats.state === 'healthy' && alchemyPoolStats.members.length) {
-      return heliusPoolStats.state === 'healthy'
-        ? 'Helius and Alchemy pools healthy'
-        : 'Alchemy pool healthy';
+    const parts: string[] = [];
+    if (heliusPoolStats.configured) {
+      if (heliusPoolStats.shareMode === 'sharing') {
+        parts.push('Helius primary+backup sharing load');
+      } else if (heliusPoolStats.shareMode === 'failover') {
+        parts.push('Helius on backup (primary degraded)');
+      } else if (heliusPoolStats.shareMode === 'solo') {
+        parts.push('Helius solo (no backup URL)');
+      } else if (heliusPoolStats.shareMode === 'primary_only') {
+        parts.push('Helius primary up · backup degraded');
+      } else if (heliusPoolStats.shareMode === 'down') {
+        parts.push('Helius pool down');
+      } else {
+        parts.push('Helius configured');
+      }
     }
-    if (heliusPoolStats.state === 'healthy') return 'Helius pool healthy';
+    if (alchemyPoolStats.configured) {
+      if (alchemyPoolStats.shareMode === 'sharing') {
+        parts.push('Alchemy primary+backup sharing load');
+      } else if (alchemyPoolStats.shareMode === 'failover') {
+        parts.push('Alchemy on backup (primary degraded)');
+      } else if (alchemyPoolStats.shareMode === 'solo') {
+        parts.push('Alchemy solo (no backup URL)');
+      } else if (alchemyPoolStats.shareMode === 'primary_only') {
+        parts.push('Alchemy primary up · backup degraded');
+      } else if (alchemyPoolStats.shareMode === 'down') {
+        parts.push('Alchemy pool down');
+      } else {
+        parts.push('Alchemy configured');
+      }
+    }
+    if (parts.length) return parts.join(' · ');
     return warning || 'RPC lanes operating';
   };
   const plainLanguage = buildPlainLanguage();

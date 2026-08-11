@@ -114,6 +114,16 @@ async function main(): Promise<void> {
 
   paperTrader.loadPersistedState();
   resolveBootTradingMode();
+  try {
+    const { ensureLearningHygieneMigration } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    ensureLearningHygieneMigration();
+  } catch (err) {
+    console.warn(
+      '[boot] learning hygiene migration failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
 
   console.log('═══════════════════════════════════════════════════');
   console.log('  Solana Smart Money Copy Trading Bot');

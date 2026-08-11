@@ -43,6 +43,26 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.274',
+    title: 'Render RPC URL env + backup share status',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Accepts HELIUS_RPC_URL / HELIUS_RPC_URLBACKUP and ALCHEMY_RPC_URL / ALCHEMY_RPC_URL_BACKUP (API key env still works).',
+      'Stats → RPC shows Helius/Alchemy primary+backup pills with sharing vs failover status lines.',
+      'Share-load default ON when both provider URLs (or keys) are set; .env.example documents Render URL names.',
+    ],
+  },
+  {
+    version: '1.2.273',
+    title: 'Dashboard-reset learning hygiene + Plan-mode Cursor package',
+    sections: ['learning', 'overview', 'knobs'],
+    items: [
+      'dashboard_reset closes are stamped learningQuarantined and excluded from self-learn / RL / expectancy (reversible via includeDashboardResetEpisodes).',
+      'One-shot historical quarantine of existing reset episodes; Learning Report notes excluded count.',
+      'Copy Cursor package now starts with Plan-mode-only evaluation instructions before the report body.',
+    ],
+  },
+  {
     version: '1.2.272',
     title: 'Learning Report on Stats → Export Data',
     sections: ['learning', 'overview', 'knobs'],
