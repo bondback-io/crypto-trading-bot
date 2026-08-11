@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.278',
+    title: 'Fix bad RPC URL coercion + clearer pool health',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Do not wrap host/path strings as API keys (prevents broken double Helius/Alchemy URLs).',
+      'Provider down chip only when all configured paid pools are down; one pool down shows Failover active.',
+      'RPC Health shows error detail (auth/timeout/…) so bad keys are visible.',
+    ],
+  },
+  {
     version: '1.2.277',
     title: 'Coerce bare keys in HELIUS/ALCHEMY_RPC_URL env',
     sections: ['overview', 'execution', 'knobs'],

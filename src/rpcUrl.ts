@@ -127,7 +127,23 @@ function normalizeExplicitRpcUrl(raw: string | null | undefined): string | null 
 /**
  * Accept full HTTPS RPC URLs or bare API keys in HELIUS_RPC_URL / ALCHEMY_RPC_URL
  * (and backups). Bare keys are coerced to the provider HTTP URL.
+ *
+ * Never treat host/path strings (e.g. mainnet.helius-rpc.com/?api-key=…) as
+ * bare keys — that previously built broken double URLs and marked pools down.
  */
+function looksLikeBareApiKey(u: string): boolean {
+  if (!u || /^https?:\/\//i.test(u)) return false;
+  if (/[./?#\\]/.test(u)) return false;
+  if (/\s/.test(u)) return false;
+  return isUsableApiKey(u);
+}
+
+function ensureHttpsUrl(u: string): string {
+  if (/^https?:\/\//i.test(u)) return u;
+  if (u.startsWith('//')) return `https:${u}`;
+  return `https://${u}`;
+}
+
 function coerceProviderRpcEnvValue(
   provider: 'helius' | 'alchemy',
   raw: string | null | undefined
@@ -135,8 +151,17 @@ function coerceProviderRpcEnvValue(
   const u = stripEnvQuotes(raw || '');
   if (!u) return null;
   if (isUsableRpcUrl(u)) return u;
-  // Bare key pasted into *_RPC_URL (common after renaming HELIUS_API_KEY → HELIUS_RPC_URL)
-  if (!/^https?:\/\//i.test(u) && isUsableApiKey(u)) {
+
+  // Host/path pasted without scheme
+  if (
+    !/^https?:\/\//i.test(u) &&
+    /(helius|alchemy|quiknode|solana-mainnet)/i.test(u)
+  ) {
+    const fixed = ensureHttpsUrl(u);
+    if (isUsableRpcUrl(fixed)) return fixed;
+  }
+
+  if (looksLikeBareApiKey(u)) {
     return provider === 'helius' ? buildHeliusRpcUrl(u) : buildAlchemyRpcUrl(u);
   }
   return null;
@@ -241,6 +266,17 @@ function resolveProviderPoolMembers(opts: {
     else if (backup && primary && backup === primary) reason = 'duplicate';
     else if (!backupPresentKey) reason = 'missing';
     console.log(`rpc_backup_unset provider=${provider} reason=${reason}`);
+  }
+
+  for (const m of out) {
+    if (
+      /api-key=.*api-key=/i.test(m.url) ||
+      /\/v2\/[^/]+\/v2\//i.test(m.url)
+    ) {
+      console.warn(
+        `rpc_env_malformed provider=${provider} label=${m.label} host=${rpcHostOnly(m.url)} — check Render value is a bare key OR a single full https URL (not both nested)`
+      );
+    }
   }
 
   return out;

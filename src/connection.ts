@@ -82,6 +82,7 @@ export type RpcLastErrorKind =
   | 'timeout'
   | '5xx'
   | 'quota'
+  | 'auth'
   | 'none'
   | 'other';
 
@@ -439,6 +440,13 @@ function classifyRpcError(error: string | undefined): RpcLastErrorKind {
   if (!error) return 'none';
   if (isRpcRateLimitMessage(error)) return '429';
   if (isRpcQuotaMessage(error)) return 'quota';
+  if (
+    /\b401\b|\b403\b|unauthorized|forbidden|invalid api|invalid.?key|api[- ]?key.*(invalid|missing|denied)/i.test(
+      error
+    )
+  ) {
+    return 'auth';
+  }
   if (/timeout|timed out|probe timeout/i.test(error)) return 'timeout';
   if (isRpc5xxMessage(error)) return '5xx';
   if (
@@ -1927,7 +1935,9 @@ export function getRpcStats(): {
         ? 'rate-limited'
         : m.lastError === 'quota'
           ? 'out of credits'
-          : m.lastError;
+          : m.lastError === 'auth'
+            ? 'bad API key/URL'
+            : m.lastError;
     };
     const envPrimaryPresent =
       provider === 'helius'
@@ -2017,8 +2027,16 @@ export function getRpcStats(): {
     alchemyPoolStats.failoverCountRecent > 0 ||
     pIdx !== preferredPrimary ||
     (preferredSecondary !== preferredPrimary && sIdx !== preferredSecondary);
-  if (heliusDown || alchemyDown) summary = 'provider_down';
-  else if (anyFailover) summary = 'failover_active';
+  // Red "Provider down" only when every configured paid pool is down.
+  // One pool down + other serving → failover_active (expected, not total outage).
+  const heliusConfigured = heliusPoolStats.configured;
+  const alchemyConfigured = alchemyPoolStats.configured;
+  const allPaidDown =
+    (!heliusConfigured || heliusDown) &&
+    (!alchemyConfigured || alchemyDown) &&
+    (heliusConfigured || alchemyConfigured);
+  if (allPaidDown) summary = 'provider_down';
+  else if (heliusDown || alchemyDown || anyFailover) summary = 'failover_active';
   else if (anyDegraded) summary = 'degraded';
 
   const buildPlainLanguage = (): string => {

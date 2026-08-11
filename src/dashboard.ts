@@ -26593,7 +26593,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   ? 'BACKUP'
                   : 'PRIMARY';
             const readyBit =
-              mem.slot === 'backup'
+              mem.slot === 'backup' && st === 'healthy'
                 ? ' ready'
                 : mem.slot === 'solo'
                   ? ' (solo)'
@@ -26615,7 +26615,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               st +
               (mem.lastError && mem.lastError !== 'none'
                 ? ' · last ' + mem.lastError
-                : '');
+                : '') +
+              (mem.lastErrorDetail ? ' · ' + mem.lastErrorDetail : '');
           };
           paintPill('rpc-' + name + '-primary', primary, 'primary');
           paintPill('rpc-' + name + '-backup', backup, 'backup');
@@ -26636,6 +26637,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               }) || null;
             const bak =
               pool.backupStatus === 'ready' ? 'backup ready' : 'backup unset';
+            const errBit = errMem
+              ? ' · err ' +
+                errMem.lastError +
+                (errMem.lastErrorDetail
+                  ? ' (' +
+                    String(errMem.lastErrorDetail).slice(0, 48) +
+                    ')'
+                  : '')
+              : '';
             meta.textContent =
               (pool.primaryConfigured ? 'primary configured' : 'primary unset') +
               ' · ' +
@@ -26645,7 +26655,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ' · ' +
               fo +
               (cnt ? ' ' + cnt : '') +
-              (errMem ? ' · err ' + errMem.lastError : '');
+              errBit;
           }
           const shareEl = document.getElementById('rpc-' + name + '-share');
           if (shareEl) {
