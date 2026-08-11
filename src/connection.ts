@@ -310,11 +310,11 @@ const LATENCY_STRESS_GRACE_MS = 15_000;
 /** Public Solana is often chronically slow from cloud hosts — fail over sooner. */
 const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
 /**
- * Critical → Alchemy soft-failover needs a higher bar so scanners keep dedicated CU.
- * Prefer QuickNode (if set) before burning Secondary.
+ * Critical soft-leave bar (QN / Alchemy / public): stick on Helius for trades
+ * unless EWMA is severely hot. 429 / hard-down still escape immediately.
  */
-const PRIMARY_TO_ALCHEMY_SOFT_MS = 800;
-const PRIMARY_TO_ALCHEMY_GRACE_MS = 30_000;
+const PRIMARY_SOFT_LEAVE_MS = 950;
+const PRIMARY_SOFT_LEAVE_GRACE_MS = 45_000;
 /** Utility Share escape only when preferred EWMA is actually hot. */
 const UTILITY_ESCAPE_MIN_EWMA_MS = 500;
 /** Don't re-log latency piggyback more often than this. */
@@ -466,6 +466,40 @@ function isPaidCriticalOrScannerUrl(url: string): boolean {
     u.includes('alchemy') ||
     u.includes('helius-rpc') ||
     u.includes('g.alchemy')
+  );
+}
+
+function isHeliusEndpoint(state: EndpointState | undefined): boolean {
+  if (!state) return false;
+  const label = (state.endpoint.label || '').toLowerCase();
+  const u = (state.endpoint.url || '').toLowerCase();
+  return label === 'helius' || u.includes('helius');
+}
+
+function isAlchemyEndpoint(state: EndpointState | undefined): boolean {
+  if (!state) return false;
+  const label = (state.endpoint.label || '').toLowerCase();
+  const u = (state.endpoint.url || '').toLowerCase();
+  return label === 'alchemy' || u.includes('alchemy') || u.includes('g.alchemy');
+}
+
+/** Share ON: non-Critical lanes must not burn Helius (trade-only host). */
+function shareBlocksHeliusForRole(role: RpcRole, idx: number): boolean {
+  if (!config.rpc?.shareLoad || role === 'primary') return false;
+  if (idx === preferredPrimary) return true;
+  return isHeliusEndpoint(endpoints[idx]);
+}
+
+/** Share ON: Utility must not burn Helius/Alchemy. */
+function shareBlocksPaidForUtility(role: RpcRole, idx: number): boolean {
+  if (!config.rpc?.shareLoad || role !== 'utility') return false;
+  const e = endpoints[idx];
+  if (!e) return false;
+  if (idx === preferredPrimary || idx === preferredSecondary) return true;
+  return (
+    isHeliusEndpoint(e) ||
+    isAlchemyEndpoint(e) ||
+    isPaidCriticalOrScannerUrl(e.endpoint.url)
   );
 }
 
@@ -1070,9 +1104,19 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
+  // Critical soft-leave: stick on Helius unless severely hot (or 429/hard-down).
+  const primarySoftLeaveBlocked =
+    role === 'primary' &&
+    latencySoft &&
+    !rateLimited &&
+    ((pref?.latencyMs ?? 0) < PRIMARY_SOFT_LEAVE_MS ||
+      (pref?.latencyStressedSince != null
+        ? Date.now() - pref.latencyStressedSince
+        : 0) < PRIMARY_SOFT_LEAVE_GRACE_MS);
+
   // Critical / Scanners: QuickNode before cross-lane paid piggyback so
   // Critical soft-failover does not casually burn Alchemy scanner CU.
-  if (role === 'primary' || role === 'secondary') {
+  if ((role === 'primary' || role === 'secondary') && !primarySoftLeaveBlocked) {
     if (
       acceptFailoverTarget(
         role,
@@ -1089,24 +1133,15 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
-  // Other paid free lane (Helius ↔ Alchemy). Share+Utility: skip.
-  // Critical→Alchemy latency soft needs a higher bar (protect signals).
-  if (!(shareLoad && role === 'utility')) {
+  // Other paid free lane. Share+Utility: skip. Share+Scanners: never onto Helius.
+  // Critical soft-leave uses PRIMARY_SOFT_LEAVE_* for any paid piggyback.
+  if (!(shareLoad && role === 'utility') && !primarySoftLeaveBlocked) {
     for (const otherRole of piggybackOrder(role)) {
-      if (
-        role === 'primary' &&
-        otherRole === 'secondary' &&
-        latencySoft &&
-        !rateLimited
-      ) {
-        const stressedFor =
-          pref?.latencyStressedSince != null
-            ? Date.now() - pref.latencyStressedSince
-            : 0;
-        if ((pref?.latencyMs ?? 0) < PRIMARY_TO_ALCHEMY_SOFT_MS) continue;
-        if (stressedFor < PRIMARY_TO_ALCHEMY_GRACE_MS) continue;
+      if (shareLoad && role === 'secondary' && otherRole === 'primary') {
+        continue; // Helius is trade-only under Share ON
       }
       const otherPreferred = preferredIndexFor(otherRole);
+      if (shareBlocksHeliusForRole(role, otherPreferred)) continue;
       if (
         acceptFailoverTarget(
           role,
@@ -1125,7 +1160,7 @@ function resolveIndexForRole(role: RpcRole): number {
   }
 
   // Utility / public for Critical+Scanners (QN already tried above)
-  if (role === 'primary' || role === 'secondary') {
+  if ((role === 'primary' || role === 'secondary') && !primarySoftLeaveBlocked) {
     if (
       acceptFailoverTarget(
         role,
@@ -1142,11 +1177,19 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
+  // Soft-leave blocked: stay on preferred Helius while still usable.
+  if (primarySoftLeaveBlocked && pref && isEndpointUsable(pref)) {
+    setActiveForRole(role, preferred);
+    return preferred;
+  }
+
   for (let i = 0; i < endpoints.length; i++) {
     if (!endpoints[i]?.healthy || isEndpointRateLimited(endpoints[i])) continue;
     if (avoidPublicForCritical && isPublicRpcUrl(endpoints[i].endpoint.url)) {
       continue;
     }
+    if (shareBlocksHeliusForRole(role, i)) continue;
+    if (shareBlocksPaidForUtility(role, i)) continue;
     // Share+Utility: only public/fallback/utility (or QN if severe) — never Helius/Alchemy.
     if (shareLoad && role === 'utility') {
       const e = endpoints[i]!;
@@ -1180,15 +1223,30 @@ function resolveIndexForRole(role: RpcRole): number {
   // Last resort: any healthy endpoint (even public for critical)
   // Share+Utility: stay on preferred only when it is still usable — otherwise
   // allow any healthy host so Favourites are not pinned to a dead publicnode.
+  // Never land Scanners/Utility on Helius (or Utility on Alchemy) under Share ON.
   if (shareLoad && role === 'utility' && isEndpointUsable(endpoints[preferred])) {
     setActiveForRole(role, preferred);
     return preferred;
   }
   for (let i = 0; i < endpoints.length; i++) {
-    if (endpoints[i]?.healthy && !isEndpointRateLimited(endpoints[i])) {
-      setActiveForRole(role, i);
-      return i;
+    if (!endpoints[i]?.healthy || isEndpointRateLimited(endpoints[i])) continue;
+    if (shareBlocksHeliusForRole(role, i)) continue;
+    if (shareBlocksPaidForUtility(role, i)) continue;
+    if (shareLoad && role === 'utility') {
+      const e = endpoints[i]!;
+      const isQn =
+        e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url);
+      if (isQn && !(pref && utilityMayUseQuicknodeSoft(pref))) continue;
+      if (
+        isPaidCriticalOrScannerUrl(e.endpoint.url) ||
+        isHeliusEndpoint(e) ||
+        isAlchemyEndpoint(e)
+      ) {
+        continue;
+      }
     }
+    setActiveForRole(role, i);
+    return i;
   }
 
   return preferred;
@@ -1454,13 +1512,21 @@ async function withRpcInner<T>(
     ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
     : WITH_RPC_MAX_ATTEMPTS_OTHER;
 
-  // Build attempt order: preferred → other paid → QuickNode → utility → remaining
+  // Build attempt order: preferred → other paid → QuickNode → utility → remaining.
+  // Share ON: never walk Scanners/Utility onto Helius; Utility also skips Alchemy.
+  const shareLoad = Boolean(config.rpc?.shareLoad);
   const order: number[] = [];
   const pushUnique = (i: number) => {
-    if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
+    if (i < 0 || i >= endpoints.length || order.includes(i)) return;
+    if (shareBlocksHeliusForRole(r, i)) return;
+    if (shareBlocksPaidForUtility(r, i)) return;
+    order.push(i);
   };
   pushUnique(startIndex);
   for (const other of piggybackOrder(r)) {
+    if (shareLoad && r === 'secondary' && other === 'primary') continue;
+    if (shareLoad && r === 'utility' && (other === 'primary' || other === 'secondary'))
+      continue;
     pushUnique(preferredIndexFor(other));
   }
   if (r === 'primary' || r === 'secondary') {

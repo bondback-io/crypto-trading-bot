@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.295',
+    title: 'Helius Critical-only — trade execution isolation',
+    sections: ['overview', 'execution'],
+    items: [
+      'Share ON: Scanners/Utility never failover or retry onto Helius — Critical stays trade-only (entries + migration sends).',
+      'Critical soft-leaves Helius only when severely hot (~950ms / 45s); 429/hard-down still escape; recovered preferred snaps back.',
+      'MEV sandwich reads move to Scanners (Alchemy) so getParsedTransaction storms no longer share Helius CU with buys.',
+    ],
+  },
+  {
     version: '1.2.294',
     title: 'Restore healthy classic Share RPC + protect Alchemy signals',
     sections: ['overview', 'execution'],
