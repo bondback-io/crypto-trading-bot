@@ -125,34 +125,6 @@ function checkRpc(): HealthIssue[] {
           'Normal under congestion — if sustained, check Secondary/Utility RPC health.',
       });
     }
-
-    const summary = stats.summary;
-    const plain = (stats.plainLanguage || '').trim();
-    if (summary === 'provider_down' && plain) {
-      out.push({
-        key: 'rpc_pool_provider_down',
-        area: 'rpc',
-        severity: 'action',
-        title: plain,
-        detail: `summary=${summary}`,
-        recommendation:
-          'Check HELIUS_RPC_URL / ALCHEMY_RPC_URL (+ HELIUS_RPC_URL_BACKUP / ALCHEMY_RPC_URL_BACKUP). Stats → RPC shows pool members.',
-        sustainedHint: true,
-      });
-    } else if (
-      (summary === 'failover_active' || summary === 'degraded') &&
-      plain
-    ) {
-      out.push({
-        key: 'rpc_pool_failover',
-        area: 'rpc',
-        severity: 'watch',
-        title: plain,
-        detail: `summary=${summary}`,
-        recommendation:
-          'Sibling/cross-provider failover is active — verify CU/quota on the degraded endpoint.',
-      });
-    }
   } catch {
     /* fail-open */
   }

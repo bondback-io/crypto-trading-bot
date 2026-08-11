@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.287',
+    title: 'Restore classic Helius / Alchemy / mainnet three-lane RPC',
+    sections: ['overview', 'copy', 'execution', 'zion'],
+    items: [
+      'Reverts dual Helius/Alchemy backup pools — Critical=Helius, Scanners=Alchemy, Utility=mainnet (Share ON).',
+      'Removes in-pool RR / soft-sticky / backup Failover thrash; keeps observational status polls and Favourites dead-endpoint escape.',
+      'Share Load restored ON; clear HELIUS/ALCHEMY *_BACKUP on Render (classic ignores them).',
+    ],
+  },
+  {
     version: '1.2.286',
     title: 'Prefer fast healthy primaries over sticky slow backups',
     sections: ['overview', 'copy', 'execution'],
