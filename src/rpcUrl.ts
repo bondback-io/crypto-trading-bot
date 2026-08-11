@@ -106,16 +106,46 @@ export interface RpcPoolMember {
   slot: RpcPoolSlot;
 }
 
+function stripEnvQuotes(raw: string): string {
+  let u = raw.trim();
+  // Render / dotenv sometimes wraps secrets in quotes
+  if (
+    (u.startsWith('"') && u.endsWith('"')) ||
+    (u.startsWith("'") && u.endsWith("'"))
+  ) {
+    u = u.slice(1, -1).trim();
+  }
+  return u;
+}
+
 function normalizeExplicitRpcUrl(raw: string | null | undefined): string | null {
-  const u = (raw || '').trim();
+  const u = stripEnvQuotes(raw || '');
   if (!u || !isUsableRpcUrl(u)) return null;
   return u;
+}
+
+/**
+ * Accept full HTTPS RPC URLs or bare API keys in HELIUS_RPC_URL / ALCHEMY_RPC_URL
+ * (and backups). Bare keys are coerced to the provider HTTP URL.
+ */
+function coerceProviderRpcEnvValue(
+  provider: 'helius' | 'alchemy',
+  raw: string | null | undefined
+): string | null {
+  const u = stripEnvQuotes(raw || '');
+  if (!u) return null;
+  if (isUsableRpcUrl(u)) return u;
+  // Bare key pasted into *_RPC_URL (common after renaming HELIUS_API_KEY → HELIUS_RPC_URL)
+  if (!/^https?:\/\//i.test(u) && isUsableApiKey(u)) {
+    return provider === 'helius' ? buildHeliusRpcUrl(u) : buildAlchemyRpcUrl(u);
+  }
+  return null;
 }
 
 /** First env key that has a non-empty raw value (may still be invalid). */
 function firstPresentEnvKey(...keys: string[]): string | null {
   for (const key of keys) {
-    if (process.env[key]?.trim()) return key;
+    if (stripEnvQuotes(process.env[key] || '')) return key;
   }
   return null;
 }
@@ -135,6 +165,7 @@ type BackupSkipReason = 'missing' | 'invalid' | 'duplicate';
 /**
  * Resolve a provider pool (primary + optional backup) with structured boot logs.
  * New Render names are preferred; legacy API keys / typo aliases remain as fallbacks.
+ * HELIUS_RPC_URL / ALCHEMY_RPC_URL may be a full URL or a bare API key.
  */
 function resolveProviderPoolMembers(opts: {
   provider: 'helius' | 'alchemy';
@@ -147,7 +178,7 @@ function resolveProviderPoolMembers(opts: {
   let primarySource: string | null = null;
   let primary: string | null = null;
   for (const key of primaryKeys) {
-    const v = normalizeExplicitRpcUrl(process.env[key]);
+    const v = coerceProviderRpcEnvValue(provider, process.env[key]);
     if (v) {
       primary = v;
       primarySource = key;
@@ -166,7 +197,7 @@ function resolveProviderPoolMembers(opts: {
   let backup: string | null = null;
   let backupSource: string | null = null;
   for (const key of backupKeys) {
-    const v = normalizeExplicitRpcUrl(process.env[key]);
+    const v = coerceProviderRpcEnvValue(provider, process.env[key]);
     if (v) {
       backup = v;
       backupSource = key;

@@ -123,6 +123,9 @@ export interface RpcProviderPoolStats {
   backupConfigured: boolean;
   /** ready when a distinct backup endpoint is in the pool; else unset */
   backupStatus: 'ready' | 'unset';
+  /** Env keys present (not values) — helps diagnose “not configured” when Render vars exist but are invalid. */
+  envPrimaryPresent: boolean;
+  envBackupPresent: boolean;
 }
 
 export type RpcHealthSummary =
@@ -1926,6 +1929,31 @@ export function getRpcStats(): {
           ? 'out of credits'
           : m.lastError;
     };
+    const envPrimaryPresent =
+      provider === 'helius'
+        ? Boolean(
+            (process.env.HELIUS_RPC_URL || '').trim() ||
+              (process.env.HELIUS_RPC_PRIMARY || '').trim() ||
+              (process.env.HELIUS_API_KEY || '').trim()
+          )
+        : Boolean(
+            (process.env.ALCHEMY_RPC_URL || '').trim() ||
+              (process.env.ALCHEMY_RPC_PRIMARY || '').trim() ||
+              (process.env.ALCHEMY_API_KEY || '').trim()
+          );
+    const envBackupPresent =
+      provider === 'helius'
+        ? Boolean(
+            (process.env.HELIUS_RPC_URL_BACKUP || '').trim() ||
+              (process.env.HELIUS_RPC_URLBACKUP || '').trim() ||
+              (process.env.HELIUS_RPC_BACKUP || '').trim()
+          )
+        : Boolean(
+            (process.env.ALCHEMY_RPC_URL_BACKUP || '').trim() ||
+              (process.env.ALCHEMY_RPC_URLBACKUP || '').trim() ||
+              (process.env.ALCHEMY_RPC_BACKUP || '').trim()
+          );
+
     let shareLabel = 'not configured';
     if (shareMode === 'solo') {
       shareLabel = `primary configured · backup unset · solo · active ${activeMem?.label || '—'}`;
@@ -1944,7 +1972,15 @@ export function getRpcStats(): {
         ? 'pool down · backup was configured — traffic on other providers'
         : 'pool down · backup unset — traffic on other providers';
     } else if (shareMode === 'empty') {
-      shareLabel = 'not configured';
+      if (envPrimaryPresent) {
+        shareLabel =
+          'env set but not loaded — use full https URL or bare API key in HELIUS/ALCHEMY_RPC_URL (+ _BACKUP), then redeploy';
+      } else {
+        shareLabel =
+          provider === 'helius'
+            ? 'not configured — set HELIUS_RPC_URL (+ HELIUS_RPC_URL_BACKUP)'
+            : 'not configured — set ALCHEMY_RPC_URL (+ ALCHEMY_RPC_URL_BACKUP)';
+      }
     }
     return {
       provider,
@@ -1962,6 +1998,8 @@ export function getRpcStats(): {
       primaryConfigured: Boolean(primaryMem),
       backupConfigured: hasBackup,
       backupStatus: hasBackup ? 'ready' : 'unset',
+      envPrimaryPresent,
+      envBackupPresent,
     };
   };
 
@@ -1988,6 +2026,12 @@ export function getRpcStats(): {
       heliusPoolStats.state === 'empty' &&
       alchemyPoolStats.state === 'empty'
     ) {
+      if (heliusPoolStats.envPrimaryPresent || alchemyPoolStats.envPrimaryPresent) {
+        return (
+          'Helius/Alchemy env vars present but not loaded as pools — use a full https URL ' +
+          'or bare API key in HELIUS_RPC_URL / ALCHEMY_RPC_URL (+ backups), then redeploy'
+        );
+      }
       return 'No Helius/Alchemy pools configured — using RPC_URL / public.';
     }
     if (heliusDown && alchemyPoolStats.state === 'healthy') {

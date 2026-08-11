@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.277',
+    title: 'Coerce bare keys in HELIUS/ALCHEMY_RPC_URL env',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'HELIUS_RPC_URL / ALCHEMY_RPC_URL (+ backups) accept full https URLs or bare API keys (auto-wrapped).',
+      'Strips wrapping quotes; Stats → RPC explains when env is present but not loaded.',
+    ],
+  },
+  {
     version: '1.2.276',
     title: 'Stats mobile UX + Export timeout + quieter persistence banners',
     sections: ['overview', 'knobs', 'backup'],
