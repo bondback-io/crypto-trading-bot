@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.268',
+    title: 'Expectancy Repair Pack (40–45% path)',
+    sections: ['overview', 'microbots', 'learning', 'tradecraft', 'scanners'],
+    items: [
+      'Entry Skill: historical zero-MFE pattern admit skip + earlier stall cut; under E-boost quality/Trend use strict 10% disc cap (no 20% floor).',
+      'Dip governor: native soft-allow counters + milder restricted haircut; Dip top-loss size-down when Dip ≥25% of abs losses.',
+      'Harvest: faster PPP giveback (28%), earlier MS/MB banks, stronger tiny-green scratch block (MFE≥6), Scalper/MB tighter fade; learning penalises zero-MFE + green→red.',
+      'Steady/HWR: soft-movement tier (range≥1.5% or H1≥0.7 + vol alive) with size ×0.85 and ≤3 concurrent soft arms; dead tape still denied.',
+      'Diagnostics: Expectancy Lift + Learning Metrics chips for 0-MFE / green→red / Dip soft-allow / soft-move / top-loss; Export snapshot repair line.',
+    ],
+  },
+  {
     version: '1.2.267',
     title: 'Export Data enrichment for AI upgrades',
     sections: ['overview', 'microbots', 'learning', 'tradecraft'],

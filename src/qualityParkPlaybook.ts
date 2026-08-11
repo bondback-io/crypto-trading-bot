@@ -24,6 +24,11 @@ export const QUALITY_MIN_SWING_H1_PCT = 1.0;
 export const QUALITY_MIN_SWING_H6_PCT = 1.75;
 export const QUALITY_DEAD_RANGE_MS = 50 * 60_000;
 export const QUALITY_MIN_VOL_ALIVE_MULT = 0.9;
+/** Soft-movement tier (1.2.268): below hard floor but not dead tape */
+export const QUALITY_SOFT_RANGE_24H_PCT = 1.5;
+export const QUALITY_SOFT_SWING_H1_PCT = 0.7;
+export const QUALITY_SOFT_ARM_CAP = 3;
+export const QUALITY_SOFT_ARM_SIZE_MULT = 0.85;
 /** Soft HWR rank boost above this MC */
 export const HWR_PREFER_MC_USD = 100_000_000;
 
@@ -43,6 +48,7 @@ export type QualityParkProfileId = 'steady_compounder' | 'high_win_rate';
 export type QualityMovementChip =
   | 'active'
   | 'low_movement'
+  | 'soft_movement'
   | 'no_level'
   | 'soft_allow_denied'
   | 'rotated_stale';
@@ -83,6 +89,9 @@ export interface QualityParkEvalResult {
   movementActive: boolean;
   chip: QualityMovementChip;
   softArmOk: boolean;
+  /** Soft-movement grant (size haircut + session cap) */
+  softMovement?: boolean;
+  sizeMult?: number;
 }
 
 type DenyBucket = Record<QualityParkDenyKey, number>;
@@ -113,6 +122,7 @@ const funnelByProfile = {
     expired: 0,
     rotated_stale: 0,
     low_movement: 0,
+    soft_movement: 0,
   },
   high_win_rate: {
     candidates_seen: 0,
@@ -122,10 +132,47 @@ const funnelByProfile = {
     expired: 0,
     rotated_stale: 0,
     low_movement: 0,
+    soft_movement: 0,
   },
 };
 
 const deadTapeSince = new Map<string, number>();
+/** Concurrent soft-movement arms (Steady+HWR combined). */
+const softArmedMints = new Set<string>();
+let softMovementGrantCount = 0;
+
+export function noteSoftMovementGrant(n = 1): void {
+  softMovementGrantCount += Math.max(1, Math.floor(n));
+}
+
+export function getSoftMovementGrantCount(): number {
+  return softMovementGrantCount;
+}
+
+export function countSoftMovementArms(): number {
+  return softArmedMints.size;
+}
+
+export function canGrantSoftMovementArm(mint?: string | null): boolean {
+  const key = String(mint || '').trim();
+  if (key && softArmedMints.has(key)) return true;
+  return softArmedMints.size < QUALITY_SOFT_ARM_CAP;
+}
+
+export function registerSoftMovementArm(mint: string | null | undefined): boolean {
+  const key = String(mint || '').trim();
+  if (!key) return false;
+  if (softArmedMints.has(key)) return true;
+  if (softArmedMints.size >= QUALITY_SOFT_ARM_CAP) return false;
+  softArmedMints.add(key);
+  return true;
+}
+
+export function releaseSoftMovementArm(mint: string | null | undefined): void {
+  const key = String(mint || '').trim();
+  if (!key) return;
+  softArmedMints.delete(key);
+}
 
 export function noteQualityParkDeny(
   profileId: QualityParkProfileId,
@@ -230,7 +277,12 @@ export function hasQualityStructure(input: {
 export function evaluateQualityMovement(
   movement: QualityMovementSnapshot,
   opts?: { watchBand?: 'medium' | 'majors'; volumeFloorUsd?: number }
-): { active: boolean; reason: string; score: number } {
+): {
+  active: boolean;
+  softEligible: boolean;
+  reason: string;
+  score: number;
+} {
   const volFloor =
     opts?.volumeFloorUsd ??
     (opts?.watchBand === 'majors'
@@ -275,10 +327,19 @@ export function evaluateQualityMovement(
     (h1 == null || h1 < QUALITY_MIN_SWING_H1_PCT) &&
     (h6 == null || h6 < QUALITY_MIN_SWING_H6_PCT);
   const deadVol = vol == null || vol < volFloor * QUALITY_MIN_VOL_ALIVE_MULT;
+  const softRangeOk =
+    range != null && range >= QUALITY_SOFT_RANGE_24H_PCT;
+  const softSwingOk = h1 != null && h1 >= QUALITY_SOFT_SWING_H1_PCT;
+  // Soft tier: vol alive + mild range/H1, never knownTiny+deadVol
+  const softEligible =
+    volOk &&
+    !(knownTiny && deadVol) &&
+    (softRangeOk || softSwingOk);
 
   if (knownTiny && deadVol) {
     return {
       active: false,
+      softEligible: false,
       reason: `low_movement range=${range?.toFixed(1) ?? '?'}% h1=${h1?.toFixed(1) ?? '?'}%`,
       score: 0,
     };
@@ -286,6 +347,7 @@ export function evaluateQualityMovement(
   if (knownTiny && !volOk) {
     return {
       active: false,
+      softEligible: false,
       reason: `low_movement range=${range?.toFixed(1) ?? '?'}%`,
       score: Math.min(range ?? 0, 2),
     };
@@ -293,17 +355,27 @@ export function evaluateQualityMovement(
 
   const active = rangeOk || swingOk || atrOk || (volOk && !knownTiny);
   if (!active && range == null && h1 == null && h6 == null) {
-    return { active: true, reason: 'movement_unknown_pass', score: 1 };
+    return {
+      active: true,
+      softEligible: false,
+      reason: 'movement_unknown_pass',
+      score: 1,
+    };
   }
   if (!active) {
-    return { active: false, reason: 'low_movement', score: 0 };
+    return {
+      active: false,
+      softEligible,
+      reason: softEligible ? 'soft_movement' : 'low_movement',
+      score: softEligible ? Math.min((range ?? 0) + (h1 ?? 0), 3) : 0,
+    };
   }
   const score =
     (range ?? 0) +
     (h1 ?? 0) * 1.5 +
     (h6 ?? 0) +
     Math.min((vol ?? 0) / 50_000, 8);
-  return { active: true, reason: 'active', score };
+  return { active: true, softEligible: false, reason: 'active', score };
 }
 
 export function qualityMovementRankScore(
@@ -630,7 +702,7 @@ function evaluateHwrArm(
 }
 
 export function evaluateQualityParkArm(
-  input: QualityParkEvalInput
+  input: QualityParkEvalInput & { mint?: string | null }
 ): QualityParkEvalResult {
   const band =
     String(input.source || '').toLowerCase() === 'majors' ? 'majors' : 'medium';
@@ -639,11 +711,28 @@ export function evaluateQualityParkArm(
     volumeFloorUsd: steadyVolFloor(input.source),
   });
 
-  const hwr = evaluateHwrArm(input, mov2.active);
-  if (hwr.ok) return hwr;
+  const softCandidate =
+    !mov2.active &&
+    mov2.softEligible &&
+    hasQualityStructure(input) &&
+    canGrantSoftMovementArm(input.mint);
+  const movementForArm = mov2.active || softCandidate;
 
-  const steady = evaluateSteadyArm(input, mov2.active);
-  if (steady.ok) return steady;
+  const hwr = evaluateHwrArm(input, movementForArm);
+  if (hwr.ok) {
+    if (softCandidate) {
+      return applySoftMovementGrant(hwr, input.mint);
+    }
+    return hwr;
+  }
+
+  const steady = evaluateSteadyArm(input, movementForArm);
+  if (steady.ok) {
+    if (softCandidate) {
+      return applySoftMovementGrant(steady, input.mint);
+    }
+    return steady;
+  }
 
   if (!mov2.active) {
     return {
@@ -658,6 +747,38 @@ export function evaluateQualityParkArm(
     };
   }
   return steady.denyKey ? steady : hwr;
+}
+
+function applySoftMovementGrant(
+  base: QualityParkEvalResult,
+  mint?: string | null
+): QualityParkEvalResult {
+  if (!base.ok || !base.profileId) return base;
+  if (!canGrantSoftMovementArm(mint)) {
+    noteQualityParkDeny(base.profileId, 'low_movement');
+    noteQualityParkFunnel(base.profileId, 'low_movement');
+    return {
+      ...base,
+      ok: false,
+      armTag: null,
+      denyKey: 'low_movement',
+      reason: 'soft_movement_cap',
+      movementActive: false,
+      chip: 'low_movement',
+      softArmOk: false,
+      softMovement: false,
+    };
+  }
+  noteSoftMovementGrant();
+  noteQualityParkFunnel(base.profileId, 'soft_movement');
+  return {
+    ...base,
+    movementActive: true,
+    chip: 'soft_movement',
+    softMovement: true,
+    sizeMult: QUALITY_SOFT_ARM_SIZE_MULT,
+    reason: `${base.reason} · soft_movement`,
+  };
 }
 
 export function resolveQualityParkPrefer(

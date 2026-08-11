@@ -60,6 +60,17 @@ export interface LearningMetricsPanel {
   updatedAt: number;
   profiles: LearningMetricsProfileRow[];
   plainLanguage: string;
+  repairSummary?: {
+    zeroMfeShare: number | null;
+    greenThenRedShare: number | null;
+    armedShare: number | null;
+    govSoftPassNative: number;
+    govDipComparativeSoftAllow: number;
+    softMovementGrants: number;
+    softMovementArmsLive: number;
+    topLossProfileId: string | null;
+    topLossShare: number | null;
+  };
   funnelConversion?: {
     armed: number | null;
     triggered: number | null;
@@ -477,10 +488,32 @@ export function getLearningMetricsPanel(
     .slice(0, 3)
     .map((r) => `${r.family}=${r.state}`)
     .join(', ');
+  const rs = el.repairSession;
+  const repairBits: string[] = [];
+  if (rs?.zeroMfeShare != null) {
+    repairBits.push(`0-MFE ${pct(rs.zeroMfeShare, 0)}`);
+  }
+  if (rs?.greenThenRedShare != null) {
+    repairBits.push(`green→red ${pct(rs.greenThenRedShare, 0)}`);
+  }
+  if (rs?.topLossProfileId) {
+    repairBits.push(
+      `top-loss ${rs.topLossProfileId}${
+        rs.topLossShare != null ? ` ${pct(rs.topLossShare, 0)}` : ''
+      }`
+    );
+  }
+  if ((rs?.govSoftAllow?.softPassNative ?? 0) > 0) {
+    repairBits.push(`dip soft-allow ×${rs!.govSoftAllow.softPassNative}`);
+  }
+  if ((rs?.softMovementGrants ?? 0) > 0) {
+    repairBits.push(`soft-move ×${rs!.softMovementGrants}`);
+  }
   const plainLanguage =
     `Learning Metrics last ${window}: ${healthyN} healthy · ${weakN} weak · ${quietN} quiet` +
     (convBits.length ? ` · open-conv ${convBits.join(' · ')}` : '') +
     (govImpact ? ` · gov ${govImpact}` : '') +
+    (repairBits.length ? ` · ${repairBits.join(' · ')}` : '') +
     ' (read-only).';
 
   return {
@@ -489,6 +522,18 @@ export function getLearningMetricsPanel(
     updatedAt: Date.now(),
     profiles,
     plainLanguage,
+    repairSummary: {
+      zeroMfeShare: rs?.zeroMfeShare ?? null,
+      greenThenRedShare: rs?.greenThenRedShare ?? null,
+      armedShare: el.mix?.armedShare ?? null,
+      govSoftPassNative: rs?.govSoftAllow?.softPassNative ?? 0,
+      govDipComparativeSoftAllow:
+        rs?.govSoftAllow?.dipComparativeSoftAllow ?? 0,
+      softMovementGrants: rs?.softMovementGrants ?? 0,
+      softMovementArmsLive: rs?.softMovementArmsLive ?? 0,
+      topLossProfileId: rs?.topLossProfileId ?? null,
+      topLossShare: rs?.topLossShare ?? null,
+    },
     funnelConversion: {
       armed: funnel?.armed ?? null,
       triggered: funnel?.triggered ?? null,

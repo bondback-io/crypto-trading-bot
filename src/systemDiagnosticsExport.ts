@@ -872,6 +872,14 @@ export function buildSystemDiagnosticsExport(
     `funnel armed=${funnel.armed} trig=${funnel.triggered} open=${funnel.opened} blocked=${funnel.blocked} · arm→trig=${funnel.armToTriggerPct ?? '—'}% trig→open=${funnel.triggerToOpenPct ?? '—'}% arm→open=${funnel.armToOpenPct ?? '—'}% openRate=${funnel.openRatePct ?? '—'}%`
   );
   lines.push(`maxDD=${fmtNum(stats.maxDrawdownPct, 1)}% · 2nd-pass=${el.blockedSecondPass ?? 0}`);
+  {
+    const rs = el.repairSession;
+    if (rs) {
+      lines.push(
+        `repair: 0-MFE=${fmtPct(rs.zeroMfeShare, 0)} green→red=${fmtPct(rs.greenThenRedShare, 0)} topLoss=${rs.topLossProfileId ?? '—'}(${fmtPct(rs.topLossShare, 0)}) · zeroMfeBlocked×${rs.zeroMfeEntryBlocked} earlyCut×${rs.zeroMfeEarlyCut} · gov softPass×${rs.govSoftAllow.softPassNative} dipCompare×${rs.govSoftAllow.dipComparativeSoftAllow} hardSkip×${rs.govSoftAllow.hardSkip} · softMove grants×${rs.softMovementGrants} live=${rs.softMovementArmsLive}`
+      );
+    }
+  }
   lines.push('');
 
   lines.push('--- 2. PROFILE TABLE ---');

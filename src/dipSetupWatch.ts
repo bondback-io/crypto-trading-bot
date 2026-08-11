@@ -76,6 +76,8 @@ export interface DipWatchEntry {
   qualityChip?: string;
   armTag?: string;
   multiTfSupportHits?: number;
+  /** Soft-movement arm (1.2.268) — size haircut + session cap */
+  softMovement?: boolean;
 }
 
 /**
@@ -341,6 +343,22 @@ function isActiveWatch(w: DipWatchEntry): boolean {
   return w.status === 'watching' || w.status === 'armed';
 }
 
+function releaseQualitySoftArm(mint: string | null | undefined): void {
+  try {
+    const { releaseSoftMovementArm } =
+      require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+    releaseSoftMovementArm(mint);
+  } catch {
+    /* optional */
+  }
+}
+
+function deleteDipWatch(mint: string): void {
+  releaseQualitySoftArm(mint);
+  watches.delete(mint);
+  lastMcRefreshAt.delete(mint);
+}
+
 function activeWatches(bucket: DipWatchBucket): DipWatchEntry[] {
   return [...watches.values()]
     .filter((w) => {
@@ -356,8 +374,7 @@ function enforceBucketCap(bucket: DipWatchBucket, max: number): void {
   while (active.length > max) {
     const oldest = active.shift();
     if (!oldest) break;
-    watches.delete(oldest.mint);
-    lastMcRefreshAt.delete(oldest.mint);
+    deleteDipWatch(oldest.mint);
   }
 }
 
@@ -423,6 +440,7 @@ function maybeRotateExcludedOrOutOfBandQualityWatch(
           : 'quality_excluded_proxy'
       );
       noteQualityBandFunnel(w.source, 'expired');
+      releaseQualitySoftArm(w.mint);
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = excl;
@@ -468,6 +486,7 @@ function maybeRotateExcludedOrOutOfBandQualityWatch(
         );
         noteDipFunnel('quality_out_of_band_mc');
         noteQualityBandFunnel(w.source, 'expired');
+        releaseQualitySoftArm(w.mint);
         w.status = 'expired';
         w.updatedAt = now;
         w.lastReason = `out_of_band_mc MC=$${Math.round(mc)}`;
@@ -512,8 +531,7 @@ function reserveAdmitSlot(
   if (bucket === 'minors') {
     const oldest = active[0];
     if (!oldest) return true;
-    watches.delete(oldest.mint);
-    lastMcRefreshAt.delete(oldest.mint);
+    deleteDipWatch(oldest.mint);
     return true;
   }
 
@@ -538,8 +556,7 @@ function reserveAdmitSlot(
     return false;
   }
 
-  watches.delete(outMint);
-  lastMcRefreshAt.delete(outMint);
+  deleteDipWatch(outMint);
   lastRotationAt.set(outMint, now);
   if (inMint) lastRotationAt.set(inMint, now);
   console.log(
@@ -588,11 +605,15 @@ function stampWatchPlan(w: DipWatchEntry): void {
       require('./risk') as typeof import('./risk');
     const { paperTrader } =
       require('./paperTrader') as typeof import('./paperTrader');
+    let sizeMult = preferSteady ? 0.85 : 1;
+    if (w.softMovement === true) {
+      sizeMult = Math.min(sizeMult, 0.85);
+    }
     const sizing = calculateDynamicPositionSize({
       equitySol: paperTrader.getEquitySol(),
       kind: 'normal',
       openCount: paperTrader.getOpenPositions().length,
-      sizeMultiplier: preferSteady ? 0.85 : 1,
+      sizeMultiplier: sizeMult,
     });
     w.sizePlanSol = sizing.sizeSol;
   } catch {
@@ -682,8 +703,7 @@ function pruneTerminal(): void {
       w.status === 'invalidated'
     ) {
       if (now - w.updatedAt > 30 * 60_000) {
-        watches.delete(mint);
-        lastMcRefreshAt.delete(mint);
+        deleteDipWatch(mint);
       }
     }
   }
@@ -775,6 +795,7 @@ function recomputeProximityFromLevels(w: DipWatchEntry): void {
 
 function buildQualityParkEvalInput(w: DipWatchEntry) {
   return {
+    mint: w.mint,
     source: w.source,
     marketCapUsd: w.marketCapUsd,
     liquidityUsd: w.liquidityUsd,
@@ -826,6 +847,7 @@ function maybeArmQualityPark(
       evaluateQualityParkArm,
       noteQualityParkFunnel,
       clearDeadTapeStreak,
+      registerSoftMovementArm,
     } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
     const verdict = evaluateQualityParkArm(buildQualityParkEvalInput(w));
     w.movementActive = verdict.movementActive;
@@ -845,6 +867,16 @@ function maybeArmQualityPark(
       !(w.nearKeyFib || w.nearSupport)
     ) {
       return false;
+    }
+    if (verdict.softMovement === true) {
+      if (!registerSoftMovementArm(w.mint)) {
+        noteDipFunnel('quality_low_movement');
+        w.lastReason = 'soft_movement_cap';
+        return false;
+      }
+      w.softMovement = true;
+    } else {
+      w.softMovement = false;
     }
     w.preferredProfileId = verdict.profileId;
     w.armTag = verdict.armTag || undefined;
@@ -869,6 +901,7 @@ function maybeArmQualityPark(
     clearDeadTapeStreak(w.mint);
     console.log(
       `[dip-watch] ARMED ${w.symbol} [${verdict.profileId}] ${verdict.armTag}` +
+        (verdict.softMovement ? ' · soft_movement' : '') +
         (nearTa ? '' : ' (soft · structure)')
     );
     if (verdict.profileId === 'steady_compounder') {
@@ -1135,6 +1168,7 @@ async function refreshWatchMarket(
           );
           noteDipFunnel('quality_low_movement');
           noteQualityBandFunnel(w.source, 'expired');
+          releaseQualitySoftArm(w.mint);
           w.status = 'expired';
           w.updatedAt = now;
           w.lastReason = 'rotated stale · dead tape';
@@ -1182,6 +1216,7 @@ async function refreshWatchMarket(
         if (rotate) {
           noteDipFunnel('no_levels_rotate');
           noteQualityBandFunnel(w.source, 'expired');
+          releaseQualitySoftArm(w.mint);
           w.status = 'expired';
           w.updatedAt = now;
           w.lastReason = `no levels ×${streak} (~20m) — rotate`;
@@ -1739,6 +1774,7 @@ export async function tickDipSetupWatches(opts?: {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
 
     if (now >= w.expiresAt) {
+      releaseQualitySoftArm(w.mint);
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = 'TTL expired';
@@ -1790,6 +1826,7 @@ export async function tickDipSetupWatches(opts?: {
 
     // Invalidate: flush past max dip
     if (w.dropFromPeakPct != null && w.dropFromPeakPct > maxDrop) {
+      releaseQualitySoftArm(w.mint);
       w.status = 'invalidated';
       w.updatedAt = now;
       w.lastReason = `flush −${w.dropFromPeakPct.toFixed(0)}%`;
@@ -1812,6 +1849,7 @@ export async function tickDipSetupWatches(opts?: {
       px > 0 &&
       px < w.supportPriceSol * 0.97
     ) {
+      releaseQualitySoftArm(w.mint);
       w.status = 'invalidated';
       w.updatedAt = now;
       w.lastReason = 'support breach';
@@ -1966,6 +2004,7 @@ export async function tickDipSetupWatches(opts?: {
         w.preferredProfileId = 'dip_buyer';
       }
       if (handOffScannerCandidate(c, { bypassCooldown: true })) {
+        releaseQualitySoftArm(w.mint);
         w.status = 'triggered';
         w.updatedAt = now;
         handed += 1;
@@ -2084,9 +2123,10 @@ export function unwatchDipSetup(mint: string): {
     existing.status = 'invalidated';
     existing.updatedAt = Date.now();
     existing.lastReason = 'unwatched by user';
-    watches.delete(key);
+    deleteDipWatch(key);
+  } else {
+    lastMcRefreshAt.delete(key);
   }
-  lastMcRefreshAt.delete(key);
   unwatchCooldownUntil.set(key, Date.now() + UNWATCH_COOLDOWN_MS);
   try {
     const { clearOneSetupProfileLock } =

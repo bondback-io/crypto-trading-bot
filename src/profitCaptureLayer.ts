@@ -60,8 +60,8 @@ export const PCL_PPP_BY_FAMILY: Record<
 > = {
   fast: {
     armOfTpPct: 52,
-    // Tighter giveback for low-capture fast/MS harvest
-    givebackOfPeakPct: 32,
+    // Tighter giveback for low-capture fast/MS harvest (1.2.268)
+    givebackOfPeakPct: 28,
     minOpenSec: 25,
     minProfitFloorPct: 4,
   },
@@ -371,10 +371,11 @@ export function resolvePclPartialDefaults(
       earlyPartialFraction: id === 'reversal_scalper' ? 0.55 : 0.6,
     };
   } else if (id === 'momentum_burst') {
-    base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.5 };
+    // Disc MS/MB: slightly earlier bank (1.2.268) — armed path overrides below
+    base = { earlyPartialTpPct: 14, earlyPartialFraction: 0.52 };
   } else if (id === 'migration_sniper') {
     // Migration: bank earlier while E weak — tighter than generic fast disc
-    base = { earlyPartialTpPct: 12, earlyPartialFraction: 0.55 };
+    base = { earlyPartialTpPct: 10, earlyPartialFraction: 0.55 };
   } else if (id === 'trend_rider') {
     base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.35 };
   } else if (id === 'dip_buyer') {
@@ -483,21 +484,8 @@ export function shouldBlockTinyGreenScratch(input: {
 }): boolean {
   if (!isProfitCaptureLayerEnabled()) return false;
   const pnl = Number(input.pnlPct) || 0;
-  if (!(pnl > 0) || pnl >= PCL_TINY_GREEN_SCRATCH_PCT) return false;
+  if (!(pnl > 0)) return false;
   const mfe = Math.max(0, Number(input.maxRunupPct) || 0);
-  const armed =
-    input.armedWatch === true ||
-    /scalp_reclaim|support_dip_reclaim/i.test(String(input.entryStyle || ''));
-  // Armed / high-MFE: never scratch tiny green when MFE ≥ 8% (was 10)
-  if ((armed || mfe >= 8) && mfe >= 8) return true;
-  // Strong MFE left on table: block scratchy soft-exit even below tiny threshold
-  if (mfe >= 12 && pnl > 0 && pnl < 5) return true;
-  const perm = isProfitPermissionActive({
-    profitPermissionUntilMs: input.profitPermissionUntilMs,
-    nowMs: input.nowMs,
-  });
-  if (perm) return true;
-  if (input.pclPartialTaken) return false;
   const tier = input.qualityTier || 'medium';
   const q =
     input.entryQualityScore != null &&
@@ -506,6 +494,25 @@ export function shouldBlockTinyGreenScratch(input: {
       : null;
   const mediumPlus =
     tier === 'medium' || tier === 'high' || (q != null && q >= 45);
+  // Medium+ with real MFE: block soft-scratch up to ~4.5% green (1.2.268)
+  const scratchCeil =
+    mediumPlus && mfe >= 6
+      ? Math.max(PCL_TINY_GREEN_SCRATCH_PCT, 4.5)
+      : PCL_TINY_GREEN_SCRATCH_PCT;
+  if (pnl >= scratchCeil) return false;
+  const armed =
+    input.armedWatch === true ||
+    /scalp_reclaim|support_dip_reclaim/i.test(String(input.entryStyle || ''));
+  // Armed / meaningful MFE: never scratch tiny green when MFE ≥ 6%
+  if ((armed || mfe >= 6) && mfe >= 6) return true;
+  // Strong MFE left on table: block scratchy soft-exit even below tiny threshold
+  if (mfe >= 12 && pnl > 0 && pnl < 5) return true;
+  const perm = isProfitPermissionActive({
+    profitPermissionUntilMs: input.profitPermissionUntilMs,
+    nowMs: input.nowMs,
+  });
+  if (perm) return true;
+  if (input.pclPartialTaken) return false;
   return mediumPlus;
 }
 
@@ -751,12 +758,24 @@ export function computePclLearningRewardDelta(input: {
     }
     // Boost: runner continuation (exit after partial with positive remainder)
     if (input.pclPartialTaken && pnl > 1) delta += 2.5;
+    // Penalize: zero-MFE / DOA (never popped)
+    if (mfe < 1.5) {
+      delta -= 5;
+      if (pnl <= 0) delta -= 1.5;
+    }
+    // Penalize: green→red (had MFE, closed red)
+    if (mfe >= 1 && pnl < 0) {
+      delta -= 4.5;
+      if (mfe >= 6) delta -= 2;
+    }
     // Penalize: tiny scratch + high MFE (scratchy soft-exits that prevent harvest)
     if (pnl > 0 && pnl < PCL_TINY_GREEN_SCRATCH_PCT && mfe >= 12) {
       delta -= 7;
       if (validStyle && q != null && q >= 70) delta -= 2;
     } else if (pnl > 0 && pnl < 5 && mfe >= 10 && capture < 0.35) {
-      delta -= 4;
+      delta -= 5;
+    } else if (pnl > 0 && pnl < 4 && mfe >= 6 && capture < 0.4) {
+      delta -= 3;
     }
     // Penalize: low capture on meaningful MFE
     if (mfe >= 10 && capture < 0.3 && pnl >= 0) {

@@ -310,6 +310,16 @@ const oneSetupLockFunnel = {
 };
 /** Armed hard-lock preferred lane failed floors (governed second-pass block). */
 let blockedSecondPassCount = 0;
+/** Historical zero-MFE pattern admit skips (session). */
+let zeroMfeEntryBlockedCount = 0;
+/** Zero-MFE early stall cuts noted from exit path (session, soft). */
+let zeroMfeEarlyCutCount = 0;
+/** Family governor soft-pass / skip counters (session). */
+const govSoftAllowCounters = {
+  softPassNative: 0,
+  dipComparativeSoftAllow: 0,
+  hardSkip: 0,
+};
 
 export function noteBlockedSecondPass(): void {
   blockedSecondPassCount += 1;
@@ -317,6 +327,72 @@ export function noteBlockedSecondPass(): void {
 
 export function getBlockedSecondPassCount(): number {
   return blockedSecondPassCount;
+}
+
+export function noteZeroMfeEntryBlocked(): void {
+  zeroMfeEntryBlockedCount += 1;
+}
+
+export function getZeroMfeEntryBlockedCount(): number {
+  return zeroMfeEntryBlockedCount;
+}
+
+export function noteZeroMfeEarlyCut(): void {
+  zeroMfeEarlyCutCount += 1;
+}
+
+export function getZeroMfeEarlyCutCount(): number {
+  return zeroMfeEarlyCutCount;
+}
+
+export function noteGovSoftAllowGrant(
+  kind: 'soft_pass_native' | 'dip_comparative' | 'hard_skip'
+): void {
+  if (kind === 'soft_pass_native') govSoftAllowCounters.softPassNative += 1;
+  else if (kind === 'dip_comparative')
+    govSoftAllowCounters.dipComparativeSoftAllow += 1;
+  else govSoftAllowCounters.hardSkip += 1;
+}
+
+export function getGovSoftAllowCounters(): {
+  softPassNative: number;
+  dipComparativeSoftAllow: number;
+  hardSkip: number;
+} {
+  return { ...govSoftAllowCounters };
+}
+
+const ZERO_MFE_PATTERN_MIN_N = 8;
+const ZERO_MFE_PATTERN_SHARE = 0.45;
+
+/** Skip admit when profile historically prints maxRunup≤0 at high rate. */
+export function shouldBlockZeroMfePattern(input: {
+  profileId?: string | null;
+  entryStyle?: string | null;
+  setupWatchFamily?: string | null;
+}): { block: boolean; reason?: string; share?: number; n?: number } {
+  try {
+    const pid = String(input.profileId || '');
+    if (!pid) return { block: false };
+    const trades = collectExpectancyTrades()
+      .filter((t) => t.profileId === pid)
+      .slice(-40);
+    const n = trades.length;
+    if (n < ZERO_MFE_PATTERN_MIN_N) return { block: false, n };
+    const zero = trades.filter((t) => (Number(t.maxRunupPct) || 0) <= 0).length;
+    const share = zero / n;
+    if (share >= ZERO_MFE_PATTERN_SHARE) {
+      return {
+        block: true,
+        share,
+        n,
+        reason: `zero_mfe_entry_blocked: ${(share * 100).toFixed(0)}% maxRunup≤0 over n=${n}`,
+      };
+    }
+    return { block: false, share, n };
+  } catch {
+    return { block: false };
+  }
 }
 
 export interface ExpectancyTradeRow {
@@ -477,6 +553,22 @@ export interface ExpectancyLiftStatus {
   armedTargetEBoost?: boolean;
   /** Armed hard-lock preferred-lane floor fails (diagnostics chip only). */
   blockedSecondPass?: number;
+  /** Session repair counters (1.2.268). */
+  repairSession?: {
+    zeroMfeEntryBlocked: number;
+    zeroMfeEarlyCut: number;
+    govSoftAllow: {
+      softPassNative: number;
+      dipComparativeSoftAllow: number;
+      hardSkip: number;
+    };
+    softMovementGrants: number;
+    softMovementArmsLive: number;
+    zeroMfeShare: number | null;
+    greenThenRedShare: number | null;
+    topLossProfileId: string | null;
+    topLossShare: number | null;
+  };
   /** Per-family skill memory (WR / E / avg W/L / MFE / n + governor). */
   familySkillMemory: FamilySkillMemoryRow[];
   /** Performance Power Cell charge (visual-only). */
@@ -1570,12 +1662,17 @@ export function shouldSkipFamilyGovernor(input: {
     // Native-style soft-pass: primary/allowed DNA — down-rank via permission/size only
     // MS unarmed already handled above when family gov is weak.
     if (profileMatchesFamilyNative(input.profileId, effective)) {
+      noteGovSoftAllowGrant('soft_pass_native');
       return {
         skip: false,
         state,
         softPassNative: true,
         reason: `governor:restricted soft-pass native ${input.profileId}`,
         family: effective,
+        reasonCode:
+          effective === 'support_dip_reclaim' && pid === 'dip_buyer'
+            ? 'gov_dip_native_soft_allow'
+            : undefined,
       };
     }
     // Dip comparative soft-allow: when support_dip_reclaim is restricted but
@@ -1588,6 +1685,7 @@ export function shouldSkipFamilyGovernor(input: {
           pid === 'dip_buyer' ||
           profileMatchesFamilyNative(input.profileId, 'support_dip_reclaim');
         if (dipNative || pid === 'dip_buyer') {
+          noteGovSoftAllowGrant('dip_comparative');
           return {
             skip: false,
             state,
@@ -1600,6 +1698,7 @@ export function shouldSkipFamilyGovernor(input: {
       }
     }
     // Hard-skip only off-style / forbidden mismatch
+    noteGovSoftAllowGrant('hard_skip');
     return {
       skip: true,
       reason: `Expectancy governor: ${effective} restricted`,
@@ -1953,20 +2052,27 @@ export function shouldLimitDiscretionaryMix(input: {
     pid === 'steady_compounder' || pid === 'high_win_rate';
 
   if (triggerable > 0) {
-    // Armed path: fast keeps strict DISC_SHARE_CAP; quality gets 20% floor.
+    // Armed path: fast keeps strict DISC_SHARE_CAP; quality normally gets 20% floor.
+    // Under E-boost (E<0 → 90% armed): quality also uses strict discShareCap (10%).
     if (!isMixThrottledDiscProfile(pid)) return { limit: false };
     // Steady/HWR: if their own arms are empty, allow limited quality disc fallback
     // rather than total silence while Scalper/MS arms occupy the book.
-    if (isSteadyHwr && countSteadyHwrTriggerableArmed() === 0) {
+    // Under E-boost, still throttle Steady/HWR disc to push armed dominance.
+    const eBoost = isArmedTargetEBoostActive();
+    if (
+      isSteadyHwr &&
+      countSteadyHwrTriggerableArmed() === 0 &&
+      !eBoost
+    ) {
       return { limit: false };
     }
     const kind = FAST_DISC_PROFILES.has(pid) ? 'fast' : 'quality';
     const effectiveCap =
-      kind === 'quality' ? Math.max(cap, 0.2) : cap;
+      kind === 'quality' && !eBoost ? Math.max(cap, 0.2) : cap;
     if (mix.discShare <= effectiveCap) return { limit: false };
     return {
       limit: true,
-      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(effectiveCap * 100).toFixed(0)}% with ${triggerable} triggerable armed — skip ${kind} disc (armed target ${armedPct}%)`,
+      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(effectiveCap * 100).toFixed(0)}% with ${triggerable} triggerable armed — skip ${kind} disc (armed target ${armedPct}%${eBoost ? ', E-boost' : ''})`,
     };
   }
 
@@ -2017,6 +2123,8 @@ export function computeTradePermissionScore(input: {
   dnaMatch?: boolean | null;
   profileId?: string | null;
   tradeProfileScore?: number | null;
+  /** Native Dip soft-pass under restricted governor — milder haircut. */
+  softPassNative?: boolean;
 }): number {
   let score = 50;
   const armed = input.armedWatch === true;
@@ -2031,7 +2139,14 @@ export function computeTradePermissionScore(input: {
   const gov = getFamilyGovernorState(family);
   if (gov === 'promoted') score += 10;
   else if (gov === 'down_ranked') score -= 12;
-  else if (gov === 'restricted') score -= 22;
+  else if (gov === 'restricted') {
+    // Native Dip soft-allow: milder than generic −22 so identity can trade
+    const dipNativeSoft =
+      input.softPassNative === true &&
+      (String(input.profileId || '') === 'dip_buyer' ||
+        family === 'support_dip_reclaim');
+    score -= dipNativeSoft ? 10 : 22;
+  }
 
   const ext =
     input.extensionFromLevelPct != null &&
@@ -2080,6 +2195,7 @@ export function expectancySizeMultiplier(input: {
   profileId?: string | null;
   family?: string | null;
   armedWatch?: boolean;
+  softPassNative?: boolean;
 }): { mult: number; note: string } {
   if (isAdmissionBaselineV235()) {
     return { mult: 1, note: 'expectancy size baseline v235' };
@@ -2116,7 +2232,17 @@ export function expectancySizeMultiplier(input: {
       const gov = getFamilyGovernorState(family);
       if (gov === 'promoted') mult = Math.min(SIZE_MULT_HI, mult + 0.03);
       if (gov === 'down_ranked') mult = Math.max(SIZE_MULT_LO, mult - 0.08);
-      if (gov === 'restricted') mult = Math.max(SIZE_MULT_LO, mult * 0.85);
+      if (gov === 'restricted') {
+        // Native Dip soft-allow: milder than generic ×0.85
+        const dipNativeSoft =
+          input.softPassNative === true &&
+          (pid === 'dip_buyer' || family === 'support_dip_reclaim');
+        mult = Math.max(
+          SIZE_MULT_LO,
+          mult * (dipNativeSoft ? 0.9 : 0.85)
+        );
+        if (dipNativeSoft) notes.push('dip_gov_soft_allow size×0.9');
+      }
       if (input.armedWatch === true) mult = Math.min(SIZE_MULT_HI, mult + 0.02);
       const discPen = expectancyLiftSizePenaltyForDiscMix({
         armedWatch: input.armedWatch,
@@ -2178,6 +2304,41 @@ export function expectancySizeMultiplier(input: {
       } else if (negMsE) {
         mult = clamp(mult * 0.85, HABIT_SIZE_LO, SIZE_MULT_HI);
         notes.push(`MS size↓ E=${m.expectancyPct!.toFixed(2)}% (armed)`);
+      }
+    }
+
+    // Dip top-loss habit: when Dip is ≥25% of abs losses and combined E < 0
+    if (pid === 'dip_buyer') {
+      try {
+        const all = collectExpectancyTrades().slice(-50);
+        const combined = computeExpectancyMetrics(all);
+        let totalLossAbs = 0;
+        let dipLossAbs = 0;
+        for (const t of all) {
+          const pnl = Number(t.pnlSol) || 0;
+          if (pnl >= 0) continue;
+          const abs = Math.abs(pnl);
+          totalLossAbs += abs;
+          if (t.profileId === 'dip_buyer') dipLossAbs += abs;
+        }
+        const share =
+          totalLossAbs > 1e-12 ? dipLossAbs / totalLossAbs : 0;
+        const negE =
+          combined.expectancyPct != null &&
+          combined.expectancyPct < 0 &&
+          combined.tradeCount >= 8;
+        if (negE && share >= 0.25) {
+          if (input.armedWatch !== true) {
+            mult = clamp(mult * 0.6, HABIT_SIZE_LO, 0.7);
+          } else {
+            mult = clamp(mult * 0.75, HABIT_SIZE_LO, SIZE_MULT_HI);
+          }
+          notes.push(
+            `dip_top_loss_size_down share=${(share * 100).toFixed(0)}%`
+          );
+        }
+      } catch {
+        /* soft */
       }
     }
 
@@ -2614,6 +2775,30 @@ export function evaluateEntrySelectivity(
         governorInfluenced: true,
       };
     }
+
+    // Historical zero-MFE / DOA pattern skip (profile last-40)
+    const zm = shouldBlockZeroMfePattern({
+      profileId: ctx.profileId,
+      entryStyle,
+      setupWatchFamily: ctx.setupWatchFamily,
+    });
+    if (zm.block) {
+      noteZeroMfeEntryBlocked();
+      reasons.push(zm.reason || 'zero_mfe_entry_blocked');
+      chips.push('zero_mfe_entry_blocked');
+      reasonCodes.push('ZERO_MFE_PATTERN');
+      return {
+        admit: false,
+        reasons,
+        permission: 0,
+        sizeMult: 1,
+        family,
+        chips,
+        reasonCodes,
+        governorState: getFamilyGovernorState(family),
+        governorInfluenced: true,
+      };
+    }
   }
 
   const gov = shouldSkipFamilyGovernor({
@@ -2627,6 +2812,10 @@ export function evaluateEntrySelectivity(
   });
   if (!baselineV235 && gov.softPassNative) {
     chips.push('gov_soft_pass');
+    if (gov.reasonCode) {
+      chips.push(gov.reasonCode);
+      reasonCodes.push(gov.reasonCode);
+    }
     reasons.push(
       gov.reason || `governor:restricted soft-pass native ${ctx.profileId}`
     );
@@ -2717,6 +2906,7 @@ export function evaluateEntrySelectivity(
     dnaMatch,
     profileId: ctx.profileId,
     tradeProfileScore: ctx.tradeProfileScore,
+    softPassNative: gov.softPassNative === true,
   });
 
   // Late-chase quality floor (defense if hard-skip somehow off / Baseline edge)
@@ -2768,11 +2958,14 @@ export function evaluateEntrySelectivity(
     profileId: ctx.profileId,
     family: effectiveFamily,
     armedWatch,
+    softPassNative: gov.softPassNative === true,
   });
   if (baselineV235) chips.push('baseline_v235');
   else chips.push('entry_skill');
   if (armedWatch) chips.push('armed');
   if (ctx.triggerConfirm === true) chips.push('trigger_confirm');
+  if (gov.softPassNative) chips.push('gov_dip_native_soft_allow');
+  if (sz.note.includes('dip_top_loss_size_down')) chips.push('dip_top_loss_size_down');
   try {
     const pid = String(ctx.profileId || '');
     if (
@@ -3371,6 +3564,53 @@ export function getExpectancyLiftStatus(
     performanceCharge = null;
   }
 
+  let softMovementGrants = 0;
+  let softMovementArmsLive = 0;
+  try {
+    const {
+      getSoftMovementGrantCount,
+      countSoftMovementArms,
+    } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+    softMovementGrants = getSoftMovementGrantCount();
+    softMovementArmsLive = countSoftMovementArms();
+  } catch {
+    /* soft */
+  }
+
+  const zeroMfeN = windowTrades.filter((t) => (Number(t.maxRunupPct) || 0) <= 0)
+    .length;
+  const greenThenRedN = windowTrades.filter(
+    (t) => (Number(t.maxRunupPct) || 0) >= 1 && (Number(t.pnlPct) || 0) < 0
+  ).length;
+  let topLossProfileId: string | null = null;
+  let topLossShare: number | null = null;
+  {
+    const lossBy = new Map<string, number>();
+    let lossTotal = 0;
+    for (const t of windowTrades) {
+      const pnl = Number(t.pnlPct) || 0;
+      if (!(pnl < 0)) continue;
+      const abs = Math.abs(pnl);
+      lossTotal += abs;
+      const id = String(t.profileId || 'unknown');
+      lossBy.set(id, (lossBy.get(id) || 0) + abs);
+    }
+    if (lossTotal > 0 && lossBy.size) {
+      let bestId = '';
+      let bestAbs = 0;
+      for (const [id, abs] of lossBy) {
+        if (abs > bestAbs) {
+          bestAbs = abs;
+          bestId = id;
+        }
+      }
+      if (bestId) {
+        topLossProfileId = bestId;
+        topLossShare = bestAbs / lossTotal;
+      }
+    }
+  }
+
   return {
     ok: true,
     window,
@@ -3409,6 +3649,19 @@ export function getExpectancyLiftStatus(
     entrySkillArmedTargetPct: operatorArmedTargetPct,
     entrySkillArmedTargetEffectivePct: armedTargetPct,
     blockedSecondPass: getBlockedSecondPassCount(),
+    repairSession: {
+      zeroMfeEntryBlocked: getZeroMfeEntryBlockedCount(),
+      zeroMfeEarlyCut: getZeroMfeEarlyCutCount(),
+      govSoftAllow: getGovSoftAllowCounters(),
+      softMovementGrants,
+      softMovementArmsLive,
+      zeroMfeShare: windowTrades.length ? zeroMfeN / windowTrades.length : null,
+      greenThenRedShare: windowTrades.length
+        ? greenThenRedN / windowTrades.length
+        : null,
+      topLossProfileId,
+      topLossShare,
+    },
     familySkillMemory,
     performanceCharge,
     entrySkillByProfile: buildEntrySkillByProfile(),

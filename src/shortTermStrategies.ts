@@ -889,10 +889,10 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
     }
   }
 
-  // Early stall: no meaningful pop by ~30% of the timer (tighter 0-MFE)
-  // → cut only when stuck slightly red (never force-exit a green mark into fee+slip losses).
+  // Early stall: no meaningful pop by ~28% of the timer (zero_mfe_early_cut)
+  // → cut when never popped and mark is near-flat or slightly red (not meaningful green).
   // Skip for Post-Run Dip — those holds are designed to wait through quiet periods.
-  const stallAfterMs = Math.max(32_000, Math.round(windowMs * 0.3));
+  const stallAfterMs = Math.max(28_000, Math.round(windowMs * 0.28));
   if (
     view.strategyId !== 'post_run_dip' &&
     ageMs >= stallAfterMs &&
@@ -901,18 +901,24 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
     const feeBps = Number(config.paper?.feeBps) || 30;
     const slipBps = Number(config.paper?.slippageBps) || 150;
     const roundTripCostPct = (feeBps * 2 + slipBps * 2) / 100;
-    // Slightly higher pop bar so true 0-MFE stalls exit sooner
     const peakPopPct = Math.max(4.0, roundTripCostPct + 1.0);
     const nearBreakevenAfterCosts = pnlPct >= roundTripCostPct * 0.25;
     const neverPopped = peakPnlPct < peakPopPct;
-    // Allow slightly deeper red stall cut (−3.5%) for 0-MFE spam
-    const stuckSlightlyRed = pnlPct < 0 && pnlPct > -3.5;
-    if (neverPopped && stuckSlightlyRed && !nearBreakevenAfterCosts) {
+    // Near-flat (≤0.5%) or slightly red (−3.5%) — do not force-exit meaningful greens
+    const stuckDead = pnlPct <= 0.5 && pnlPct > -3.5;
+    if (neverPopped && stuckDead && !nearBreakevenAfterCosts) {
       const heldSec = Math.max(0, Math.round(ageMs / 1000));
+      try {
+        const { noteZeroMfeEarlyCut } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        noteZeroMfeEarlyCut();
+      } catch {
+        /* soft */
+      }
       return {
         type: 'full',
         exitKind: 'scalp_signal_fail',
-        reason: `${label} stalled underwater after ${heldSec}s (peak +${peakPnlPct.toFixed(1)}%, mark ${pnlPct.toFixed(1)}%, RT ~${roundTripCostPct.toFixed(1)}%)`,
+        reason: `${label} zero_mfe_early_cut after ${heldSec}s (peak +${peakPnlPct.toFixed(1)}%, mark ${pnlPct.toFixed(1)}%, RT ~${roundTripCostPct.toFixed(1)}%)`,
       };
     }
   }

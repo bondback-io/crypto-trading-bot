@@ -395,6 +395,15 @@ export function computeEpisodeTimingQuality(input: {
   if (pnl > 0 && pnl < 4 && mfe >= 10 && captureRatio < 0.35) {
     timingReward -= 3.5;
   }
+  // Explicit zero-MFE + green→red penalties (1.2.268)
+  if (mfe < 1.5) {
+    timingReward -= 3.5;
+    if (pnl <= 0) timingReward -= 1.5;
+  }
+  if (mfe >= 1 && pnl < 0) {
+    timingReward -= 4;
+    if (mfe >= 6) timingReward -= 1.5;
+  }
 
   try {
     const { computePclLearningRewardDelta } =

@@ -10376,6 +10376,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="lsd-chip" id="el-chip-partial">1st partial —</span>
           <span class="lsd-chip" id="el-chip-mfe">MFE cap —</span>
           <span class="lsd-chip" id="el-chip-second-pass">2nd-pass —</span>
+          <span class="lsd-chip" id="el-chip-zero-mfe">0-MFE —</span>
+          <span class="lsd-chip" id="el-chip-green-red">green→red —</span>
+          <span class="lsd-chip" id="el-chip-gov-soft">Dip soft-allow —</span>
+          <span class="lsd-chip" id="el-chip-soft-move">Soft-move —</span>
+          <span class="lsd-chip" id="el-chip-top-loss">Top loss —</span>
         </div>
         <div id="el-quiet-chips" class="flex flex-wrap gap-2 mb-2 text-xs"></div>
         <div class="tc-table-wrap" style="overflow-x:auto;margin-bottom:0.75rem">
@@ -10517,6 +10522,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div style="min-width:0;flex:1">
               <div class="section-title">Learning Metrics <span class="tip" tabindex="0" data-tip="Per-profile readiness, EMA, capture, armed quality, and promotion blockers. Joins Expectancy Lift, Profile RL, Trade Craft, and Learning diagnostics. Read-only — does not change admits or modes."></span></div>
               <p class="text-xs text-slate-400 mb-0" id="lm-summary">Monitor whether each profile is learning and improving, not just trading.</p>
+              <div class="flex flex-wrap gap-2 mb-2 text-xs" id="lm-repair-chips" aria-label="Repair summary chips"></div>
             </div>
             <div class="flex flex-wrap gap-2 items-end">
               <label class="ctl ctl-fit">
@@ -15946,6 +15952,63 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (panel && panel.plainLanguage) ||
           'Monitor whether each profile is learning and improving, not just trading.';
       }
+      const repairHost = document.getElementById('lm-repair-chips');
+      if (repairHost) {
+        const rs = (panel && panel.repairSummary) || {};
+        const chips = [];
+        chips.push(
+          '<span class="lm-chip' +
+            (rs.zeroMfeShare != null && rs.zeroMfeShare >= 0.25
+              ? ' is-bad'
+              : '') +
+            '" title="maxRunup≤0 share">0-MFE ' +
+            lmFmtPct(rs.zeroMfeShare) +
+            '</span>'
+        );
+        chips.push(
+          '<span class="lm-chip' +
+            (rs.greenThenRedShare != null && rs.greenThenRedShare >= 0.2
+              ? ' is-bad'
+              : '') +
+            '" title="MFE≥1% closed red">green→red ' +
+            lmFmtPct(rs.greenThenRedShare) +
+            '</span>'
+        );
+        chips.push(
+          '<span class="lm-chip" title="Armed share">armed ' +
+            lmFmtPct(rs.armedShare) +
+            '</span>'
+        );
+        chips.push(
+          '<span class="lm-chip" title="Native Dip soft-allow grants">Dip soft ×' +
+            (Number(rs.govSoftPassNative) || 0) +
+            (rs.govDipComparativeSoftAllow
+              ? ' ·cmp×' + Number(rs.govDipComparativeSoftAllow)
+              : '') +
+            '</span>'
+        );
+        chips.push(
+          '<span class="lm-chip" title="Steady/HWR soft-movement">soft-move ×' +
+            (Number(rs.softMovementGrants) || 0) +
+            ' ·live ' +
+            (Number(rs.softMovementArmsLive) || 0) +
+            '</span>'
+        );
+        if (rs.topLossProfileId) {
+          chips.push(
+            '<span class="lm-chip' +
+              (rs.topLossShare != null && rs.topLossShare >= 0.25
+                ? ' is-warn'
+                : '') +
+              '" title="Top abs-loss contributor">top-loss ' +
+              escHtml(String(rs.topLossProfileId)) +
+              ' ' +
+              lmFmtPct(rs.topLossShare) +
+              '</span>'
+          );
+        }
+        repairHost.innerHTML = chips.join('');
+      }
       if (updated) {
         const t = panel && panel.updatedAt ? new Date(panel.updatedAt) : null;
         updated.textContent = t
@@ -17856,6 +17919,71 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             bsp > 0
               ? 'Armed hard-lock floor fails (blocked_second_pass)=' + bsp
               : 'Armed preferred hard-lock floor fails (chip only; no policy change)';
+        }
+        const rs = (data && data.repairSession) || {};
+        const zmEl = document.getElementById('el-chip-zero-mfe');
+        if (zmEl) {
+          const share = rs.zeroMfeShare;
+          const blocked = Number(rs.zeroMfeEntryBlocked) || 0;
+          const early = Number(rs.zeroMfeEarlyCut) || 0;
+          zmEl.textContent =
+            '0-MFE ' +
+            elFmtPct(share) +
+            (blocked || early ? ' ·×' + (blocked + early) : '');
+          zmEl.className = elChipClass(
+            share == null || share < 0.25,
+            share != null && share >= 0.25 && share < 0.4
+          );
+          zmEl.title =
+            'Share of closes with maxRunup≤0 · session blocked=' +
+            blocked +
+            ' earlyCut=' +
+            early;
+        }
+        const grEl = document.getElementById('el-chip-green-red');
+        if (grEl) {
+          const share = rs.greenThenRedShare;
+          grEl.textContent = 'green→red ' + elFmtPct(share);
+          grEl.className = elChipClass(
+            share == null || share < 0.2,
+            share != null && share >= 0.2 && share < 0.3
+          );
+          grEl.title = 'Share of closes with MFE≥1% that finished red';
+        }
+        const gsEl = document.getElementById('el-chip-gov-soft');
+        if (gsEl) {
+          const gov = rs.govSoftAllow || {};
+          const soft = Number(gov.softPassNative) || 0;
+          const cmp = Number(gov.dipComparativeSoftAllow) || 0;
+          gsEl.textContent =
+            'Dip soft-allow ×' + soft + (cmp ? ' ·cmp×' + cmp : '');
+          gsEl.className = elChipClass(soft > 0 || cmp > 0, soft === 0 && cmp === 0);
+          gsEl.title =
+            'Native Dip soft-pass + comparative soft-allow session grants (hardSkip×' +
+            (Number(gov.hardSkip) || 0) +
+            ')';
+        }
+        const smEl = document.getElementById('el-chip-soft-move');
+        if (smEl) {
+          const grants = Number(rs.softMovementGrants) || 0;
+          const live = Number(rs.softMovementArmsLive) || 0;
+          smEl.textContent = 'Soft-move ×' + grants + ' ·live ' + live;
+          smEl.className = elChipClass(grants > 0, grants === 0);
+          smEl.title =
+            'Steady/HWR soft-movement grants this session · concurrent soft arms';
+        }
+        const tlEl = document.getElementById('el-chip-top-loss');
+        if (tlEl) {
+          const pid = rs.topLossProfileId || '—';
+          tlEl.textContent =
+            'Top loss ' +
+            pid +
+            (rs.topLossShare != null ? ' ' + elFmtPct(rs.topLossShare) : '');
+          tlEl.className = elChipClass(
+            rs.topLossShare == null || rs.topLossShare < 0.25,
+            rs.topLossShare != null && rs.topLossShare >= 0.25
+          );
+          tlEl.title = 'Largest abs-loss share by profile in window';
         }
         const quietHost = document.getElementById('el-quiet-chips');
         if (quietHost) {

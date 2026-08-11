@@ -346,7 +346,20 @@ export function computeProfileRlReward(
   if (Number.isFinite(gbPeak) && gbPeak >= 40) {
     protectPart -= clamp((gbPeak - 40) / 200, 0, 0.03);
   }
-  protectPart = clamp(protectPart, -0.08, 0.08);
+  // Explicit zero-MFE + green→red (1.2.268) — do not treat DOA/scratch as success
+  const mfePct = Math.max(0, Number(episode.maxRunupPct) || 0);
+  const pnlPctEp = Number(episode.pnlPct);
+  if (mfePct < 1.5) {
+    protectPart -= 0.04;
+  }
+  if (
+    mfePct >= 1 &&
+    Number.isFinite(pnlPctEp) &&
+    pnlPctEp < 0
+  ) {
+    protectPart -= 0.035;
+  }
+  protectPart = clamp(protectPart, -0.1, 0.08);
 
   let replayBonus = 0;
   let cfBonus = 0;

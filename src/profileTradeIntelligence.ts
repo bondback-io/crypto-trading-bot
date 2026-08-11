@@ -69,7 +69,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     earlyPartialTpPct: 13,
     earlyPartialFraction: 0.55,
     trailTightenFactor: 0.7,
-    momentumFadeDropPct: 5,
+    momentumFadeDropPct: 4,
     aggressiveDeadMarket: true,
     qualityBreakdownExit: false,
     profitLockArmPct: 28,
@@ -85,7 +85,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     earlyPartialTpPct: 12,
     earlyPartialFraction: 0.55,
     trailTightenFactor: 0.65,
-    momentumFadeDropPct: 5,
+    momentumFadeDropPct: 4,
     aggressiveDeadMarket: true,
     qualityBreakdownExit: false,
     profitLockArmPct: 22,
@@ -101,7 +101,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     earlyPartialTpPct: 18,
     earlyPartialFraction: 0.4,
     trailTightenFactor: 0.75,
-    momentumFadeDropPct: 6,
+    momentumFadeDropPct: 5,
     aggressiveDeadMarket: true,
     qualityBreakdownExit: false,
     profitLockArmPct: 35,
@@ -834,6 +834,15 @@ export function evaluateAdaptiveProfileExit(input: {
     // Soft urgency: only absolute collapse / confirmed bearish-div lower fade
     // threshold (not generic “decaying” — too common after pumps).
     let fadeThresh = pol.momentumFadeDropPct;
+    // Fast family: slightly tighter fade so greens bank before full giveback (1.2.268)
+    const pid = String(input.tradeProfileId || '');
+    if (
+      pid === 'scalper' ||
+      pid === 'reversal_scalper' ||
+      pid === 'momentum_burst'
+    ) {
+      fadeThresh *= 0.88;
+    }
     if (pclOn) {
       try {
         const { permissionFadeThresholdMult, shouldBlockTinyGreenScratch } =

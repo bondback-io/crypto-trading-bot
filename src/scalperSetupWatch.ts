@@ -961,7 +961,18 @@ export async function tickScalperSetupWatches(opts?: {
       let volumeHint = false;
       try {
         const volM5 = Number(w.volumeM5Usd);
-        volumeHint = Number.isFinite(volM5) && volM5 > 0;
+        const volH1 = Number(
+          (w as { volumeH1Usd?: number }).volumeH1Usd
+        );
+        const chgH1 = Number(
+          (w as { priceChangeH1Pct?: number }).priceChangeH1Pct
+        );
+        // Mild expansion / H1 alive — not mere volM5 > 0
+        const m5Ok = Number.isFinite(volM5) && volM5 >= 800;
+        const h1Ok =
+          (Number.isFinite(volH1) && volH1 >= 2_500) ||
+          (Number.isFinite(chgH1) && Math.abs(chgH1) >= 0.8);
+        volumeHint = m5Ok || h1Ok;
         const det = detectSupportReclaim({
           priceSol: px,
           supportPriceSol: w.supportPriceSol,
