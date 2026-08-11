@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.294',
+    title: 'Restore healthy classic Share RPC + protect Alchemy signals',
+    sections: ['overview', 'execution'],
+    items: [
+      'Classic Share ON stays: Critical=Helius, Scanners=Alchemy, Utility=publicnode-first — no dual KEY pools.',
+      'Critical soft-failover prefers QuickNode before Alchemy and needs hotter EWMA/grace before piggybacking scanners; recovered preferred snaps back when clearly better.',
+      'Utility Share escape only under real latency stress + longer sticky anti-thrash; Critical shed yields Favourites harder while Alchemy scanners keep polling unless Secondary is skip-hot.',
+    ],
+  },
+  {
     version: '1.2.293',
     title: 'Utility prefers publicnode + Share escape from sticky weak publics',
     sections: ['overview', 'execution'],

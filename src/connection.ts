@@ -309,6 +309,14 @@ const UTILITY_QUICKNODE_STRESS_MS = 1000;
 const LATENCY_STRESS_GRACE_MS = 15_000;
 /** Public Solana is often chronically slow from cloud hosts — fail over sooner. */
 const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
+/**
+ * Critical → Alchemy soft-failover needs a higher bar so scanners keep dedicated CU.
+ * Prefer QuickNode (if set) before burning Secondary.
+ */
+const PRIMARY_TO_ALCHEMY_SOFT_MS = 800;
+const PRIMARY_TO_ALCHEMY_GRACE_MS = 30_000;
+/** Utility Share escape only when preferred EWMA is actually hot. */
+const UTILITY_ESCAPE_MIN_EWMA_MS = 500;
 /** Don't re-log latency piggyback more often than this. */
 const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
 
@@ -431,8 +439,8 @@ function isStrongUtilityEndpoint(state: EndpointState | undefined): boolean {
 /** Min absolute EWMA gap for “clearly better” Utility escape (ms). */
 const CLEAR_UTILITY_LATENCY_GAP_MS = 120;
 
-/** a is clearly healthier/faster than b — used for Share+Utility public escape. */
-function isClearlyBetterUtility(
+/** a is clearly healthier/faster than b — Utility escape + prefer-fast preferred snap-back. */
+function isClearlyBetterEndpoint(
   a: EndpointState | undefined,
   b: EndpointState | undefined
 ): boolean {
@@ -496,8 +504,8 @@ function pickClearlyBetterUtilityAlt(preferredIdx: number): number {
       label === 'mainnet' ||
       label === 'mainnet-triton';
     if (!isAltPublic) continue;
-    if (!isClearlyBetterUtility(e, pref)) continue;
-    if (best < 0 || isClearlyBetterUtility(e, endpoints[best]!)) best = i;
+    if (!isClearlyBetterEndpoint(e, pref)) continue;
+    if (best < 0 || isClearlyBetterEndpoint(e, endpoints[best]!)) best = i;
   }
   return best;
 }
@@ -534,7 +542,7 @@ function pickPreferredUtilityIndex(): number {
 }
 
 /** Sticky window so Utility does not thrash between weak publics. */
-const UTILITY_FAILOVER_STICKY_MS = 45_000;
+const UTILITY_FAILOVER_STICKY_MS = 60_000;
 let lastUtilityFailoverAt = 0;
 let lastUtilityFailoverIdx = -1;
 
@@ -789,10 +797,10 @@ function setActiveForRole(role: RpcRole, index: number): void {
 }
 
 function piggybackOrder(role: RpcRole): RpcRole[] {
-  // Critical: Helius → Alchemy → (QuickNode mid-tier) → public.
-  // Scanners: Alchemy → Helius → (QuickNode) → public.
+  // Critical: Helius → (QuickNode mid-tier first in resolve) → Alchemy (high bar) → public.
+  // Scanners: Alchemy → (QuickNode) → Helius → public.
   // Utility: public → (QN only if ~1000ms stressed and not busy) → Alchemy → Helius.
-  // Paid cross-lane only here; QuickNode + utility are inserted after in resolve/withRpc.
+  // Paid cross-lane only here; QuickNode is tried before this for Critical/Scanners.
   if (role === 'primary') return ['secondary'];
   if (role === 'secondary') return ['primary'];
   return ['secondary', 'primary'];
@@ -876,6 +884,27 @@ function resolveIndexForRole(role: RpcRole): number {
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
   const latencySoft = latencyFailoverReady(pref);
+  const activeNow =
+    role === 'primary'
+      ? activePrimary
+      : role === 'secondary'
+        ? activeSecondary
+        : activeUtility;
+
+  // Prefer-fast preferred: when failover target is clearly worse than healthy
+  // preferred, snap Critical/Scanners back immediately (protect Alchemy CU).
+  if (
+    (role === 'primary' || role === 'secondary') &&
+    activeNow >= 0 &&
+    activeNow !== preferred &&
+    pref &&
+    isEndpointUsable(pref) &&
+    !isEndpointRateLimited(pref) &&
+    isClearlyBetterEndpoint(pref, endpoints[activeNow])
+  ) {
+    setActiveForRole(role, preferred);
+    return preferred;
+  }
 
   // Utility: if preferred is weak public but a stronger non-public/rpc-url is healthy, prefer it.
   if (role === 'utility' && pref && isWeakPublicUtilityUrl(pref.endpoint.url)) {
@@ -889,15 +918,18 @@ function resolveIndexForRole(role: RpcRole): number {
   }
 
   // Share+Utility: leave very slow usable weak public when a clearly better
-  // public / rpc-url exists (never burn Helius/Alchemy). Runs even while
-  // preferred still looks "healthy" so sticky mainnet-beta/publicnode cannot pin.
+  // public / rpc-url exists (never burn Helius/Alchemy). Gate on real EWMA stress
+  // so healthy publicnode does not thrash.
   const shareLoadEarly = Boolean(config.rpc?.shareLoad);
+  const utilityEscapeHot =
+    latencySoft || (pref?.latencyMs ?? 0) >= UTILITY_ESCAPE_MIN_EWMA_MS;
   if (
     shareLoadEarly &&
     role === 'utility' &&
     pref &&
     isEndpointUsable(pref) &&
-    isWeakPublicUtilityUrl(pref.endpoint.url)
+    isWeakPublicUtilityUrl(pref.endpoint.url) &&
+    utilityEscapeHot
   ) {
     const alt = pickClearlyBetterUtilityAlt(preferred);
     if (alt >= 0 && alt !== preferred) {
@@ -1038,10 +1070,42 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
-  // 1) Other paid free lane (Helius ↔ Alchemy)
-  // Share+Utility: skip paid-lane piggyback (soft-watch must not burn Critical/Scanners).
+  // Critical / Scanners: QuickNode before cross-lane paid piggyback so
+  // Critical soft-failover does not casually burn Alchemy scanner CU.
+  if (role === 'primary' || role === 'secondary') {
+    if (
+      acceptFailoverTarget(
+        role,
+        preferred,
+        pref,
+        preferredQuicknode,
+        latencySoft,
+        rateLimited,
+        downMs,
+        avoidPublicForCritical
+      )
+    ) {
+      return preferredQuicknode;
+    }
+  }
+
+  // Other paid free lane (Helius ↔ Alchemy). Share+Utility: skip.
+  // Critical→Alchemy latency soft needs a higher bar (protect signals).
   if (!(shareLoad && role === 'utility')) {
     for (const otherRole of piggybackOrder(role)) {
+      if (
+        role === 'primary' &&
+        otherRole === 'secondary' &&
+        latencySoft &&
+        !rateLimited
+      ) {
+        const stressedFor =
+          pref?.latencyStressedSince != null
+            ? Date.now() - pref.latencyStressedSince
+            : 0;
+        if ((pref?.latencyMs ?? 0) < PRIMARY_TO_ALCHEMY_SOFT_MS) continue;
+        if (stressedFor < PRIMARY_TO_ALCHEMY_GRACE_MS) continue;
+      }
       const otherPreferred = preferredIndexFor(otherRole);
       if (
         acceptFailoverTarget(
@@ -1060,23 +1124,8 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
-  // 2) QuickNode mid-tier (Critical + Scanners only; skip if unset/unhealthy)
+  // Utility / public for Critical+Scanners (QN already tried above)
   if (role === 'primary' || role === 'secondary') {
-    if (
-      acceptFailoverTarget(
-        role,
-        preferred,
-        pref,
-        preferredQuicknode,
-        latencySoft,
-        rateLimited,
-        downMs,
-        avoidPublicForCritical
-      )
-    ) {
-      return preferredQuicknode;
-    }
-    // 3) Utility / public before remaining fallbacks
     if (
       acceptFailoverTarget(
         role,

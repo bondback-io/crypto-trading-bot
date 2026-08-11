@@ -105,19 +105,25 @@ function recompute(external?: {
   const pLat = external?.primaryLatencyMs;
   if (pLat != null && pLat >= 700) {
     shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 3);
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-    reasons.push(`Critical latency ${Math.round(pLat)}ms → shed background`);
+    // Favourites yield harder; keep Alchemy scanners live unless Secondary is skip-hot.
+    utilitySlowFactor = Math.max(utilitySlowFactor, 3);
+    if (!laneIdle && (secondarySkipsHot >= 6 || secSkip >= 10)) {
+      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+    }
+    reasons.push(
+      `Critical latency ${Math.round(pLat)}ms → shed Favourites` +
+        (scannerSlowFactor >= 2 ? ' (+scanner soft)' : '')
+    );
   } else if (pLat != null && pLat >= 450) {
     shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push(`Critical latency ${Math.round(pLat)}ms → reduce scanners`);
+    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
+    reasons.push(`Critical latency ${Math.round(pLat)}ms → Favourites yield`);
   }
 
   if ((external?.primaryQueued ?? 0) > 0) {
     shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push('Critical queue > 0 → shed scanners/utility');
+    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
+    reasons.push('Critical queue > 0 → shed Favourites/utility');
   }
 
   const uLat = external?.utilityLatencyMs;

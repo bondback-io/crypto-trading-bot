@@ -10904,7 +10904,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers publicnode; escapes sticky slow weak publics to a healthier public/rpc-url (never burns Helius/Alchemy).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred → other paid lane → QuickNode → public. Utility soft-escape stays on public/rpc-url only under Share ON.</div>
+            <div class="mint">Failover: preferred → QuickNode (Critical/Scanners) → other paid lane (Critical→Alchemy only when very hot) → public. Utility soft-escape stays on public/rpc-url under Share ON; recovered preferred snaps back when clearly better.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
