@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.289',
+    title: 'Revert KEY2 spares — classic three-lane RPC again',
+    sections: ['overview', 'copy', 'execution'],
+    items: [
+      'Removes HELIUS_API_KEY2 / ALCHEMY_API_KEY2 same-provider promote logic that broke RPC routing.',
+      'Back to 1.2.287 classic lanes: Critical=Helius, Scanners=Alchemy, Utility=mainnet (Share ON).',
+    ],
+  },
+  {
     version: '1.2.287',
     title: 'Restore classic Helius / Alchemy / mainnet three-lane RPC',
     sections: ['overview', 'copy', 'execution', 'zion'],
