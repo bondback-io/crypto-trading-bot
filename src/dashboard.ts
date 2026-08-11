@@ -10904,7 +10904,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion + MEV sandwich reads (Share ON). Prefers Alchemy. Under Alchemy stress → QuickNode/public, not Helius.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers publicnode; escapes sticky slow weak publics to a healthier public/rpc-url (never burns Helius/Alchemy).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred → QuickNode → other paid (Critical→Alchemy only when severely hot; Scanners never → Helius) → public. Utility soft-escape stays on public/rpc-url under Share ON; recovered preferred snaps back when clearly better.</div>
+            <div class="mint">Failover: preferred → QuickNode → other paid (Critical→Alchemy only when severely hot; Scanners never → Helius) → public. Utility soft-escape stays on public/rpc-url under Share ON. Correlated multi-host latency spikes often mean host/event-loop load, not every API key failing — hard HTTP timeouts + tighter lane caps reduce the illusion.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -26290,36 +26290,62 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     async function refresh() {
       if (window._refreshInFlight) return;
-      // Under RPC stress, skip every other poll to cut /api/status fan-out load.
-      if (window._rpcStressed) {
-        window._rpcStressSkip = (window._rpcStressSkip || 0) + 1;
-        if (window._rpcStressSkip % 2 === 1) return;
+      const now = Date.now();
+      const stressed = Boolean(window._rpcStressed);
+      // Under stress: ~10s cadence (skip if last full refresh was <9s ago).
+      if (stressed && window._lastRefreshAt && now - window._lastRefreshAt < 9000) {
+        return;
       }
       window._refreshInFlight = true;
       const positionsGenAtStart = window._openPositionsGen || 0;
       try {
-      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
-        fetchJSON('/api/status'),
-        fetchJSON('/api/positions?fast=1'),
-        fetchJSON('/api/logs?limit=50'),
-        fetchJSON('/api/activity'),
-        fetchJSON('/api/config'),
-        fetchJSON('/wallets'),
-        fetchJSON('/api/migrations'),
-        fetchJSON('/paper-status'),
-        fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
-        fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
-        fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
-        fetchJSON('/api/zion').catch(() => null),
-      ]);
+      let status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData;
+      if (stressed) {
+        // Slim fan-out: keep status / positions / config; skip heavy side panels.
+        [status, positions, cfg] = await Promise.all([
+          fetchJSON('/api/status'),
+          fetchJSON('/api/positions?fast=1'),
+          fetchJSON('/api/config'),
+        ]);
+        logs = { logs: [] };
+        activity = { activity: [] };
+        walletsRaw = window._lastWalletsRaw || [];
+        migrations = { migrations: [] };
+        paper = window._lastPaper || {};
+        sized = { signals: [], trade: {} };
+        dipSm = { events: [], config: {} };
+        scanner = { status: {}, candidates: [] };
+        zionData = null;
+      } else {
+        [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
+          fetchJSON('/api/status'),
+          fetchJSON('/api/positions?fast=1'),
+          fetchJSON('/api/logs?limit=50'),
+          fetchJSON('/api/activity'),
+          fetchJSON('/api/config'),
+          fetchJSON('/wallets'),
+          fetchJSON('/api/migrations'),
+          fetchJSON('/paper-status'),
+          fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
+          fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
+          fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
+          fetchJSON('/api/zion').catch(() => null),
+        ]);
+        window._lastWalletsRaw = walletsRaw;
+        window._lastPaper = paper;
+      }
+      window._lastRefreshAt = Date.now();
       try {
         const rpc = status && status.rpc;
+        const lc = rpc && rpc.loadControl;
         window._rpcStressed = Boolean(
           rpc &&
             (rpc.summary === 'failover_active' ||
               rpc.summary === 'provider_down' ||
               rpc.summary === 'degraded' ||
-              (rpc.gate && rpc.gate.stressed))
+              (rpc.gate && rpc.gate.stressed) ||
+              (lc && lc.shedBackground) ||
+              (lc && (lc.utilitySlowFactor || 1) >= 2))
         );
       } catch (_) {
         window._rpcStressed = false;

@@ -128,8 +128,8 @@ function recompute(external?: {
 
   const uLat = external?.utilityLatencyMs;
   if (external?.utilityWeakPublic) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    reasons.push('Utility on weak public RPC → cut Favourites/activity');
+    utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
+    reasons.push('Utility on weak public RPC → slow Favourites (soft)');
   }
   if (external?.utilityFailover) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);

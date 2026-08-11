@@ -119,6 +119,8 @@ let activeIndex = 0;
 const rpcRoleAls = new AsyncLocalStorage<RpcRole>();
 /** Optional feature tag for call metering (wallet_poll, health_probe, …). */
 const rpcFeatureAls = new AsyncLocalStorage<string>();
+/** Optional per-call HTTP timeout override (ms) — used by health probes. */
+const rpcHttpTimeoutAls = new AsyncLocalStorage<number>();
 /** >0 when already inside an acquired lane gate (nested runWithRpcRole). */
 const rpcGateDepthAls = new AsyncLocalStorage<number>();
 
@@ -243,6 +245,39 @@ function parseRpcMethodsFromBody(body: unknown): string[] {
   }
 }
 
+function rpcHttpTimeoutMs(): number {
+  const override = rpcHttpTimeoutAls.getStore();
+  if (override != null && Number.isFinite(override) && override > 0) {
+    return Math.max(2_000, Math.min(30_000, Math.round(override)));
+  }
+  const raw = process.env.RPC_HTTP_TIMEOUT_MS;
+  const n = raw != null && raw !== '' ? Number(raw) : NaN;
+  if (Number.isFinite(n)) return Math.max(4_000, Math.min(30_000, Math.round(n)));
+  return 12_000;
+}
+
+function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const filtered = signals.filter(Boolean);
+  if (filtered.length === 1) return filtered[0]!;
+  const anyFn = (
+    AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }
+  ).any;
+  if (typeof anyFn === 'function') return anyFn.call(AbortSignal, filtered);
+  const ctrl = new AbortController();
+  for (const s of filtered) {
+    if (s.aborted) {
+      ctrl.abort((s as AbortSignal & { reason?: unknown }).reason);
+      return ctrl.signal;
+    }
+    s.addEventListener(
+      'abort',
+      () => ctrl.abort((s as AbortSignal & { reason?: unknown }).reason),
+      { once: true }
+    );
+  }
+  return ctrl.signal;
+}
+
 function meteredFetch(endpointLabel: string) {
   const baseFetch = globalThis.fetch.bind(globalThis);
   return async (
@@ -251,9 +286,14 @@ function meteredFetch(endpointLabel: string) {
   ): Promise<Response> => {
     const methods = parseRpcMethodsFromBody(init?.body);
     const t0 = Date.now();
+    const timeoutMs = rpcHttpTimeoutMs();
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = init?.signal
+      ? mergeAbortSignals([init.signal, timeoutSignal])
+      : timeoutSignal;
     let ok = false;
     try {
-      const res = await baseFetch(input, init);
+      const res = await baseFetch(input, { ...init, signal });
       ok = res.ok;
       const latencyMs = Date.now() - t0;
       for (const method of methods) {
@@ -274,6 +314,18 @@ function meteredFetch(endpointLabel: string) {
           ok: false,
           latencyMs,
         });
+      }
+      const name = err instanceof Error ? err.name : '';
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        timeoutSignal.aborted ||
+        name === 'TimeoutError' ||
+        name === 'AbortError' ||
+        /aborted|timeout/i.test(msg)
+      ) {
+        throw new Error(
+          `RPC timeout after ${Math.round(timeoutMs / 1000)}s (${endpointLabel})`
+        );
       }
       throw err;
     }
@@ -653,6 +705,7 @@ function ensureEndpoints(): void {
         commitment: 'confirmed',
         wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
         disableRetryOnRateLimit: true,
+        confirmTransactionInitialTimeout: 30_000,
         fetch: meteredFetch(endpoint.label || `rpc`),
       }),
       healthy: true,
@@ -1377,7 +1430,16 @@ function recordFailure(index: number, error: string): void {
   if (isRateLimit) {
     state.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
   } else if (
-    /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|probe timeout/i.test(
+    /RPC timeout after|RPC probe timeout/i.test(error)
+  ) {
+    // Local abort / probe race — soft miss under congestion. Do not quarantine
+    // quickly or every host looks dead when the event loop is saturated.
+    const recentOk = state.successCount >= Math.max(2, state.failureCount);
+    if (!recentOk && state.consecutiveFailures >= 4) {
+      enterQuarantine(state, error.slice(0, 120));
+    }
+  } else if (
+    /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed/i.test(
       error
     )
   ) {
@@ -1465,26 +1527,31 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
       ? timeoutMs
       : Math.min(timeoutMs, 4_000);
 
-  return runWithRpcFeature('health_probe', async () => {
-    const start = Date.now();
-    try {
-      await Promise.race([
-        state.connection.getSlot('confirmed'),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`RPC probe timeout after ${effectiveTimeout}ms`)),
-            effectiveTimeout
-          )
-        ),
-      ]);
-      recordSuccess(index, Date.now() - start);
-      return true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      recordFailure(index, message);
-      return false;
-    }
-  });
+  return rpcHttpTimeoutAls.run(effectiveTimeout, () =>
+    runWithRpcFeature('health_probe', async () => {
+      const start = Date.now();
+      try {
+        await Promise.race([
+          state.connection.getSlot('confirmed'),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(`RPC probe timeout after ${effectiveTimeout}ms`)
+                ),
+              effectiveTimeout
+            )
+          ),
+        ]);
+        recordSuccess(index, Date.now() - start);
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        recordFailure(index, message);
+        return false;
+      }
+    })
+  );
 }
 
 /** Run a timed RPC call against the lane's active endpoint; failover on failure */
@@ -2400,11 +2467,24 @@ export function startRpcHealthMonitor(): void {
           i === preferredSecondary ||
           i === preferredUtility ||
           i === preferredQuicknode;
-        if (gateSnap.stressed && !isActive && !isPreferred) {
+        const primaryBusy =
+          gateSnap.lanes.primary.inFlight >=
+            Math.max(1, gateSnap.lanes.primary.maxConcurrent - 1) ||
+          gateSnap.lanes.primary.queued > 0;
+        // Under congestion: only preferred/active — skip inactive public fallbacks.
+        if ((gateSnap.stressed || primaryBusy) && !isActive && !isPreferred) {
+          continue;
+        }
+        if (
+          (gateSnap.stressed || primaryBusy) &&
+          isPublicRpcUrl(endpoints[i]?.endpoint.url || '') &&
+          !isActive &&
+          i !== preferredUtility
+        ) {
           continue;
         }
         await probeEndpoint(i);
-        await new Promise((r) => setTimeout(r, gateSnap.stressed ? 400 : 250));
+        await new Promise((r) => setTimeout(r, gateSnap.stressed || primaryBusy ? 400 : 250));
       }
       await maybeSwitchEndpoints();
       try {

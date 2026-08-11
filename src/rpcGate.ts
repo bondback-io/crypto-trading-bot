@@ -73,39 +73,40 @@ function laneLimits(role: RpcGateRole): {
 } {
   if (role === 'primary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_PRIMARY', 8, 1, 32),
-      maxRps: envInt('RPC_LANE_RPS_PRIMARY', 20, 1, 120),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_PRIMARY', 6, 1, 32),
+      maxRps: envInt('RPC_LANE_RPS_PRIMARY', 12, 1, 120),
       maxQueue: envInt('RPC_LANE_QUEUE_PRIMARY', 24, 0, 200),
       maxWaitMs: 8_000,
     };
   }
   if (role === 'secondary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 2, 1, 24),
+      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 4, 1, 80),
       maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
       maxWaitMs: 3_000,
     };
   }
   return {
     maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
-    maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
+    maxRps: envInt('RPC_LANE_RPS_UTILITY', 3, 1, 40),
     maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
     maxWaitMs: 2_000,
   };
 }
 
 const lanes: Record<RpcGateRole, LaneState> = {
-  primary: emptyLane(),
-  secondary: emptyLane(),
-  utility: emptyLane(),
+  primary: emptyLane('primary'),
+  secondary: emptyLane('secondary'),
+  utility: emptyLane('utility'),
 };
 
-function emptyLane(): LaneState {
+function emptyLane(role: RpcGateRole): LaneState {
+  const { maxRps } = laneLimits(role);
   return {
     inFlight: 0,
     waiters: [],
-    tokens: 100, // full bucket until first refill caps to maxRps
+    tokens: maxRps, // start at cap — avoid boot burst above RPS
     lastRefillAt: Date.now(),
     hitConcurrency: 0,
     hitRateLimit: 0,
@@ -381,16 +382,12 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
       reason: load.reasons[0] || 'adaptive shed for Critical',
     };
   }
-  // Favourites must yield during Critical shed (utilitySlowFactor tops out ~2.5).
-  if (
-    kind === 'utility' &&
-    (load.shedBackground || load.utilitySlowFactor >= 2)
-  ) {
+  // Favourites yield only on Critical shed or Utility lane saturation —
+  // weak-public utilitySlowFactor soft-throttles via utilityPollScale / cycle caps.
+  if (kind === 'utility' && load.shedBackground) {
     return {
       defer: true,
-      reason: load.shedBackground
-        ? load.reasons[0] || 'adaptive shed for Critical'
-        : `utility adaptive×${load.utilitySlowFactor}`,
+      reason: load.reasons[0] || 'adaptive shed for Critical',
     };
   }
   } catch {

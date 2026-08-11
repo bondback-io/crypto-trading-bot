@@ -231,6 +231,8 @@ export function getLiveMinWalletSol(): number {
 }
 
 let cachedLiveReady: LiveTradingReadyResult | null = null;
+let cachedLiveReadyAt = 0;
+const LIVE_READY_CACHE_MS = 8_000;
 
 /** Last Live gate evaluation (updated by assertLiveTradingReady / status). */
 export function getCachedLiveTradingReady(): LiveTradingReadyResult | null {
@@ -241,6 +243,7 @@ async function finishReady(
   result: LiveTradingReadyResult
 ): Promise<LiveTradingReadyResult> {
   cachedLiveReady = result;
+  cachedLiveReadyAt = Date.now();
   return result;
 }
 
@@ -265,6 +268,14 @@ export async function assertLiveTradingReady(
       balanceSol: null,
       minSol,
     });
+  }
+  // Slim status polls: reuse recent balance gate for ~8s (one RPC, not two).
+  if (
+    cachedLiveReady &&
+    Date.now() - cachedLiveReadyAt < LIVE_READY_CACHE_MS &&
+    cachedLiveReady.reason !== 'not live'
+  ) {
+    return cachedLiveReady;
   }
   const slot = getActiveTradingWallet();
   if (!slot || !slot.enabled) {

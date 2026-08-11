@@ -41,7 +41,6 @@ import {
 import { performanceScoreFromStats } from './performanceScore';
 import { isValidSolanaAddress, inferWalletCategory } from './walletStore';
 import {
-  getLiveBalanceSol,
   getRpcStats,
   startRpcHealthMonitor,
   probeRpcRecovery,
@@ -284,7 +283,8 @@ export function createServer(): express.Application {
     const monitor = getMonitorStatus();
     const active = getActiveTradingWallet();
     const pubkey = getWalletPublicKey();
-    let liveTradingReady = null;
+    let liveTradingReady: import('./liveWalletHistory').LiveTradingReadyResult | null =
+      null;
     let liveWalletConnected = true;
     let liveWalletMeta: {
       connected: boolean;
@@ -313,9 +313,10 @@ export function createServer(): express.Application {
         liveWalletConnected = false;
       }
     }
+    // Reuse balance from assertLiveTradingReady — do not double-call getLiveBalanceSol.
     const liveBalance =
       config.mode === 'live' && liveWalletConnected
-        ? await getLiveBalanceSol()
+        ? (liveTradingReady?.balanceSol ?? null)
         : null;
     const paperStats = paperTrader.getStats();
     const liveSimScore = usesPaperAccounting()

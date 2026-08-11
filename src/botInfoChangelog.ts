@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.296',
+    title: 'Stabilize RPC under host congestion',
+    sections: ['overview', 'execution'],
+    items: [
+      'Hard per-call RPC HTTP timeouts (default 12s, AbortSignal) so hung providers free lane slots instead of wedging the process.',
+      'Tighter lane caps (Critical 6/12 RPS, Scanners 2/4, Utility 2/3) + no boot RPS burst; Favourites soft-throttle on weak public instead of hard-pause.',
+      'Slimmer live /api/status balance (8s cache, no double fetch) and dashboard ~10s slim fan-out under stress; /health stays memory-only.',
+    ],
+  },
+  {
     version: '1.2.295',
     title: 'Helius Critical-only — trade execution isolation',
     sections: ['overview', 'execution'],
