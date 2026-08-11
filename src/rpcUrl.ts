@@ -115,7 +115,33 @@ function stripEnvQuotes(raw: string): string {
   ) {
     u = u.slice(1, -1).trim();
   }
+  // Long HTTPS URLs pasted into Render often pick up newlines/spaces from wrap.
+  if (/^https?:\/\//i.test(u) || /(helius|alchemy|quiknode|solana-mainnet)/i.test(u)) {
+    u = u.replace(/\s+/g, '');
+  }
   return u;
+}
+
+/**
+ * Fix common Helius URL typos: `?api-key-<uuid>` → `?api-key=<uuid>`.
+ * (Hyphen instead of equals breaks auth and looks like "pool down".)
+ */
+function repairProviderRpcUrl(
+  provider: 'helius' | 'alchemy',
+  u: string
+): string {
+  let out = u;
+  if (provider === 'helius' || /helius-rpc\.com/i.test(out)) {
+    const before = out;
+    out = out.replace(/\?api-key-([0-9a-f]{8}-[0-9a-f-]+)/i, '?api-key=$1');
+    out = out.replace(/([?&])api_key=/gi, '$1api-key=');
+    if (out !== before) {
+      console.warn(
+        '[rpc] Repaired Helius URL typo api-key- → api-key= (check Render HELIUS_RPC_URL*)'
+      );
+    }
+  }
+  return out;
 }
 
 function normalizeExplicitRpcUrl(raw: string | null | undefined): string | null {
@@ -148,8 +174,10 @@ function coerceProviderRpcEnvValue(
   provider: 'helius' | 'alchemy',
   raw: string | null | undefined
 ): string | null {
-  const u = stripEnvQuotes(raw || '');
+  let u = stripEnvQuotes(raw || '');
   if (!u) return null;
+  u = repairProviderRpcUrl(provider, u);
+
   if (isUsableRpcUrl(u)) return u;
 
   // Host/path pasted without scheme
@@ -157,7 +185,7 @@ function coerceProviderRpcEnvValue(
     !/^https?:\/\//i.test(u) &&
     /(helius|alchemy|quiknode|solana-mainnet)/i.test(u)
   ) {
-    const fixed = ensureHttpsUrl(u);
+    const fixed = repairProviderRpcUrl(provider, ensureHttpsUrl(u));
     if (isUsableRpcUrl(fixed)) return fixed;
   }
 

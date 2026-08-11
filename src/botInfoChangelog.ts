@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.280',
+    title: 'Sanitize HELIUS/ALCHEMY_RPC_URL paste (whitespace + api-key typo)',
+    sections: ['overview', 'execution', 'knobs'],
+    items: [
+      'Strip newlines/spaces from pasted RPC URLs; auto-repair Helius ?api-key- → ?api-key=.',
+      'Docs: Render HELIUS_RPC_URL must use equals after api-key and stay on one line.',
+    ],
+  },
+  {
     version: '1.2.279',
     title: 'Stop RPC latency failover thrash (Render lag/crashes)',
     sections: ['overview', 'execution', 'knobs'],
