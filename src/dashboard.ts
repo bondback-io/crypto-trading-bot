@@ -26131,7 +26131,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               rpc.summary === 'provider_down' ||
               rpc.summary === 'degraded' ||
               (rpc.gate && rpc.gate.stressed))
-        )
         );
       } catch (_) {
         window._rpcStressed = false;

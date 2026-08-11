@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.284',
+    title: 'Fix dashboard JS syntax break (stuck UI)',
+    sections: ['overview'],
+    items: [
+      'Repair broken window._rpcStressed assignment (extra );) that prevented the dashboard script from parsing — UI looked fully down/frozen.',
+    ],
+  },
+  {
     version: '1.2.283',
     title: 'Unstick Favourites polls + stop status-driven RPC thrash',
     sections: ['overview', 'copy', 'execution'],
