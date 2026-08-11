@@ -73,40 +73,39 @@ function laneLimits(role: RpcGateRole): {
 } {
   if (role === 'primary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_PRIMARY', 6, 1, 32),
-      maxRps: envInt('RPC_LANE_RPS_PRIMARY', 12, 1, 120),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_PRIMARY', 8, 1, 32),
+      maxRps: envInt('RPC_LANE_RPS_PRIMARY', 20, 1, 120),
       maxQueue: envInt('RPC_LANE_QUEUE_PRIMARY', 24, 0, 200),
       maxWaitMs: 8_000,
     };
   }
   if (role === 'secondary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 2, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 4, 1, 80),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
+      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
       maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
       maxWaitMs: 3_000,
     };
   }
   return {
     maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
-    maxRps: envInt('RPC_LANE_RPS_UTILITY', 3, 1, 40),
+    maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
     maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
     maxWaitMs: 2_000,
   };
 }
 
 const lanes: Record<RpcGateRole, LaneState> = {
-  primary: emptyLane('primary'),
-  secondary: emptyLane('secondary'),
-  utility: emptyLane('utility'),
+  primary: emptyLane(),
+  secondary: emptyLane(),
+  utility: emptyLane(),
 };
 
-function emptyLane(role: RpcGateRole): LaneState {
-  const { maxRps } = laneLimits(role);
+function emptyLane(): LaneState {
   return {
     inFlight: 0,
     waiters: [],
-    tokens: maxRps, // start at cap — avoid boot burst above RPS
+    tokens: 100, // full bucket until first refill caps to maxRps
     lastRefillAt: Date.now(),
     hitConcurrency: 0,
     hitRateLimit: 0,
@@ -349,10 +348,10 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
   }
   const stressed =
     out.utility.queued > 0 ||
-    out.utility.inFlight >= Math.max(1, out.utility.maxConcurrent) ||
+    out.utility.skipped > 0 ||
     out.secondary.queued > 2 ||
-    out.primary.queued > 0 ||
-    out.primary.inFlight >= Math.max(1, out.primary.maxConcurrent);
+    out.primary.hitConcurrency > 0 ||
+    out.primary.queued > 0;
   return { lanes: out, backlog, stressed };
 }
 
@@ -382,12 +381,10 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
       reason: load.reasons[0] || 'adaptive shed for Critical',
     };
   }
-  // Favourites yield only on Critical shed or Utility lane saturation —
-  // weak-public utilitySlowFactor soft-throttles via utilityPollScale / cycle caps.
-  if (kind === 'utility' && load.shedBackground) {
+  if (kind === 'utility' && load.utilitySlowFactor >= 3) {
     return {
       defer: true,
-      reason: load.reasons[0] || 'adaptive shed for Critical',
+      reason: `utility adaptive×${load.utilitySlowFactor}`,
     };
   }
   } catch {
@@ -411,13 +408,10 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
       reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
     };
   }
-  if (
-    kind === 'utility' &&
-    (u.queued >= 2 || u.inFlight >= u.maxConcurrent)
-  ) {
+  if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
     return {
       defer: true,
-      reason: `Utility lane saturated (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued})`,
+      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued}, skipped ${u.skipped})`,
     };
   }
   return { defer: false, reason: null };

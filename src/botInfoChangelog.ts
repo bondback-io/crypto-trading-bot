@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.297',
+    title: 'Restore RPC stack to 1.2.262-era classic lanes',
+    sections: ['overview', 'execution'],
+    items: [
+      'RPC runtime (connection, gates, load control, URL prefs, MEV lane) restored from Release 1.2.262 — the last known-good build before Aug 11 dual-pool / failover churn.',
+      'Classic Share ON again: Critical=Helius, Scanners=Alchemy, Utility=public Solana; Aug 11 Closed Trades / Steady / learning fixes kept.',
+      'Drops post-262 dual-pool, KEY2, and soft-failover experiment paths from the live RPC stack.',
+    ],
+  },
+  {
     version: '1.2.296',
     title: 'Stabilize RPC under host congestion',
     sections: ['overview', 'execution'],

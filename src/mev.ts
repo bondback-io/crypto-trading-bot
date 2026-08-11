@@ -82,9 +82,8 @@ export async function checkSandwichRisk(
     return empty(true, 'Invalid mint — skip sandwich check');
   }
 
-  // Share ON: sandwich reads on Scanners (Alchemy) — keep Helius for trade sends only.
-  // Do not dump getParsedTransaction storms onto Utility (Favourites lane).
-  return runWithRpcRole('secondary', () => checkSandwichRiskInner(mint, empty), 'mev_sandwich');
+  // Share load: do not dump getParsedTransaction storms onto Utility (Favourites lane).
+  return runWithRpcRole('primary', () => checkSandwichRiskInner(mint, empty), 'mev_sandwich');
 }
 
 async function checkSandwichRiskInner(

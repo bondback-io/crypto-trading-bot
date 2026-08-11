@@ -2,8 +2,8 @@
  * RPC URL sanitization + free-tier multi-RPC manager.
  *
  * Priority order (failover pool):
- *   1. Helius Free     — HELIUS_API_KEY or single HELIUS_RPC_URL
- *   2. Alchemy Free    — ALCHEMY_API_KEY or single ALCHEMY_RPC_URL
+ *   1. Helius Free     — HELIUS_API_KEY  → https://mainnet.helius-rpc.com/?api-key=…
+ *   2. Alchemy Free    — ALCHEMY_API_KEY → https://solana-mainnet.g.alchemy.com/v2/…
  *   3. QuickNode       — QUICKNODE_RPC_URL (mid-tier paid failover for Critical/Scanners)
  *   4. RPC_URL / RPC_PRIMARY             — Triton api.mainnet.solana.com preferred for Utility
  *   5. Public Solana                     — https://solana-rpc.publicnode.com
@@ -14,7 +14,7 @@
  * Triple-lane layout (Share RPC load ON):
  *   Primary (critical) → Helius — entries, migration, wallet buy detection
  *   Secondary (scanners) → Alchemy — Market / Alpha / Zion
- *   Utility → publicnode (then Triton / rpc-url), official mainnet-beta last resort
+ *   Utility → official mainnet-beta (api.mainnet-beta.solana.com), then publicnode / Triton
  * Paid-lane failover: preferred → other paid → QuickNode → public (bypass QuickNode if unset).
  * Health monitor + piggyback failover live in connection.ts.
  */
@@ -82,69 +82,18 @@ function isUsableApiKey(key: string | null | undefined): boolean {
   return true;
 }
 
-/**
- * Sanitize a pasted RPC URL: collapse whitespace and repair `?api-key-` → `?api-key=`.
- */
-function sanitizePastedRpcUrl(raw: string): string {
-  let u = raw.trim().replace(/\s+/g, '');
-  u = u.replace(/\?api-key-/i, '?api-key=');
-  return u;
-}
-
-/**
- * Build Helius mainnet HTTP RPC URL.
- * Prefers HELIUS_API_KEY; else a single HELIUS_RPC_URL (full URL or bare key).
- * Backup URL env vars are ignored (dual-pool routing removed).
- */
+/** Build Helius mainnet HTTP RPC URL from API key (null if unset/placeholder). */
 export function buildHeliusRpcUrl(apiKey?: string | null): string | null {
-  if (apiKey != null) {
-    const key = apiKey.trim();
-    if (!isUsableApiKey(key)) return null;
-    return `https://mainnet.helius-rpc.com/?api-key=${key}`;
-  }
-  const fromKey = process.env.HELIUS_API_KEY?.trim();
-  if (isUsableApiKey(fromKey)) {
-    return `https://mainnet.helius-rpc.com/?api-key=${fromKey}`;
-  }
-  const raw = sanitizePastedRpcUrl(
-    process.env.HELIUS_RPC_URL || process.env.HELIUS_RPC_PRIMARY || ''
-  );
-  if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) {
-    return isUsableRpcUrl(raw) ? raw : null;
-  }
-  if (isUsableApiKey(raw)) {
-    return `https://mainnet.helius-rpc.com/?api-key=${raw}`;
-  }
-  return null;
+  const key = (apiKey ?? process.env.HELIUS_API_KEY)?.trim();
+  if (!isUsableApiKey(key)) return null;
+  return `https://mainnet.helius-rpc.com/?api-key=${key}`;
 }
 
-/**
- * Build Alchemy Solana mainnet HTTP RPC URL.
- * Prefers ALCHEMY_API_KEY; else a single ALCHEMY_RPC_URL (full URL or bare key).
- * Backup URL env vars are ignored (dual-pool routing removed).
- */
+/** Build Alchemy Solana mainnet HTTP RPC URL from API key (null if unset/placeholder). */
 export function buildAlchemyRpcUrl(apiKey?: string | null): string | null {
-  if (apiKey != null) {
-    const key = apiKey.trim();
-    if (!isUsableApiKey(key)) return null;
-    return `https://solana-mainnet.g.alchemy.com/v2/${key}`;
-  }
-  const fromKey = process.env.ALCHEMY_API_KEY?.trim();
-  if (isUsableApiKey(fromKey)) {
-    return `https://solana-mainnet.g.alchemy.com/v2/${fromKey}`;
-  }
-  const raw = sanitizePastedRpcUrl(
-    process.env.ALCHEMY_RPC_URL || process.env.ALCHEMY_RPC_PRIMARY || ''
-  );
-  if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) {
-    return isUsableRpcUrl(raw) ? raw : null;
-  }
-  if (isUsableApiKey(raw)) {
-    return `https://solana-mainnet.g.alchemy.com/v2/${raw}`;
-  }
-  return null;
+  const key = (apiKey ?? process.env.ALCHEMY_API_KEY)?.trim();
+  if (!isUsableApiKey(key)) return null;
+  return `https://solana-mainnet.g.alchemy.com/v2/${key}`;
 }
 
 /** True for QuickNode hosted Solana HTTP endpoints. */
@@ -430,23 +379,15 @@ export function rpcEndpointsFromEnv(
     }
   }
 
-  // Utility prefers publicnode / Triton over official mainnet-beta (slow from cloud).
+  // Utility lane prefers official mainnet-beta, then publicnode / Triton.
   let utilityUrl = '';
   const utilityPrefs = [
+    PUBLIC_SOLANA_RPC_OFFICIAL,
+    rpcUrl && isOfficialMainnetBetaRpcUrl(rpcUrl) ? rpcUrl : '',
     PUBLIC_SOLANA_RPC,
     rpcUrl && isTritonMainnetRpcUrl(rpcUrl) ? rpcUrl : '',
     rpcSecondary && isTritonMainnetRpcUrl(rpcSecondary) ? rpcSecondary : '',
-    rpcUrl &&
-    !isOfficialMainnetBetaRpcUrl(rpcUrl) &&
-    !/helius|alchemy/i.test(rpcUrl)
-      ? rpcUrl
-      : '',
-    rpcSecondary &&
-    !isOfficialMainnetBetaRpcUrl(rpcSecondary) &&
-    !/helius|alchemy/i.test(rpcSecondary)
-      ? rpcSecondary
-      : '',
-    PUBLIC_SOLANA_RPC_OFFICIAL,
+    rpcSecondary && !isOfficialMainnetBetaRpcUrl(rpcSecondary) ? rpcSecondary : '',
   ].filter((u) => u && isUsableRpcUrl(u));
   for (const u of utilityPrefs) {
     if (u !== primaryUrl && u !== secondaryUrl) {
@@ -463,11 +404,11 @@ export function rpcEndpointsFromEnv(
   }
   if (!utilityUrl) {
     utilityUrl =
-      PUBLIC_SOLANA_RPC !== primaryUrl && PUBLIC_SOLANA_RPC !== secondaryUrl
-        ? PUBLIC_SOLANA_RPC
-        : PUBLIC_SOLANA_RPC_OFFICIAL !== primaryUrl &&
-            PUBLIC_SOLANA_RPC_OFFICIAL !== secondaryUrl
-          ? PUBLIC_SOLANA_RPC_OFFICIAL
+      PUBLIC_SOLANA_RPC_OFFICIAL !== primaryUrl &&
+      PUBLIC_SOLANA_RPC_OFFICIAL !== secondaryUrl
+        ? PUBLIC_SOLANA_RPC_OFFICIAL
+        : PUBLIC_SOLANA_RPC !== primaryUrl && PUBLIC_SOLANA_RPC !== secondaryUrl
+          ? PUBLIC_SOLANA_RPC
           : secondaryUrl || primaryUrl;
   }
 
