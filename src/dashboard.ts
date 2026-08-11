@@ -245,6 +245,81 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .rpc-status.rpc-ok { color: #6ee7b7; }
     .rpc-status.rpc-bad { color: #fca5a5; }
     .rpc-status.rpc-unknown { color: #94a3b8; }
+    .rpc-health-panel .rpc-health-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-bottom: 0.55rem;
+    }
+    .rpc-health-panel .rpc-health-chip {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      color: #94a3b8;
+    }
+    .rpc-health-panel .rpc-health-chip.is-on {
+      border-color: rgba(52, 211, 153, 0.45);
+      color: #6ee7b7;
+      background: rgba(6, 78, 59, 0.25);
+    }
+    .rpc-health-panel .rpc-health-chip.is-warn {
+      border-color: rgba(251, 191, 36, 0.45);
+      color: #fbbf24;
+      background: rgba(120, 53, 15, 0.25);
+    }
+    .rpc-health-panel .rpc-health-chip.is-bad {
+      border-color: rgba(248, 113, 113, 0.45);
+      color: #fca5a5;
+      background: rgba(127, 29, 29, 0.25);
+    }
+    .rpc-health-panel .rpc-prov-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.65rem;
+      padding: 0.35rem 0;
+      border-top: 1px solid rgba(51, 65, 85, 0.45);
+      font-size: 0.75rem;
+    }
+    .rpc-health-panel .rpc-prov-name {
+      font-weight: 600;
+      color: #cbd5e1;
+      min-width: 4.5rem;
+    }
+    .rpc-health-panel .rpc-ep-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: 0.35rem;
+      border: 1px solid rgba(100, 116, 139, 0.4);
+      color: #94a3b8;
+      max-width: 11rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .rpc-health-panel .rpc-ep-pill.is-healthy {
+      color: #6ee7b7;
+      border-color: rgba(52, 211, 153, 0.4);
+    }
+    .rpc-health-panel .rpc-ep-pill.is-degraded {
+      color: #fbbf24;
+      border-color: rgba(251, 191, 36, 0.4);
+    }
+    .rpc-health-panel .rpc-ep-pill.is-down {
+      color: #fca5a5;
+      border-color: rgba(248, 113, 113, 0.4);
+    }
+    .rpc-health-panel .rpc-ep-pill.is-active {
+      box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.45);
+    }
+    .rpc-health-panel .rpc-plain {
+      margin: 0.4rem 0 0;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
     .active-profile-extras {
       display: inline-flex;
       flex-wrap: wrap;
@@ -6459,15 +6534,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       background: rgba(248, 113, 113, 0.1);
     }
     .zion-mic-dot {
-      position: absolute; top: 0.28rem; right: 0.28rem;
-      width: 0.38rem; height: 0.38rem; border-radius: 999px;
-      background: #22c55e; box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.85);
+      position: absolute; top: 0.22rem; right: 0.22rem;
+      width: 0.5rem; height: 0.5rem; border-radius: 999px;
+      background: #22c55e; box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.85), 0 0 6px rgba(34, 197, 94, 0.55);
       display: none;
     }
     .zion-mic-btn.is-on .zion-mic-dot { display: block; }
     .zion-mic-btn.is-on.is-listening .zion-mic-dot {
       background: #fbbf24;
       box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.85), 0 0 8px rgba(251, 191, 36, 0.65);
+    }
+    @media (pointer: coarse) {
+      .zion-mic-dot { width: 0.55rem; height: 0.55rem; top: 0.18rem; right: 0.18rem; }
     }
     @keyframes zion-mic-listen-pulse {
       0%, 100% { transform: scale(1); }
@@ -7499,6 +7577,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
         <div class="card !py-3"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="PF / avg win / avg loss use the selected stats window. Other health bits stay live."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
+      </div>
+
+      <div class="card mt-2.5 sm:mt-3 rpc-health-panel" id="rpc-health-panel">
+        <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Live Helius/Alchemy pool status: primary+backup load share and failover. Hosts only — API keys never shown. Refreshes with Overview."></span></div>
+        <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
+          <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
+          <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
+          <span class="rpc-health-chip" id="rpc-chip-failover">Failover active</span>
+          <span class="rpc-health-chip" id="rpc-chip-down">Provider down</span>
+        </div>
+        <div id="rpc-health-providers">
+          <div class="rpc-prov-row" data-provider="helius">
+            <span class="rpc-prov-name">Helius</span>
+            <span class="rpc-ep-pill" id="rpc-helius-primary">primary —</span>
+            <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
+            <span class="mint text-xs" id="rpc-helius-meta">—</span>
+          </div>
+          <div class="rpc-prov-row" data-provider="alchemy">
+            <span class="rpc-prov-name">Alchemy</span>
+            <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
+            <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
+            <span class="mint text-xs" id="rpc-alchemy-meta">—</span>
+          </div>
+        </div>
+        <p class="rpc-plain" id="rpc-health-plain">—</p>
       </div>
 
       <div class="card mt-2.5 sm:mt-3" id="lane-fight-overview-card">
@@ -25970,6 +26073,112 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       // RPC status
       const rpc = status.rpc || {};
+      function paintRpcHealthPanel(rpcObj) {
+        const summary = rpcObj && rpcObj.summary;
+        const setChip = function (id, on, kind) {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.classList.remove('is-on', 'is-warn', 'is-bad');
+          if (on) el.classList.add(kind || 'is-on');
+        };
+        setChip('rpc-chip-all', summary === 'all_healthy', 'is-on');
+        setChip('rpc-chip-degraded', summary === 'degraded', 'is-warn');
+        setChip(
+          'rpc-chip-failover',
+          summary === 'failover_active',
+          'is-warn'
+        );
+        setChip('rpc-chip-down', summary === 'provider_down', 'is-bad');
+        const plain = document.getElementById('rpc-health-plain');
+        if (plain) {
+          plain.textContent =
+            (rpcObj && rpcObj.plainLanguage) ||
+            (rpcObj && rpcObj.warning) ||
+            '—';
+        }
+        function paintProv(name) {
+          const pool =
+            (rpcObj && rpcObj.pools && rpcObj.pools[name]) || {};
+          const members = pool.members || [];
+          const bySlot = function (slot) {
+            return (
+              members.find(function (m) {
+                return m.slot === slot;
+              }) ||
+              members.find(function (m) {
+                return members.length === 1;
+              }) ||
+              null
+            );
+          };
+          const primary = bySlot('primary') || bySlot('solo');
+          const backup = bySlot('backup');
+          const paintPill = function (elId, mem, emptyLabel) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.classList.remove(
+              'is-healthy',
+              'is-degraded',
+              'is-down',
+              'is-active'
+            );
+            if (!mem) {
+              el.textContent = emptyLabel + ' (unset)';
+              return;
+            }
+            const st = mem.state || 'down';
+            el.classList.add(
+              st === 'healthy'
+                ? 'is-healthy'
+                : st === 'degraded'
+                  ? 'is-degraded'
+                  : 'is-down'
+            );
+            if (mem.isActive) el.classList.add('is-active');
+            el.textContent =
+              (mem.slot || emptyLabel) +
+              ' · ' +
+              (mem.host || mem.label || '—') +
+              (mem.latencyEwmaMs != null
+                ? ' · ' + Math.round(mem.latencyEwmaMs) + 'ms'
+                : '');
+            el.title =
+              (mem.label || '') +
+              ' · ' +
+              st +
+              (mem.lastError && mem.lastError !== 'none'
+                ? ' · last ' + mem.lastError
+                : '');
+          };
+          paintPill('rpc-' + name + '-primary', primary, 'primary');
+          paintPill('rpc-' + name + '-backup', backup, 'backup');
+          const meta = document.getElementById('rpc-' + name + '-meta');
+          if (meta) {
+            const fo =
+              pool.lastFailoverAt != null
+                ? 'fo ' +
+                  new Date(pool.lastFailoverAt).toLocaleTimeString()
+                : 'fo —';
+            const cnt =
+              pool.failoverCountRecent != null
+                ? '×' + pool.failoverCountRecent
+                : '';
+            const errMem =
+              members.find(function (m) {
+                return m.lastError && m.lastError !== 'none';
+              }) || null;
+            meta.textContent =
+              'active ' +
+              (pool.activeLabel || '—') +
+              ' · ' +
+              fo +
+              (cnt ? ' ' + cnt : '') +
+              (errMem ? ' · err ' + errMem.lastError : '');
+          }
+        }
+        paintProv('helius');
+        paintProv('alchemy');
+      }
       const activeEp = (rpc.endpoints || []).find(e => e.isActive) || {};
       const rpcActiveEl = document.getElementById('rpc-active');
       const rpcWrap = document.getElementById('rpc-status-wrap');
@@ -25994,6 +26203,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             : 'Active Solana RPC: ' + (rpc.active || '—') + latTip;
       }
       setStatusIcon(rpcIcon, rpc.ok === false ? 'activityBad' : 'activity');
+      try {
+        paintRpcHealthPanel(rpc);
+      } catch (_) {}
       const rpcLatEl = document.getElementById('rpc-latency');
       if (rpcLatEl) {
         const ms = activeEp.latencyMs != null ? Number(activeEp.latencyMs) : null;
@@ -33008,6 +33220,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionVoiceGen = 0;
     let _zionVoiceToggleLockUntil = 0;
     let _zionMicButtonsBound = false;
+    let _zionVoiceMediaStream = null;
+    let _zionVoiceLastPtrToggleAt = 0;
     const ZION_VOICE_SILENCE_MS = 3000;
     const ZION_VOICE_ACTIVE_FLOOR_MS = 5000;
     const ZION_VOICE_KEEPALIVE_MS = 10000;
@@ -33015,6 +33229,74 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const ZION_VOICE_MAX_FAILS = 3;
     const ZION_VOICE_RESTART_BASE_MS = 450;
     const ZION_VOICE_TOGGLE_DEBOUNCE_MS = 450;
+
+    function releaseZionVoiceMediaStream() {
+      const stream = _zionVoiceMediaStream;
+      _zionVoiceMediaStream = null;
+      if (!stream) return;
+      try {
+        const tracks = stream.getTracks ? stream.getTracks() : [];
+        for (let i = 0; i < tracks.length; i++) {
+          try { tracks[i].stop(); } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    /**
+     * iOS/Android: SpeechRecognition alone often never shows the OS mic indicator
+     * and silently fails after the first session. Hold a getUserMedia stream while
+     * the mic is armed so permission + green indicator stick and restarts work.
+     */
+    function primeZionVoiceMediaStreamFromGesture() {
+      if (_zionVoiceMediaStream) return;
+      const md = navigator.mediaDevices;
+      if (!md || typeof md.getUserMedia !== 'function') return;
+      try {
+        md.getUserMedia({ audio: true, video: false })
+          .then(function (stream) {
+            if (!_zionVoiceOn) {
+              try {
+                const tracks = stream.getTracks ? stream.getTracks() : [];
+                for (let i = 0; i < tracks.length; i++) {
+                  try { tracks[i].stop(); } catch (_) {}
+                }
+              } catch (_) {}
+              return;
+            }
+            if (_zionVoiceMediaStream && _zionVoiceMediaStream !== stream) {
+              releaseZionVoiceMediaStream();
+            }
+            _zionVoiceMediaStream = stream;
+            // Permission just granted — if SpeechRecognition never attached, start now.
+            if (
+              _zionVoiceOn &&
+              !_zionChatBusy &&
+              !_zionVoicePausedBusy &&
+              !_zionVoiceRec &&
+              !_zionVoiceStarting
+            ) {
+              try { startZionVoiceRecognition({ force: true }); } catch (_) {}
+            }
+            try { syncZionMicUi(); } catch (_) {}
+          })
+          .catch(function (err) {
+            const name = String((err && err.name) || '');
+            if (
+              name === 'NotAllowedError' ||
+              name === 'PermissionDeniedError' ||
+              name === 'SecurityError'
+            ) {
+              failZionVoiceSoft('Microphone permission denied');
+              return;
+            }
+            if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+              failZionVoiceSoft('No microphone available');
+              return;
+            }
+            // Some browsers still run Web Speech without an explicit stream.
+          });
+      } catch (_) {}
+    }
 
     function isZionVoiceMobileClient() {
       try {
@@ -33098,6 +33380,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceOn = false;
         _zionVoicePausedBusy = false;
         _zionVoiceRec = null;
+        try { releaseZionVoiceMediaStream(); } catch (__) {}
       }
       writeZionVoiceMicPref(false);
       paintZionVoiceError(text);
@@ -33424,6 +33707,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceActiveSince = 0;
         _zionVoiceKeepAliveUntil = 0;
         _zionVoiceFailCount = 0;
+        releaseZionVoiceMediaStream();
         if (persistOff) writeZionVoiceMicPref(false);
       }
       syncZionMicUi();
@@ -33526,6 +33810,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function startZionVoiceRecognition(opts) {
       const force = !!(opts && opts.force);
       const fromUserGesture = !!(opts && opts.fromUserGesture);
+      const reuseIfRunning = !!(opts && opts.reuseIfRunning);
       if (_zionVoiceStarting && !force) return;
       const Ctor = getZionSpeechRecognitionCtor();
       if (!Ctor) {
@@ -33536,6 +33821,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         failZionVoiceSoft('Voice needs HTTPS (or localhost)');
         return;
       }
+
+      // iOS: abort()+start() in the same gesture often kills recognition.
+      // Mode changes (wake → active) should reuse the live session.
+      if (
+        _zionVoiceRec &&
+        (reuseIfRunning || (fromUserGesture && !force)) &&
+        !_zionVoiceStarting
+      ) {
+        clearZionVoiceStartWatchdog();
+        _zionVoiceStarting = false;
+        try { syncZionMicUi(); } catch (_) {}
+        return;
+      }
+
       _zionVoiceStarting = true;
       clearZionVoiceRestartTimer();
       clearZionVoiceStartWatchdog();
@@ -33574,6 +33873,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       _zionVoiceRec = rec;
       _zionVoiceStarting = true;
       // Mobile Web Speech is unreliable with continuous=true (starts then dies).
+      // Keep a live MediaStream (primeZionVoiceMediaStreamFromGesture) so one-shot
+      // sessions can restart after onend without a fresh tap.
       const mobile = isZionVoiceMobileClient();
       rec.continuous = !mobile;
       rec.interimResults = true;
@@ -33649,6 +33950,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return;
         }
         if (err === 'audio-capture') {
+          // Often means OS mic session missing — re-prime then soft-retry.
+          if (mobile && _zionVoiceOn) {
+            try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
+            _zionVoiceFailCount += 1;
+            if (_zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
+              failZionVoiceSoft('No microphone available');
+              return;
+            }
+            if (!_zionChatBusy && !_zionVoicePausedBusy) {
+              scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS * _zionVoiceFailCount);
+            }
+            return;
+          }
           failZionVoiceSoft('No microphone available');
           return;
         }
@@ -33673,10 +33987,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         clearZionVoiceStartWatchdog();
         _zionVoiceStarting = false;
         if (_zionVoiceOn && !_zionChatBusy && !_zionVoicePausedBusy) {
-          // Mobile one-shot: restart promptly so tap-to-talk stays live
-          scheduleZionVoiceRestart(
-            mobile ? Math.max(180, ZION_VOICE_RESTART_BASE_MS / 2) : ZION_VOICE_RESTART_BASE_MS
-          );
+          // Mobile one-shot: restart promptly so wake-word / tap-to-talk stays live
+          const delay = mobile
+            ? (_zionVoiceMediaStream ? 120 : Math.max(180, ZION_VOICE_RESTART_BASE_MS / 2))
+            : ZION_VOICE_RESTART_BASE_MS;
+          scheduleZionVoiceRestart(delay);
         } else {
           try { syncZionMicUi(); } catch (_) {}
         }
@@ -33704,7 +34019,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         } catch (_) {}
         _zionVoiceStarting = false;
         scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS * 2);
-      }, ZION_VOICE_START_TIMEOUT_MS);
+      }, mobile && !_zionVoiceMediaStream
+        ? Math.max(ZION_VOICE_START_TIMEOUT_MS, 20000)
+        : ZION_VOICE_START_TIMEOUT_MS);
 
       try {
         // Must stay sync on the user-gesture stack (iOS / Android Chrome).
@@ -33738,6 +34055,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const now = Date.now();
       if (now < _zionVoiceToggleLockUntil) return;
       _zionVoiceToggleLockUntil = now + ZION_VOICE_TOGGLE_DEBOUNCE_MS;
+      const mobile = isZionVoiceMobileClient();
       try {
         if (!getZionSpeechRecognitionCtor()) {
           failZionVoiceSoft('Voice not supported in this browser');
@@ -33754,16 +34072,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             _zionVoiceLastError = '';
             _zionVoiceFailCount = 0;
             _zionVoiceStarting = false;
-            enterZionVoiceActive({ silent: true });
+            if (mobile) enterZionVoiceWakeIdle();
+            else enterZionVoiceActive({ silent: true });
+            try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
             startZionVoiceRecognition({ fromUserGesture: true, force: true });
             return;
           }
-          // Wake-idle (after keep-alive): tap re-arms active listen — don't force off
+          // Wake-idle (green): tap re-arms active listen — don't force off
           if (_zionVoiceMode === 'wake-idle') {
             _zionVoiceLastError = '';
             _zionVoiceFailCount = 0;
             enterZionVoiceActive({ silent: false });
-            startZionVoiceRecognition({ fromUserGesture: true, force: true });
+            // Reuse live session when possible — iOS dies on abort+start
+            startZionVoiceRecognition({
+              fromUserGesture: true,
+              reuseIfRunning: true,
+            });
             focusZionComposer(src);
             return;
           }
@@ -33777,7 +34101,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           // Switch source while on — jump to active listen for this composer
           _zionVoiceSource = src;
           enterZionVoiceActive({ silent: true });
-          startZionVoiceRecognition({ fromUserGesture: true, force: true });
+          startZionVoiceRecognition({
+            fromUserGesture: true,
+            reuseIfRunning: true,
+          });
           focusZionComposer(src);
           return;
         }
@@ -33792,8 +34119,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceLastError = '';
         _zionVoiceStarting = false;
         writeZionVoiceMicPref(true);
-        // Tap-to-talk: go straight to active listen (wake-word idle is for background only)
-        enterZionVoiceActive({ silent: false });
+        // Mobile: arm wake-idle (green) and listen for “Zion”.
+        // Desktop: tap-to-talk goes straight to active (existing UX).
+        if (mobile) {
+          enterZionVoiceWakeIdle();
+        } else {
+          enterZionVoiceActive({ silent: false });
+        }
+        try { syncZionMicUi(); } catch (_) {}
+        try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
         startZionVoiceRecognition({ fromUserGesture: true, force: true });
       } catch (err) {
         failZionVoiceSoft('Voice input failed: ' + ((err && err.message) || 'unknown'));
@@ -33810,6 +34144,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         let ptrDownX = 0;
         let ptrDownY = 0;
         let ptrActive = false;
+
+        function fireMicToggle(ev) {
+          if (btn.disabled || btn.classList.contains('is-unsupported')) return;
+          const src = btn.getAttribute('data-zion-mic') || 'widget';
+          try {
+            if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+          } catch (_) {}
+          toggleZionVoice(src);
+        }
+
         btn.addEventListener(
           'pointerdown',
           function (ev) {
@@ -33836,9 +34180,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const dx = Math.abs((Number(ev.clientX) || 0) - ptrDownX);
             const dy = Math.abs((Number(ev.clientY) || 0) - ptrDownY);
             if (dx > 14 || dy > 14) return;
-            try { ev.preventDefault(); } catch (_) {}
-            const src = btn.getAttribute('data-zion-mic') || 'widget';
-            toggleZionVoice(src);
+            _zionVoiceLastPtrToggleAt = Date.now();
+            fireMicToggle(ev);
           },
           { passive: false }
         );
@@ -33848,6 +34191,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ptrActive = false;
           },
           { passive: true }
+        );
+        // Click fallback for browsers that skip pointerup (some WebViews / iOS quirks).
+        btn.addEventListener(
+          'click',
+          function (ev) {
+            if (Date.now() - _zionVoiceLastPtrToggleAt < 500) {
+              try { ev.preventDefault(); } catch (_) {}
+              return;
+            }
+            fireMicToggle(ev);
+          },
+          { passive: false }
         );
         // Keyboard / accessibility fallback
         btn.addEventListener('keydown', function (ev) {
@@ -33871,6 +34226,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (_zionVoiceMode !== 'active' || Date.now() > _zionVoiceKeepAliveUntil) {
         enterZionVoiceWakeIdle();
       }
+      // Prefer wake-idle on restore so “Zion” works after reopen (esp. mobile).
+      if (isZionVoiceMobileClient() && _zionVoiceMode === 'active') {
+        enterZionVoiceWakeIdle();
+      }
+      try { syncZionMicUi(); } catch (_) {}
       if (!_zionVoiceRec && !_zionVoiceStarting) {
         try { startZionVoiceRecognition(); } catch (_) {}
       }

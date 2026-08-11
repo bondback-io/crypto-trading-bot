@@ -26,7 +26,11 @@ import {
   isPublicRpcUrl,
   isQuicknodeRpcUrl,
   isOfficialMainnetBetaRpcUrl,
+  inferRpcProvider,
+  inferRpcPoolSlot,
   type RpcLaneRole,
+  type RpcProviderKind,
+  type RpcPoolSlot,
 } from './rpcUrl';
 import {
   acquireRpcLane,
@@ -47,6 +51,8 @@ export interface RpcEndpoint {
   /** Optional dedicated websocket URL */
   wsUrl?: string;
   role?: RpcLaneRole;
+  provider?: RpcProviderKind;
+  slot?: RpcPoolSlot;
 }
 
 export interface RpcEndpointStats {
@@ -66,7 +72,45 @@ export interface RpcEndpointStats {
   isActive: boolean;
   /** Preferred endpoint for primary, secondary, or utility lane */
   lane?: RpcRole | null;
+  provider?: RpcProviderKind;
+  slot?: RpcPoolSlot;
 }
+
+export type RpcMemberHealthState = 'healthy' | 'degraded' | 'down';
+export type RpcLastErrorKind =
+  | '429'
+  | 'timeout'
+  | '5xx'
+  | 'quota'
+  | 'none'
+  | 'other';
+
+export interface RpcPoolMemberStats {
+  label: string;
+  slot: RpcPoolSlot;
+  host: string;
+  state: RpcMemberHealthState;
+  lastError: RpcLastErrorKind;
+  lastErrorDetail?: string;
+  lastSuccessAgeMs: number | null;
+  latencyEwmaMs: number | null;
+  isActive: boolean;
+}
+
+export interface RpcProviderPoolStats {
+  provider: 'helius' | 'alchemy';
+  members: RpcPoolMemberStats[];
+  activeLabel: string | null;
+  state: RpcMemberHealthState | 'empty';
+  lastFailoverAt: number | null;
+  failoverCountRecent: number;
+}
+
+export type RpcHealthSummary =
+  | 'all_healthy'
+  | 'degraded'
+  | 'failover_active'
+  | 'provider_down';
 
 interface EndpointState {
   endpoint: RpcEndpoint;
@@ -100,6 +144,10 @@ interface EndpointState {
   latencyStressedSince: number | null;
   /** Last time we logged latency soft-failover. */
   lastLatencyFailoverLogAt: number;
+  provider: RpcProviderKind;
+  slot: RpcPoolSlot;
+  /** Last successful probe/call timestamp */
+  lastSuccessAt: number | null;
 }
 
 let endpoints: EndpointState[] = [];
@@ -115,6 +163,16 @@ let activeSecondary = 0;
 let activeUtility = 0;
 /** Legacy single active pointer — mirrors primary lane for older callers */
 let activeIndex = 0;
+/** Indices belonging to Helius / Alchemy dual pools */
+let heliusPoolIndices: number[] = [];
+let alchemyPoolIndices: number[] = [];
+/** Round-robin cursors (read path) */
+let heliusRrCursor = 0;
+let alchemyRrCursor = 0;
+/** Recent failover counters (rolling 10m window) */
+const failoverEvents: Array<{ at: number; provider: string }> = [];
+let lastHeliusFailoverAt: number | null = null;
+let lastAlchemyFailoverAt: number | null = null;
 
 const rpcRoleAls = new AsyncLocalStorage<RpcRole>();
 /** Optional feature tag for call metering (wallet_poll, health_probe, …). */
@@ -285,13 +343,25 @@ const DEFAULT_FAILOVER_DOWN_MS = 30_000;
 /** Floor so env typos cannot collapse failover to zero. */
 const MIN_FAILOVER_DOWN_MS = 5_000;
 /** After a 429, leave the hot endpoint alone so failover can breathe. */
-const RATE_LIMIT_COOLDOWN_MS = 60_000;
+function rateLimitCooldownMs(): number {
+  const n = Number(process.env.RPC_HEALTH_COOLDOWN_MS);
+  if (Number.isFinite(n) && n >= 5_000) return Math.min(300_000, n);
+  return 60_000;
+}
 /** Dead/failing endpoints: base quarantine (escalates with streak). */
 const HARD_FAIL_COOLDOWN_MS = 5 * 60_000;
 const HARD_FAIL_COOLDOWN_MAX_MS = 20 * 60_000;
 /** Cap withRpc endpoint walks — avoid retry storms across every fallback. */
-const WITH_RPC_MAX_ATTEMPTS_CRITICAL = 4;
-const WITH_RPC_MAX_ATTEMPTS_OTHER = 3;
+function withRpcMaxAttemptsCritical(): number {
+  const n = Number(process.env.RPC_MAX_RETRIES);
+  if (Number.isFinite(n) && n >= 1) return Math.min(8, Math.floor(n) + 1);
+  return 4;
+}
+function withRpcMaxAttemptsOther(): number {
+  const n = Number(process.env.RPC_MAX_RETRIES);
+  if (Number.isFinite(n) && n >= 1) return Math.min(6, Math.floor(n));
+  return 3;
+}
 /** Don't re-log "marked unhealthy" more often than this. */
 const UNHEALTHY_LOG_THROTTLE_MS = 15_000;
 /** EWMA weight for new samples — dampens single getTransaction spikes in the UI. */
@@ -311,6 +381,7 @@ const LATENCY_STRESS_GRACE_MS = 15_000;
 const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
 /** Don't re-log latency piggyback more often than this. */
 const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
+const FAILOVER_COUNT_WINDOW_MS = 10 * 60_000;
 
 function latencyStressGraceMs(state: EndpointState | undefined): number {
   if (state && isPublicRpcUrl(state.endpoint.url)) {
@@ -328,6 +399,159 @@ function latencyStressGraceMs(state: EndpointState | undefined): number {
  */
 function isRpcRateLimitMessage(error: string): boolean {
   return /429|rate.?limit|-32429|too many requests/i.test(error);
+}
+
+function isRpcQuotaMessage(error: string): boolean {
+  return /credit|quota|insufficient|payment.?required|exceeded.*limit|out of credits|usage limit/i.test(
+    error
+  );
+}
+
+function isRpc5xxMessage(error: string): boolean {
+  return /\b5\d\d\b|internal server error|bad gateway|service unavailable|gateway timeout/i.test(
+    error
+  );
+}
+
+function classifyRpcError(error: string | undefined): RpcLastErrorKind {
+  if (!error) return 'none';
+  if (isRpcRateLimitMessage(error)) return '429';
+  if (isRpcQuotaMessage(error)) return 'quota';
+  if (/timeout|timed out|probe timeout/i.test(error)) return 'timeout';
+  if (isRpc5xxMessage(error)) return '5xx';
+  if (
+    /ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed/i.test(error)
+  ) {
+    return 'other';
+  }
+  return 'other';
+}
+
+function noteFailoverEvent(provider: string): void {
+  const now = Date.now();
+  failoverEvents.push({ at: now, provider });
+  while (
+    failoverEvents.length &&
+    now - failoverEvents[0]!.at > FAILOVER_COUNT_WINDOW_MS
+  ) {
+    failoverEvents.shift();
+  }
+  if (provider === 'helius') lastHeliusFailoverAt = now;
+  if (provider === 'alchemy') lastAlchemyFailoverAt = now;
+}
+
+function failoverCountRecent(provider?: string): number {
+  const now = Date.now();
+  return failoverEvents.filter(
+    (e) =>
+      now - e.at <= FAILOVER_COUNT_WINDOW_MS &&
+      (!provider || e.provider === provider)
+  ).length;
+}
+
+function slotLabel(slot: RpcPoolSlot): string {
+  if (slot === 'backup') return 'backup';
+  if (slot === 'primary') return 'primary';
+  return 'solo';
+}
+
+function isEndpointUsable(state: EndpointState | undefined): boolean {
+  if (!state) return false;
+  if (isEndpointRateLimited(state) || isEndpointHardFailed(state)) return false;
+  return state.healthy;
+}
+
+function poolIndicesFor(provider: 'helius' | 'alchemy'): number[] {
+  return provider === 'helius' ? heliusPoolIndices : alchemyPoolIndices;
+}
+
+/** Round-robin among healthy pool members (read path). */
+function pickRoundRobinFromPool(provider: 'helius' | 'alchemy'): number {
+  const idxs = poolIndicesFor(provider);
+  if (!idxs.length) return -1;
+  const cursor = provider === 'helius' ? heliusRrCursor : alchemyRrCursor;
+  for (let step = 0; step < idxs.length; step++) {
+    const i = idxs[(cursor + step) % idxs.length]!;
+    if (isEndpointUsable(endpoints[i])) {
+      if (provider === 'helius') heliusRrCursor = cursor + step + 1;
+      else alchemyRrCursor = cursor + step + 1;
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** Lowest EWMA among healthy (send / critical confirm path). */
+function pickHealthiestFromPool(provider: 'helius' | 'alchemy'): number {
+  const idxs = poolIndicesFor(provider);
+  let best = -1;
+  let bestMs = Number.POSITIVE_INFINITY;
+  for (const i of idxs) {
+    const e = endpoints[i];
+    if (!isEndpointUsable(e)) continue;
+    const ms = e!.latencyMs ?? 9999;
+    if (ms < bestMs) {
+      bestMs = ms;
+      best = i;
+    }
+  }
+  return best;
+}
+
+function pickSibling(
+  fromIndex: number,
+  provider: 'helius' | 'alchemy'
+): number {
+  const idxs = poolIndicesFor(provider);
+  for (const i of idxs) {
+    if (i === fromIndex) continue;
+    if (isEndpointUsable(endpoints[i])) return i;
+  }
+  return -1;
+}
+
+function logPoolFailover(
+  provider: 'helius' | 'alchemy',
+  fromIdx: number,
+  toIdx: number,
+  reason: string
+): void {
+  const from = endpoints[fromIdx];
+  const to = endpoints[toIdx];
+  if (!from || !to) return;
+  console.warn(
+    `rpc_failover provider=${provider} from=${slotLabel(from.slot)} to=${slotLabel(to.slot)} reason=${reason}`
+  );
+  noteFailoverEvent(provider);
+  const healthyLeft = poolIndicesFor(provider).filter((i) =>
+    isEndpointUsable(endpoints[i])
+  ).length;
+  if (healthyLeft <= 0) {
+    console.warn(`rpc_pool_degraded provider=${provider}`);
+  }
+}
+
+function endpointHostMasked(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.host;
+  } catch {
+    return url.slice(0, 40);
+  }
+}
+
+function memberHealthState(state: EndpointState): RpcMemberHealthState {
+  if (isEndpointHardFailed(state) || (!state.healthy && isEndpointRateLimited(state))) {
+    return 'down';
+  }
+  if (
+    !state.healthy ||
+    isEndpointRateLimited(state) ||
+    state.latencyStressedSince != null
+  ) {
+    return 'degraded';
+  }
+  return 'healthy';
 }
 
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {
@@ -521,8 +745,12 @@ function ensureEndpoints(): void {
           : endpoint.label === 'utility'
             ? 'utility'
             : 'fallback');
+    const provider =
+      endpoint.provider || inferRpcProvider(endpoint.url, endpoint.label);
+    const slot =
+      endpoint.slot || inferRpcPoolSlot(endpoint.label, provider);
     return {
-      endpoint: { ...endpoint, role },
+      endpoint: { ...endpoint, role, provider, slot },
       connection: new Connection(endpoint.url, {
         commitment: 'confirmed',
         wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
@@ -545,15 +773,34 @@ function ensureEndpoints(): void {
       lastUnhealthyLogAt: 0,
       latencyStressedSince: null,
       lastLatencyFailoverLogAt: 0,
+      provider,
+      slot,
+      lastSuccessAt: null,
     };
   });
+
+  heliusPoolIndices = endpoints
+    .map((e, i) => (e.provider === 'helius' ? i : -1))
+    .filter((i) => i >= 0);
+  alchemyPoolIndices = endpoints
+    .map((e, i) => (e.provider === 'alchemy' ? i : -1))
+    .filter((i) => i >= 0);
 
   preferredPrimary = Math.max(
     0,
     endpoints.findIndex((e) => e.role === 'primary')
   );
+  // Prefer first Helius pool member as Critical preferred when present
+  if (heliusPoolIndices.length) {
+    preferredPrimary = heliusPoolIndices[0]!;
+  }
   const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
-  preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
+  preferredSecondary =
+    alchemyPoolIndices.length > 0
+      ? alchemyPoolIndices[0]!
+      : secIdx >= 0
+        ? secIdx
+        : preferredPrimary;
   const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
   preferredUtility = pickPreferredUtilityIndex();
   if (utilIdx >= 0 && preferredUtility !== utilIdx) {
@@ -574,7 +821,7 @@ function ensureEndpoints(): void {
   console.log(
     `[rpc] Initialized ${endpoints.length} endpoint(s): ` +
       endpoints
-        .map((e) => `${e.endpoint.label}[${e.role}]`)
+        .map((e) => `${e.endpoint.label}[${e.role}/${e.provider}]`)
         .join(', ')
   );
   console.log(
@@ -586,6 +833,12 @@ function ensureEndpoints(): void {
       `(${maskUrlForLog(endpoints[preferredUtility]?.endpoint.url)})` +
       (preferredQuicknode >= 0
         ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
+        : '') +
+      (heliusPoolIndices.length > 1
+        ? ` · heliusPool×${heliusPoolIndices.length}`
+        : '') +
+      (alchemyPoolIndices.length > 1
+        ? ` · alchemyPool×${alchemyPoolIndices.length}`
         : '') +
       ` · cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
       (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
@@ -792,6 +1045,49 @@ function resolveIndexForRole(role: RpcRole): number {
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
   const latencySoft = latencyFailoverReady(pref);
+  const shareLoad = Boolean(config.rpc?.shareLoad);
+
+  // In-provider pool: RR (reads) / healthiest (primary send-ish) while healthy
+  const preferProvider: 'helius' | 'alchemy' | null =
+    role === 'primary' && heliusPoolIndices.length
+      ? 'helius'
+      : role === 'secondary' && alchemyPoolIndices.length
+        ? 'alchemy'
+        : null;
+
+  if (preferProvider && shareLoad) {
+    const feature = rpcFeatureAls.getStore() || '';
+    const sendish = /send|confirm|rawTransaction|legacy/i.test(feature);
+    const poolPick = sendish
+      ? pickHealthiestFromPool(preferProvider)
+      : pickRoundRobinFromPool(preferProvider);
+    if (poolPick >= 0) {
+      const picked = endpoints[poolPick]!;
+      if (
+        picked.healthy &&
+        !isEndpointRateLimited(picked) &&
+        !(poolPick === preferred && latencySoft)
+      ) {
+        // Soft latency on preferred: still allow sibling RR if sibling healthier
+        if (latencySoft && poolPick === preferred) {
+          const sib = pickSibling(preferred, preferProvider);
+          if (sib >= 0 && isFasterAlternate(pref!, endpoints[sib]!)) {
+            logPoolFailover(
+              preferProvider,
+              preferred,
+              sib,
+              'latency'
+            );
+            setActiveForRole(role, sib);
+            return sib;
+          }
+        } else if (!latencySoft || poolPick !== preferred) {
+          setActiveForRole(role, poolPick);
+          return poolPick;
+        }
+      }
+    }
+  }
 
   // Utility: if preferred is weak public but a stronger non-public/rpc-url is healthy, prefer it.
   if (role === 'utility' && pref && isWeakPublicUtilityUrl(pref.endpoint.url)) {
@@ -811,6 +1107,41 @@ function resolveIndexForRole(role: RpcRole): number {
 
   const downMs = downForMs(pref);
   const rateLimited = isEndpointRateLimited(pref);
+  const avoidPublicForCritical = shareLoad && role === 'primary';
+
+  // Sibling-first: same provider pool before sticky grace / cross-provider
+  if (pref && preferProvider) {
+    const hard = !pref.healthy || rateLimited || isEndpointHardFailed(pref);
+    if (hard || latencySoft) {
+      const sib = pickSibling(preferred, preferProvider);
+      if (sib >= 0) {
+        const reason = rateLimited
+          ? '429'
+          : isRpcQuotaMessage(pref.lastError || '')
+            ? 'quota'
+            : latencySoft
+              ? 'latency'
+              : classifyRpcError(pref.lastError);
+        logPoolFailover(preferProvider, preferred, sib, reason);
+        setActiveForRole(role, sib);
+        return sib;
+      }
+      // Whole provider unhealthy — try other paid pool
+      const otherProv: 'helius' | 'alchemy' =
+        preferProvider === 'helius' ? 'alchemy' : 'helius';
+      const cross =
+        role === 'primary' || role === 'secondary'
+          ? pickHealthiestFromPool(otherProv)
+          : pickRoundRobinFromPool(otherProv);
+      if (cross >= 0) {
+        console.warn(`rpc_pool_degraded provider=${preferProvider}`);
+        noteFailoverEvent(preferProvider);
+        setActiveForRole(role, cross);
+        return cross;
+      }
+    }
+  }
+
   // Sticky grace for hard failures only — latency soft-failover skips this wait.
   if (
     !latencySoft &&
@@ -820,9 +1151,6 @@ function resolveIndexForRole(role: RpcRole): number {
   ) {
     return preferred;
   }
-
-  const shareLoad = Boolean(config.rpc?.shareLoad);
-  const avoidPublicForCritical = shareLoad && role === 'primary';
 
   // Utility + public preferred is slow: try another public/fallback
   // before burning Alchemy/Helius/QuickNode CU on wallet polls.
@@ -1044,6 +1372,10 @@ export function getActiveEndpointLabel(role?: RpcRole): string {
 function recordSuccess(index: number, latencyMs: number): void {
   const state = endpoints[index];
   if (!state) return;
+  const wasUnhealthy =
+    !state.healthy ||
+    state.rateLimitedUntil > Date.now() ||
+    state.hardFailUntil > Date.now();
   state.successCount += 1;
   const sample = Math.max(0, latencyMs);
   state.lastCallLatencyMs = sample;
@@ -1059,6 +1391,7 @@ function recordSuccess(index: number, latencyMs: number): void {
   state.consecutiveFailures = 0;
   state.unhealthySince = null;
   state.lastCheckedAt = Date.now();
+  state.lastSuccessAt = Date.now();
   state.lastError = undefined;
   // Clear cooldowns after a real success (including mid-cooldown recovery).
   state.rateLimitedUntil = 0;
@@ -1079,6 +1412,9 @@ function recordSuccess(index: number, latencyMs: number): void {
     state.hardFailUntil = 0;
     // Decay streak on success so temporary blips don't lock forever.
     state.quarantineStreak = Math.max(0, (state.quarantineStreak || 0) - 1);
+  }
+  if (wasUnhealthy) {
+    console.log(`rpc_recovered endpoint=${state.endpoint.label}`);
   }
 }
 
@@ -1125,10 +1461,12 @@ function recordFailure(index: number, error: string): void {
   if (!state) return;
 
   const isRateLimit = isRpcRateLimitMessage(error);
+  const isQuota = isRpcQuotaMessage(error);
   const alreadyCooling = isEndpointRateLimited(state);
+  const cooldownMs = rateLimitCooldownMs();
 
   // Already in 429 cooldown — count quietly, never re-log / re-switch thrash.
-  if (isRateLimit && alreadyCooling) {
+  if ((isRateLimit || isQuota) && alreadyCooling) {
     state.failureCount += 1;
     state.consecutiveFailures += 1;
     state.lastError = error;
@@ -1142,14 +1480,15 @@ function recordFailure(index: number, error: string): void {
   state.lastError = error;
   state.lastCheckedAt = Date.now();
 
-  if (isRateLimit) {
-    state.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+  if (isRateLimit || isQuota) {
+    state.rateLimitedUntil = Date.now() + cooldownMs;
   } else if (
     /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|probe timeout/i.test(
       error
-    )
+    ) ||
+    isRpc5xxMessage(error)
   ) {
-    // Hard network/timeout failures — quarantine so health/withRpc stop hammering it.
+    // Hard network/timeout/5xx failures — quarantine so health/withRpc stop hammering it.
     if (state.consecutiveFailures >= 2) {
       enterQuarantine(state, error.slice(0, 120));
     }
@@ -1158,7 +1497,8 @@ function recordFailure(index: number, error: string): void {
     enterQuarantine(state, error.slice(0, 120));
   }
 
-  const threshold = isRateLimit ? 1 : config.rpc?.failureThreshold ?? 3;
+  const threshold =
+    isRateLimit || isQuota ? 1 : config.rpc?.failureThreshold ?? 3;
   if (state.consecutiveFailures < threshold) return;
 
   const wasHealthy = state.healthy;
@@ -1174,8 +1514,8 @@ function recordFailure(index: number, error: string): void {
     state.lastUnhealthyLogAt = now;
     console.warn(
       `[rpc] ${state.endpoint.label} marked unhealthy after ${state.consecutiveFailures} failures` +
-        (isRateLimit
-          ? ` (rate limited — cooling ${RATE_LIMIT_COOLDOWN_MS / 1000}s, failing over)`
+        (isRateLimit || isQuota
+          ? ` (${isQuota ? 'quota' : 'rate limited'} — cooling ${cooldownMs / 1000}s, failing over)`
           : '')
     );
   }
@@ -1208,6 +1548,12 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
   const state = endpoints[index];
   if (!state) return false;
 
+  const envTimeout = Number(process.env.RPC_TIMEOUT_MS);
+  const baseTimeout =
+    Number.isFinite(envTimeout) && envTimeout >= 2_000
+      ? Math.min(30_000, envTimeout)
+      : timeoutMs;
+
   // Don't probe a rate-limited endpoint — burns CU and re-triggers 429 storms.
   // Once the cooldown elapses, fall through so preferred lanes can recover.
   if (isEndpointRateLimited(state)) {
@@ -1230,8 +1576,8 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
   const recovering = !state.healthy || state.unhealthySince != null;
   const effectiveTimeout =
     recovering || !(gate.stressed || gate.backlog > 0)
-      ? timeoutMs
-      : Math.min(timeoutMs, 4_000);
+      ? baseTimeout
+      : Math.min(baseTimeout, 4_000);
 
   return runWithRpcFeature('health_probe', async () => {
     const start = Date.now();
@@ -1277,8 +1623,8 @@ async function withRpcInner<T>(
     /trade|migrat|send|confirm|swap|buy|sell/i.test(label) ||
     r === 'primary';
   const maxAttempts = critical
-    ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
-    : WITH_RPC_MAX_ATTEMPTS_OTHER;
+    ? withRpcMaxAttemptsCritical()
+    : withRpcMaxAttemptsOther();
 
   // Build attempt order: preferred → other paid → QuickNode → utility → remaining
   const order: number[] = [];
@@ -1427,6 +1773,12 @@ export function getRpcStats(): {
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null;
   utilityWeakPublic: boolean;
+  pools: {
+    helius: RpcProviderPoolStats;
+    alchemy: RpcProviderPoolStats;
+  };
+  summary: RpcHealthSummary;
+  plainLanguage: string;
 } {
   ensureEndpoints();
   const pIdx = resolveIndexForRole('primary');
@@ -1464,6 +1816,117 @@ export function getRpcStats(): {
     warning =
       'Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. Set a distinct RPC_SECONDARY.';
   }
+
+  const buildPoolStats = (
+    provider: 'helius' | 'alchemy'
+  ): RpcProviderPoolStats => {
+    const idxs = poolIndicesFor(provider);
+    const activeIdx =
+      provider === 'helius'
+        ? idxs.includes(pIdx)
+          ? pIdx
+          : idxs.find((i) => isEndpointUsable(endpoints[i])) ?? idxs[0] ?? -1
+        : idxs.includes(sIdx)
+          ? sIdx
+          : idxs.find((i) => isEndpointUsable(endpoints[i])) ?? idxs[0] ?? -1;
+    const members: RpcPoolMemberStats[] = idxs.map((i) => {
+      const s = endpoints[i]!;
+      return {
+        label: s.endpoint.label,
+        slot: s.slot,
+        host: endpointHostMasked(s.endpoint.url),
+        state: memberHealthState(s),
+        lastError: classifyRpcError(s.lastError),
+        lastErrorDetail: s.lastError?.slice(0, 80),
+        lastSuccessAgeMs:
+          s.lastSuccessAt != null ? Date.now() - s.lastSuccessAt : null,
+        latencyEwmaMs: s.latencyMs,
+        isActive: i === activeIdx,
+      };
+    });
+    let state: RpcProviderPoolStats['state'] = 'empty';
+    if (members.length) {
+      if (members.every((m) => m.state === 'healthy')) state = 'healthy';
+      else if (members.every((m) => m.state === 'down')) state = 'down';
+      else state = 'degraded';
+    }
+    return {
+      provider,
+      members,
+      activeLabel:
+        activeIdx >= 0 ? endpoints[activeIdx]?.endpoint.label ?? null : null,
+      state,
+      lastFailoverAt:
+        provider === 'helius' ? lastHeliusFailoverAt : lastAlchemyFailoverAt,
+      failoverCountRecent: failoverCountRecent(provider),
+    };
+  };
+
+  const heliusPoolStats = buildPoolStats('helius');
+  const alchemyPoolStats = buildPoolStats('alchemy');
+
+  let summary: RpcHealthSummary = 'all_healthy';
+  const heliusDown = heliusPoolStats.state === 'down';
+  const alchemyDown = alchemyPoolStats.state === 'down';
+  const anyDegraded =
+    heliusPoolStats.state === 'degraded' ||
+    alchemyPoolStats.state === 'degraded';
+  const anyFailover =
+    heliusPoolStats.failoverCountRecent > 0 ||
+    alchemyPoolStats.failoverCountRecent > 0 ||
+    pIdx !== preferredPrimary ||
+    (preferredSecondary !== preferredPrimary && sIdx !== preferredSecondary);
+  if (heliusDown || alchemyDown) summary = 'provider_down';
+  else if (anyFailover) summary = 'failover_active';
+  else if (anyDegraded) summary = 'degraded';
+
+  const buildPlainLanguage = (): string => {
+    if (
+      heliusPoolStats.state === 'empty' &&
+      alchemyPoolStats.state === 'empty'
+    ) {
+      return 'No Helius/Alchemy pools configured — using RPC_URL / public.';
+    }
+    if (heliusDown && alchemyPoolStats.state === 'healthy') {
+      return 'Both Helius endpoints degraded — traffic on Alchemy';
+    }
+    if (alchemyDown && heliusPoolStats.state === 'healthy') {
+      return 'Alchemy pool down — traffic on Helius';
+    }
+    if (heliusDown && alchemyDown) {
+      return 'Helius and Alchemy pools down — on public / mid-tier fallback';
+    }
+    const hActive = heliusPoolStats.members.find((m) => m.isActive);
+    if (
+      heliusPoolStats.members.length > 1 &&
+      hActive &&
+      hActive.slot === 'backup' &&
+      heliusPoolStats.members.some(
+        (m) => m.slot === 'primary' && m.state !== 'healthy'
+      )
+    ) {
+      const err =
+        heliusPoolStats.members.find((m) => m.slot === 'primary')?.lastError ||
+        'error';
+      return `Helius primary ${err === '429' ? 'rate-limited' : err === 'quota' ? 'out of credits' : 'degraded'} — using Helius backup`;
+    }
+    const aActive = alchemyPoolStats.members.find((m) => m.isActive);
+    if (
+      alchemyPoolStats.members.length > 1 &&
+      aActive &&
+      aActive.slot === 'backup'
+    ) {
+      return 'Alchemy primary degraded — using Alchemy backup';
+    }
+    if (alchemyPoolStats.state === 'healthy' && alchemyPoolStats.members.length) {
+      return heliusPoolStats.state === 'healthy'
+        ? 'Helius and Alchemy pools healthy'
+        : 'Alchemy pool healthy';
+    }
+    if (heliusPoolStats.state === 'healthy') return 'Helius pool healthy';
+    return warning || 'RPC lanes operating';
+  };
+  const plainLanguage = buildPlainLanguage();
 
   const gate = getRpcGateSnapshot();
   if (!warning && gate.stressed) {
@@ -1592,6 +2055,8 @@ export function getRpcStats(): {
         unhealthySince: s.unhealthySince,
         isActive: i === pIdx || i === sIdx || i === uIdx,
         lane,
+        provider: s.provider,
+        slot: s.slot,
       };
     }),
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
@@ -1603,6 +2068,9 @@ export function getRpcStats(): {
     quarantine,
     loadControl,
     utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
+    pools: { helius: heliusPoolStats, alchemy: alchemyPoolStats },
+    summary,
+    plainLanguage,
   };
 }
 
@@ -1690,14 +2158,25 @@ export async function sendOptimizedTransaction(
   serialized: Uint8Array,
   options: SendOptions = {}
 ): Promise<string> {
-  return withRpc('sendRawTransaction', async (conn) => {
-    const sig = await conn.sendRawTransaction(serialized, {
-      skipPreflight: options.skipPreflight ?? false,
-      maxRetries: options.maxRetries ?? 3,
-      preflightCommitment: 'confirmed',
-    });
-    await conn.confirmTransaction(sig, 'confirmed');
-    return sig;
+  return runWithRpcFeature('sendRawTransaction', async () => {
+    // Prefer healthiest Helius (or Alchemy) member for live sends
+    ensureEndpoints();
+    if (heliusPoolIndices.length) {
+      const best = pickHealthiestFromPool('helius');
+      if (best >= 0) setActiveForRole('primary', best);
+    } else if (alchemyPoolIndices.length) {
+      const best = pickHealthiestFromPool('alchemy');
+      if (best >= 0) setActiveForRole('primary', best);
+    }
+    return withRpc('sendRawTransaction', async (conn) => {
+      const sig = await conn.sendRawTransaction(serialized, {
+        skipPreflight: options.skipPreflight ?? false,
+        maxRetries: options.maxRetries ?? 3,
+        preflightCommitment: 'confirmed',
+      });
+      await conn.confirmTransaction(sig, 'confirmed');
+      return sig;
+    }, 'primary');
   });
 }
 
@@ -1917,7 +2396,9 @@ export function startRpcHealthMonitor(): void {
 
   const interval = Math.max(
     45_000,
-    config.rpc?.healthIntervalMs ?? 45_000
+    Number(process.env.RPC_HEALTH_PROBE_INTERVAL_MS) ||
+      config.rpc?.healthIntervalMs ||
+      45_000
   );
   let healthCycle = 0;
 
@@ -1963,6 +2444,16 @@ export function startRpcHealthMonitor(): void {
     }
     if (isPublic) {
       return cycle % 5 === 0;
+    }
+    // Helius pool: probe preferred every 3rd; rotate backup siblings
+    if (heliusPoolIndices.includes(index)) {
+      if (isPrimary || index === activePrimary) return cycle % 3 === 0;
+      return cycle % 4 === (heliusPoolIndices.indexOf(index) % 4);
+    }
+    // Alchemy pool: preferred every 2nd; rotate siblings
+    if (alchemyPoolIndices.includes(index)) {
+      if (isSecondary || index === activeSecondary) return cycle % 2 === 0;
+      return cycle % 5 === (alchemyPoolIndices.indexOf(index) % 5);
     }
     // Helius (critical): every 3rd cycle (~135s at 45s interval)
     if (isPrimary) return cycle % 3 === 0;

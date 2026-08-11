@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.270',
+    title: 'Dual free-tier RPC pools + Overview RPC Health',
+    sections: ['overview', 'execution', 'zion', 'knobs'],
+    items: [
+      'Helius/Alchemy primary+backup pools via HELIUS_RPC_URL(_BACKUP) / ALCHEMY_RPC_URL(_BACKUP) or existing API keys; in-pool RR + sibling-first failover.',
+      'Overview RPC Health panel (chips + pool pills) from /api/status; Zion uses pool plainLanguage one-liners.',
+      'Optional RPC_TIMEOUT_MS / RPC_MAX_RETRIES / RPC_HEALTH_COOLDOWN_MS / RPC_HEALTH_PROBE_INTERVAL_MS; send prefers healthiest paid endpoint.',
+    ],
+  },
+  {
     version: '1.2.269',
     title: 'Unstick armed signal path (MC unknown + Entry Skill)',
     sections: ['overview', 'microbots', 'scanners', 'learning'],
