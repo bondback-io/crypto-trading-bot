@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.269',
+    title: 'Unstick armed signal path (MC unknown + Entry Skill)',
+    sections: ['overview', 'microbots', 'scanners', 'learning'],
+    items: [
+      'Armed setup watches soft-pass unknown MC on Min MC Override (global $8k + anti-rug still final); known-below-min stays hard.',
+      'Governed armed soft-open no longer treats Min MC Override / unknown MC text as safety-hard (fixes blocked_second_pass freeze).',
+      'Zero-MFE pattern skip exempts armed_trigger; scratchy shorts filtered from the DOA share sample.',
+      'Steady/HWR empty-arm disc relief restored under E-boost; soft-movement vol floors aligned with softEligible.',
+    ],
+  },
+  {
     version: '1.2.268',
     title: 'Expectancy Repair Pack (40–45% path)',
     sections: ['overview', 'microbots', 'learning', 'tradecraft', 'scanners'],

@@ -414,9 +414,15 @@ function steadyVolFloor(source?: string): number {
 
 function evaluateSteadyArm(
   input: QualityParkEvalInput,
-  movementActive: boolean
+  movementActive: boolean,
+  opts?: { softMovement?: boolean }
 ): QualityParkEvalResult {
-  const chip: QualityMovementChip = movementActive ? 'active' : 'low_movement';
+  const softMovement = opts?.softMovement === true;
+  const chip: QualityMovementChip = movementActive
+    ? softMovement
+      ? 'soft_movement'
+      : 'active'
+    : 'low_movement';
   if (!isQualitySource(input.source)) {
     return {
       ok: false,
@@ -498,15 +504,19 @@ function evaluateSteadyArm(
     };
   }
   const volFloor = steadyVolFloor(input.source);
+  // Soft-movement uses same vol alive floor as softEligible (0.9×)
+  const effectiveVolFloor = softMovement
+    ? volFloor * QUALITY_MIN_VOL_ALIVE_MULT
+    : volFloor;
   const vol = Number(input.volumeH1Usd);
-  if (Number.isFinite(vol) && vol > 0 && vol < volFloor) {
+  if (Number.isFinite(vol) && vol > 0 && vol < effectiveVolFloor) {
     noteQualityParkDeny('steady_compounder', 'vol');
     return {
       ok: false,
       profileId: 'steady_compounder',
       armTag: null,
       denyKey: 'vol',
-      reason: `volH1 $${Math.round(vol)} < $${volFloor}`,
+      reason: `volH1 $${Math.round(vol)} < $${Math.round(effectiveVolFloor)}`,
       movementActive,
       chip,
       softArmOk: false,
@@ -532,16 +542,22 @@ function evaluateSteadyArm(
     denyKey: null,
     reason: STEADY_STRUCTURE_ARM,
     movementActive: true,
-    chip: 'active',
+    chip: softMovement ? 'soft_movement' : 'active',
     softArmOk: true,
   };
 }
 
 function evaluateHwrArm(
   input: QualityParkEvalInput,
-  movementActive: boolean
+  movementActive: boolean,
+  opts?: { softMovement?: boolean }
 ): QualityParkEvalResult {
-  const chip: QualityMovementChip = movementActive ? 'active' : 'low_movement';
+  const softMovement = opts?.softMovement === true;
+  const chip: QualityMovementChip = movementActive
+    ? softMovement
+      ? 'soft_movement'
+      : 'active'
+    : 'low_movement';
   const qf = DEFAULT_HWR_QUALITY_FILTER;
   if (!isQualitySource(input.source)) {
     return {
@@ -628,14 +644,17 @@ function evaluateHwrArm(
     };
   }
   const vol = Number(input.volumeH1Usd);
-  if (Number.isFinite(vol) && vol > 0 && vol < qf.minVolumeH1Usd) {
+  const hwrVolFloor = softMovement
+    ? qf.minVolumeH1Usd * QUALITY_MIN_VOL_ALIVE_MULT
+    : qf.minVolumeH1Usd;
+  if (Number.isFinite(vol) && vol > 0 && vol < hwrVolFloor) {
     noteQualityParkDeny('high_win_rate', 'vol');
     return {
       ok: false,
       profileId: 'high_win_rate',
       armTag: null,
       denyKey: 'vol',
-      reason: `HWR volH1 $${Math.round(vol)} < $${qf.minVolumeH1Usd}`,
+      reason: `HWR volH1 $${Math.round(vol)} < $${Math.round(hwrVolFloor)}`,
       movementActive,
       chip,
       softArmOk: false,
@@ -696,7 +715,7 @@ function evaluateHwrArm(
     denyKey: null,
     reason: HWR_QUALITY_ARM,
     movementActive: true,
-    chip: 'active',
+    chip: softMovement ? 'soft_movement' : 'active',
     softArmOk: false,
   };
 }
@@ -717,8 +736,9 @@ export function evaluateQualityParkArm(
     hasQualityStructure(input) &&
     canGrantSoftMovementArm(input.mint);
   const movementForArm = mov2.active || softCandidate;
+  const softOpts = softCandidate ? { softMovement: true } : undefined;
 
-  const hwr = evaluateHwrArm(input, movementForArm);
+  const hwr = evaluateHwrArm(input, movementForArm, softOpts);
   if (hwr.ok) {
     if (softCandidate) {
       return applySoftMovementGrant(hwr, input.mint);
@@ -726,7 +746,7 @@ export function evaluateQualityParkArm(
     return hwr;
   }
 
-  const steady = evaluateSteadyArm(input, movementForArm);
+  const steady = evaluateSteadyArm(input, movementForArm, softOpts);
   if (steady.ok) {
     if (softCandidate) {
       return applySoftMovementGrant(steady, input.mint);
@@ -734,7 +754,14 @@ export function evaluateQualityParkArm(
     return steady;
   }
 
+  // Prefer the real deny (vol/liq/confluence) over generic low_movement
   if (!mov2.active) {
+    const prefer = steady.denyKey && steady.denyKey !== 'low_movement'
+      ? steady
+      : hwr.denyKey && hwr.denyKey !== 'low_movement'
+        ? hwr
+        : null;
+    if (prefer) return prefer;
     return {
       ok: false,
       profileId: 'steady_compounder',
@@ -769,8 +796,7 @@ function applySoftMovementGrant(
       softMovement: false,
     };
   }
-  noteSoftMovementGrant();
-  noteQualityParkFunnel(base.profileId, 'soft_movement');
+  // Slot reserved by caller on successful arm (dipSetupWatch.registerSoftMovementArm)
   return {
     ...base,
     movementActive: true,

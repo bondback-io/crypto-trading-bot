@@ -7219,8 +7219,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           const failR = String(
             intended0?.failReason || intended0?.reason || ''
           ).toLowerCase();
+          // Known-below-min MC stays hard; unknown MC / Min MC Override text is
+          // NOT safety — armed watches already soft-pass unknown MC in floors.
           const isSafetyHard =
-            /honeypot|anti.?rug|rug|pump.?only|mc\s*\$?\s*\d+\s*<\s*(lane\s*)?min|unknown.*mc|min mc override|top10|token age|dead.?token|blacklist/i.test(
+            /honeypot|anti.?rug|rug|pump.?only|mc\s*\$?\s*\d+\s*<\s*(lane\s*)?min|top10|token age|dead.?token|blacklist/i.test(
               failR
             );
           governedArmedSoftOpen = !isSafetyHard;

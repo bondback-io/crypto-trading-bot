@@ -3238,17 +3238,19 @@ export function evaluateLaneEntryFloors(
   const globalMin = effectiveMinMarketCapUsd();
   const laneMinMc = Math.max(globalMin, profileMin);
 
-  // Hard lane MC floor. Unknown MC + profile Min MC Override → hard fail
-  // (migration / early enrich often lack MC; soft-pass let Trend stamp $19k
-  // mints despite a $1M override). Soft-pass only when no profile min is set.
+  // Hard lane MC floor. Unknown MC + profile Min MC Override → hard fail on
+  // discretionary (migration / early enrich often lack MC; soft-pass let Trend
+  // stamp $19k mints despite a $1M override). Armed setup watches soft-pass
+  // unknown MC — global $8k + anti-rug still apply at fill (1.2.269).
   if (laneMinMc > 0) {
     if (profileMin > 0 && (mc == null || mc <= 0)) {
-      return {
-        ok: false,
-        reason: `${def.name} Min MC Override $${Math.round(profileMin)} — MC unknown`,
-      };
-    }
-    if (mc != null && mc > 0 && mc < laneMinMc) {
+      if (!armedSetupWatchSoft) {
+        return {
+          ok: false,
+          reason: `${def.name} Min MC Override $${Math.round(profileMin)} — MC unknown`,
+        };
+      }
+    } else if (mc != null && mc > 0 && mc < laneMinMc) {
       return {
         ok: false,
         reason: `${def.name} MC $${Math.round(mc)} < lane min $${Math.round(laneMinMc)}`,

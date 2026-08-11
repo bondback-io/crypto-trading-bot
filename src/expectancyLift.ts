@@ -370,8 +370,18 @@ export function shouldBlockZeroMfePattern(input: {
   profileId?: string | null;
   entryStyle?: string | null;
   setupWatchFamily?: string | null;
+  /** Armed / setup-watch reclaim — never hard-block the vetted path. */
+  armedWatch?: boolean;
+  entryPath?: string | null;
 }): { block: boolean; reason?: string; share?: number; n?: number } {
   try {
+    // Do not freeze armed trigger→open on historical DOA share (1.2.269).
+    if (
+      input.armedWatch === true ||
+      String(input.entryPath || '') === 'armed_trigger'
+    ) {
+      return { block: false };
+    }
     const pid = String(input.profileId || '');
     if (!pid) return { block: false };
     const trades = collectExpectancyTrades()
@@ -379,17 +389,28 @@ export function shouldBlockZeroMfePattern(input: {
       .slice(-40);
     const n = trades.length;
     if (n < ZERO_MFE_PATTERN_MIN_N) return { block: false, n };
-    const zero = trades.filter((t) => (Number(t.maxRunupPct) || 0) <= 0).length;
-    const share = zero / n;
+    // Prefer decided non-scratch outcomes when hold was meaningful
+    const decided = trades.filter((t) => {
+      const holdSec = Math.max(0, Number(t.holdMs) || 0) / 1000;
+      const pnl = Number(t.pnlPct) || 0;
+      // Ignore tiny scratch exits that inflate zero-MFE rate
+      if (holdSec < 20 && pnl > -1 && pnl < 2) return false;
+      return true;
+    });
+    const sample = decided.length >= ZERO_MFE_PATTERN_MIN_N ? decided : trades;
+    const sn = sample.length;
+    if (sn < ZERO_MFE_PATTERN_MIN_N) return { block: false, n: sn };
+    const zero = sample.filter((t) => (Number(t.maxRunupPct) || 0) <= 0).length;
+    const share = zero / sn;
     if (share >= ZERO_MFE_PATTERN_SHARE) {
       return {
         block: true,
         share,
-        n,
-        reason: `zero_mfe_entry_blocked: ${(share * 100).toFixed(0)}% maxRunup≤0 over n=${n}`,
+        n: sn,
+        reason: `zero_mfe_entry_blocked: ${(share * 100).toFixed(0)}% maxRunup≤0 over n=${sn}`,
       };
     }
-    return { block: false, share, n };
+    return { block: false, share, n: sn };
   } catch {
     return { block: false };
   }
@@ -2057,13 +2078,9 @@ export function shouldLimitDiscretionaryMix(input: {
     if (!isMixThrottledDiscProfile(pid)) return { limit: false };
     // Steady/HWR: if their own arms are empty, allow limited quality disc fallback
     // rather than total silence while Scalper/MS arms occupy the book.
-    // Under E-boost, still throttle Steady/HWR disc to push armed dominance.
+    // Keep this even under E-boost so quality parks are not frozen (1.2.269).
     const eBoost = isArmedTargetEBoostActive();
-    if (
-      isSteadyHwr &&
-      countSteadyHwrTriggerableArmed() === 0 &&
-      !eBoost
-    ) {
+    if (isSteadyHwr && countSteadyHwrTriggerableArmed() === 0) {
       return { limit: false };
     }
     const kind = FAST_DISC_PROFILES.has(pid) ? 'fast' : 'quality';
@@ -2781,6 +2798,8 @@ export function evaluateEntrySelectivity(
       profileId: ctx.profileId,
       entryStyle,
       setupWatchFamily: ctx.setupWatchFamily,
+      armedWatch,
+      entryPath,
     });
     if (zm.block) {
       noteZeroMfeEntryBlocked();

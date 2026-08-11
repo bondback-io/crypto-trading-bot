@@ -848,6 +848,7 @@ function maybeArmQualityPark(
       noteQualityParkFunnel,
       clearDeadTapeStreak,
       registerSoftMovementArm,
+      noteSoftMovementGrant,
     } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
     const verdict = evaluateQualityParkArm(buildQualityParkEvalInput(w));
     w.movementActive = verdict.movementActive;
@@ -875,6 +876,8 @@ function maybeArmQualityPark(
         return false;
       }
       w.softMovement = true;
+      noteSoftMovementGrant();
+      noteQualityParkFunnel(verdict.profileId, 'soft_movement');
     } else {
       w.softMovement = false;
     }
