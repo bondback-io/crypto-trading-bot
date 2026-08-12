@@ -26,7 +26,11 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { getRpcLoadControlSnapshot, utilityPollScale } from './rpcLoadControl';
+import {
+  getRpcLoadControlSnapshot,
+  shouldHardSkipFavouritesForShed,
+  utilityPollScale,
+} from './rpcLoadControl';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
@@ -1910,7 +1914,7 @@ export function startMonitor(): void {
       return;
     }
     try {
-      if (getRpcLoadControlSnapshot().shedBackground) return;
+      if (shouldHardSkipFavouritesForShed()) return;
     } catch {
       /* */
     }
@@ -1996,7 +2000,7 @@ async function pollAllWallets(): Promise<void> {
     return;
   }
   try {
-    if (getRpcLoadControlSnapshot().shedBackground) {
+    if (shouldHardSkipFavouritesForShed()) {
       logBackgroundDeferred(
         'Favourites wallet watch',
         'background_rpc_throttled',
@@ -8598,6 +8602,24 @@ function getLastSignalAt(): number | null {
 /** Recent wallet-buy signal activity window for Overview signal light (15m). */
 const SIGNAL_LIVE_WINDOW_MS = 15 * 60 * 1000;
 
+/**
+ * Entries/Signals "RPC down" should follow Critical-lane health, not Utility
+ * quarantine alone. Emergency failover with a healthy active host stays clear.
+ */
+function isCriticalLaneRpcHealthy(
+  rpc: ReturnType<typeof getRpcStats>
+): boolean {
+  const crit = rpc.lanes?.critical;
+  if (crit) {
+    if (crit.healthy) return true;
+    // Preferred down but traffic already on a healthy emergency host.
+    if (crit.failover && rpc.ok) return true;
+    return false;
+  }
+  if (rpc.primary?.healthy) return true;
+  return Boolean(rpc.ok);
+}
+
 export function getSignalLightStatus(now = Date.now()): {
   state: 'live' | 'quiet' | 'paused' | 'off';
   label: string;
@@ -8609,7 +8631,7 @@ export function getSignalLightStatus(now = Date.now()): {
   const signals24h = getSignals24hCount();
   const ageMs = lastSignalAt != null ? now - lastSignalAt : null;
   const rpc = getRpcStats();
-  const rpcHealthy = Boolean(rpc.ok);
+  const rpcHealthy = isCriticalLaneRpcHealthy(rpc);
   const watching = getWalletsForPolling().length;
 
   // Paused is distinct from broken/off so Overview doesn't look "dead"
@@ -8687,7 +8709,7 @@ export function getEntryPathLightStatus(): {
 } {
   const blockers: string[] = [];
   const rpc = getRpcStats();
-  const rpcHealthy = Boolean(rpc.ok);
+  const rpcHealthy = isCriticalLaneRpcHealthy(rpc);
   const openCount = paperTrader.getOpenPositions().length;
   let maxPos = Math.max(1, Number(config.filters?.maxConcurrentPositions) || 1);
   try {

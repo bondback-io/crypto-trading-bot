@@ -10,6 +10,11 @@ export type RpcLoadControlSnapshot = {
   utilitySlowFactor: number;
   /** True when background work should yield for Critical/Helius. */
   shedBackground: boolean;
+  /**
+   * True when shedBackground is protecting a paid Critical lane.
+   * False when Critical is itself weak public — Favourites must not hard-stop.
+   */
+  shedProtectsPaidCritical: boolean;
   reasons: string[];
   secondarySkipsRecent: number;
   updatedAt: number;
@@ -27,6 +32,7 @@ let lastSnapshot: RpcLoadControlSnapshot = {
   scannerSlowFactor: 1,
   utilitySlowFactor: 1,
   shedBackground: false,
+  shedProtectsPaidCritical: false,
   reasons: [],
   secondarySkipsRecent: 0,
   updatedAt: Date.now(),
@@ -61,6 +67,8 @@ function recompute(external?: {
   utilityFailover?: boolean;
   primaryFailover?: boolean;
   primaryQueued?: number;
+  /** Preferred Critical is weak public (no paid Helius/Alchemy BACKUP). */
+  primaryWeakPublic?: boolean;
   /** @deprecated Lifetime gate skips — ignored (was locking scanner×3 forever). */
   secondarySkipped?: number;
   /** Secondary lane currently idle (heal skip-based ×3). */
@@ -81,6 +89,9 @@ function recompute(external?: {
   let utilitySlowFactor = 1;
   let shedBackground = false;
   const reasons: string[] = [];
+  // When Critical is itself public, latency/failover must not kill Favourites —
+  // there is no paid lane to protect.
+  const paidCritical = external?.primaryWeakPublic !== true;
 
   // Only the rolling 60s window — never lifetime lane.skipped (that never resets
   // and permanently pinned scanner×3 after the first boot burst).
@@ -105,16 +116,32 @@ function recompute(external?: {
 
   const pLat = external?.primaryLatencyMs;
   if (pLat != null && pLat >= 700) {
-    shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 3);
+    if (paidCritical) {
+      shedBackground = true;
+      reasons.push(`Critical latency ${Math.round(pLat)}ms → shed background`);
+    } else {
+      reasons.push(
+        `Critical (public) latency ${Math.round(pLat)}ms → soft slow only`
+      );
+    }
+    scannerSlowFactor = Math.max(scannerSlowFactor, paidCritical ? 3 : 2);
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-    reasons.push(`Critical latency ${Math.round(pLat)}ms → shed background`);
   } else if (pLat != null && pLat >= 450) {
-    shedBackground = true;
+    if (paidCritical) {
+      shedBackground = true;
+      reasons.push(`Critical latency ${Math.round(pLat)}ms → reduce scanners`);
+    } else {
+      reasons.push(
+        `Critical (public) latency ${Math.round(pLat)}ms → soft slow only`
+      );
+    }
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push(`Critical latency ${Math.round(pLat)}ms → reduce scanners`);
+    if (!paidCritical) {
+      utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
+    }
   }
 
+  // Queue backlog always protects trade entry (even on public Critical).
   if ((external?.primaryQueued ?? 0) > 0) {
     shedBackground = true;
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
@@ -122,10 +149,16 @@ function recompute(external?: {
   }
 
   if (external?.primaryFailover) {
-    shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-    reasons.push('Critical emergency failover → shed background');
+    if (paidCritical) {
+      shedBackground = true;
+      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+      utilitySlowFactor = Math.max(utilitySlowFactor, 2);
+      reasons.push('Critical emergency failover → shed background');
+    } else {
+      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+      utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
+      reasons.push('Critical public failover → soft slow only');
+    }
   }
 
   const uLat = external?.utilityLatencyMs;
@@ -151,10 +184,13 @@ function recompute(external?: {
     reasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
   }
 
+  const shedProtectsPaidCritical = shedBackground && paidCritical;
+
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
     utilitySlowFactor: Math.min(4, utilitySlowFactor),
     shedBackground,
+    shedProtectsPaidCritical,
     reasons,
     secondarySkipsRecent: secSkip,
     updatedAt: now,
@@ -166,6 +202,7 @@ function recompute(external?: {
       `[background_rpc_throttled] scanner×${lastSnapshot.scannerSlowFactor} ` +
         `utility×${lastSnapshot.utilitySlowFactor}` +
         (shedBackground ? ' shedBackground=ON' : '') +
+        (shedProtectsPaidCritical ? ' paidCritical' : '') +
         ` — ${reasons.join('; ')}`
     );
   }
@@ -180,6 +217,7 @@ export function updateRpcLoadSignals(signals: {
   utilityFailover?: boolean;
   primaryFailover?: boolean;
   primaryQueued?: number;
+  primaryWeakPublic?: boolean;
   secondarySkipped?: number;
   secondaryIdle?: boolean;
 }): void {
@@ -188,6 +226,18 @@ export function updateRpcLoadSignals(signals: {
 
 export function getRpcLoadControlSnapshot(): RpcLoadControlSnapshot {
   return { ...lastSnapshot, reasons: [...lastSnapshot.reasons] };
+}
+
+/**
+ * Hard-stop Favourites only when shed is protecting a paid Critical lane
+ * (or Critical queue is actively backing up). Soft slows still apply via
+ * utilitySlowFactor / soft-watch cap.
+ */
+export function shouldHardSkipFavouritesForShed(): boolean {
+  const snap = getRpcLoadControlSnapshot();
+  if (!snap.shedBackground) return false;
+  if (snap.shedProtectsPaidCritical) return true;
+  return snap.reasons.some((r) => /Critical queue > 0/i.test(r));
 }
 
 /** Effective scanner poll interval after adaptive slowdown. */

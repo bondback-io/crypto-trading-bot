@@ -2562,6 +2562,7 @@ export function startRpcHealthMonitor(): void {
           utilityFailover: activeUtility !== preferredUtility,
           primaryFailover: activePrimary !== preferredPrimary,
           primaryQueued: gate.lanes.primary.queued,
+          primaryWeakPublic: isWeakPublicUtilityUrl(pState?.endpoint.url),
           secondaryIdle:
             gate.lanes.secondary.inFlight === 0 &&
             gate.lanes.secondary.queued === 0,

@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.308',
+    title: 'Stop public Critical from silencing Favourites',
+    sections: ['execution', 'overview'],
+    items: [
+      'When Critical is weak public (no paid BACKUP/Helius), latency no longer sets shedBackground — Favourites keep polling at a soft-slowed rate instead of hard-stopping.',
+      'Entries/Signals “RPC down” follows Critical-lane health (emergency active host still counts), not Utility quarantine alone.',
+    ],
+  },
+  {
     version: '1.2.307',
     title: 'Alchemy BACKUP is sticky Critical; Helius + BACKUP2 emergency',
     sections: ['execution', 'overview'],
