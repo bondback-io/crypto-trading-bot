@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.309',
+    title: 'Alchemy dual-key sticky + Helius emergency-only honesty',
+    sections: ['execution', 'overview'],
+    items: [
+      'Critical stays on ALCHEMY_API_KEY_BACKUP and Scanners on ALCHEMY_API_KEY; preferred Critical never falls back to Helius unless RPC_CRITICAL_PROVIDER=helius.',
+      'Soft latency hops stay among Alchemy siblings only; hard Critical order is other Alchemy → BACKUP2 → Helius → Helius backup → QuickNode → public.',
+      'Idle Helius is not probed during sticky Alchemy operation; UI/summary stay all_sticky (no false emergency / preferred-DOWN / shed from quarantined Helius).',
+    ],
+  },
+  {
     version: '1.2.308',
     title: 'Stop public Critical from silencing Favourites',
     sections: ['execution', 'overview'],

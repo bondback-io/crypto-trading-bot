@@ -352,10 +352,13 @@ const LATENCY_EWMA_ALPHA = 0.22;
 const LATENCY_STRESS_MS = 500;
 /** EWMA below this → clear latency stress (hysteresis). */
 const LATENCY_RECOVER_MS = 320;
-/** Critical + dedicated emergency (Helius / BACKUP2): hop off preferred sooner. */
-const CRITICAL_BACKUP_STRESS_MS = 200;
-const CRITICAL_BACKUP_RECOVER_MS = 150;
-const CRITICAL_BACKUP_GRACE_MS = 3_000;
+/**
+ * Soft hop among Alchemy siblings only (never Helius) when Critical EWMA stays hot.
+ * Helius requires hard failover (429 / unhealthy ≥ failoverDownMs).
+ */
+const ALCHEMY_SIBLING_STRESS_MS = 450;
+const ALCHEMY_SIBLING_RECOVER_MS = 320;
+const ALCHEMY_SIBLING_GRACE_MS = 8_000;
 /**
  * Utility may soft-fail onto QuickNode only when preferred EWMA is this hot
  * (after public/fallback alternatives) and QN is not already serving Critical/Scanners.
@@ -368,11 +371,10 @@ const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
 /** Don't re-log latency piggyback more often than this. */
 const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
 
-function hasDedicatedCriticalBackup(): boolean {
+function hasAlchemySiblingFailover(): boolean {
   return (
-    preferredAlchemyBackup2 >= 0 ||
-    preferredHeliusBackup >= 0 ||
-    (preferredHelius >= 0 && preferredHelius !== preferredPrimary)
+    (preferredSecondary >= 0 && preferredSecondary !== preferredPrimary) ||
+    preferredAlchemyBackup2 >= 0
   );
 }
 
@@ -381,15 +383,22 @@ function isPreferredCriticalState(state: EndpointState | undefined): boolean {
 }
 
 function latencyStressThresholdMs(state: EndpointState | undefined): number {
-  if (hasDedicatedCriticalBackup() && isPreferredCriticalState(state)) {
-    return CRITICAL_BACKUP_STRESS_MS;
+  // Soft hop threshold only for Alchemy↔Alchemy sibling failover — never for Helius.
+  if (hasAlchemySiblingFailover() && isPreferredCriticalState(state)) {
+    const pref = endpoints[preferredPrimary];
+    if (pref && isAlchemyEndpoint(pref) && !isHeliusEndpoint(pref)) {
+      return ALCHEMY_SIBLING_STRESS_MS;
+    }
   }
   return LATENCY_STRESS_MS;
 }
 
 function latencyRecoverThresholdMs(state: EndpointState | undefined): number {
-  if (hasDedicatedCriticalBackup() && isPreferredCriticalState(state)) {
-    return CRITICAL_BACKUP_RECOVER_MS;
+  if (hasAlchemySiblingFailover() && isPreferredCriticalState(state)) {
+    const pref = endpoints[preferredPrimary];
+    if (pref && isAlchemyEndpoint(pref) && !isHeliusEndpoint(pref)) {
+      return ALCHEMY_SIBLING_RECOVER_MS;
+    }
   }
   return LATENCY_RECOVER_MS;
 }
@@ -398,8 +407,11 @@ function latencyStressGraceMs(state: EndpointState | undefined): number {
   if (state && isPublicRpcUrl(state.endpoint.url)) {
     return LATENCY_STRESS_GRACE_PUBLIC_MS;
   }
-  if (hasDedicatedCriticalBackup() && isPreferredCriticalState(state)) {
-    return CRITICAL_BACKUP_GRACE_MS;
+  if (hasAlchemySiblingFailover() && isPreferredCriticalState(state)) {
+    const pref = endpoints[preferredPrimary];
+    if (pref && isAlchemyEndpoint(pref) && !isHeliusEndpoint(pref)) {
+      return ALCHEMY_SIBLING_GRACE_MS;
+    }
   }
   return LATENCY_STRESS_GRACE_MS;
 }
@@ -1004,13 +1016,40 @@ function resolveIndexForRole(role: RpcRole): number {
   const shareLoad = Boolean(config.rpc?.shareLoad);
   const avoidPublicForCritical = shareLoad && role === 'primary';
 
-  // Emergency-only backups / cross-provider — never for Utility Favourites.
+  // Soft latency: Alchemy siblings only — never Helius / QuickNode on soft hop.
+  if (shareLoad && role === 'primary' && latencySoft && !rateLimited) {
+    const softOrder = [
+      preferredSecondary !== preferredPrimary ? preferredSecondary : -1,
+      preferredAlchemyBackup2,
+    ];
+    for (const alt of softOrder) {
+      if (
+        acceptFailoverTarget(
+          role,
+          preferred,
+          pref,
+          alt,
+          true,
+          false,
+          downMs,
+          avoidPublicForCritical
+        )
+      ) {
+        return alt;
+      }
+    }
+    // Stay sticky on preferred Alchemy rather than burning Helius on soft latency.
+    setActiveForRole(role, preferred);
+    return preferred;
+  }
+
+  // Hard failover (429 / preferred unhealthy ≥ grace) — Alchemy first, then Helius.
   if (shareLoad && role === 'primary') {
     const critOrder = [
+      preferredSecondary !== preferredPrimary ? preferredSecondary : -1,
       preferredAlchemyBackup2,
       preferredHelius !== preferredPrimary ? preferredHelius : -1,
       preferredHeliusBackup,
-      preferredSecondary,
       preferredQuicknode,
     ];
     for (const alt of critOrder) {
@@ -1020,7 +1059,7 @@ function resolveIndexForRole(role: RpcRole): number {
           preferred,
           pref,
           alt,
-          latencySoft,
+          false,
           rateLimited,
           downMs,
           avoidPublicForCritical
@@ -1031,8 +1070,35 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
   if (shareLoad && role === 'secondary') {
-    const scanOrder = [preferredAlchemyBackup2, preferredQuicknode];
+    // Soft: other Alchemy only. Hard: Alchemy Critical → BACKUP2 → Helius last.
+    const scanSoft = [
+      preferredPrimary,
+      preferredAlchemyBackup2,
+    ];
+    const scanHard = [
+      preferredPrimary,
+      preferredAlchemyBackup2,
+      preferredHelius !== preferredPrimary ? preferredHelius : -1,
+      preferredHeliusBackup,
+      preferredQuicknode,
+    ];
+    const scanOrder = latencySoft && !rateLimited ? scanSoft : scanHard;
     for (const alt of scanOrder) {
+      if (alt === preferred) continue;
+      // Soft path: never Helius for scanners.
+      if (latencySoft && !rateLimited && isHeliusEndpoint(endpoints[alt])) {
+        continue;
+      }
+      // Hard path: allow Helius only after both Alchemy paths are down.
+      if (
+        !latencySoft &&
+        isHeliusEndpoint(endpoints[alt]) &&
+        endpoints[preferredPrimary]?.healthy &&
+        !isEndpointRateLimited(endpoints[preferredPrimary]) &&
+        endpoints[preferred]?.healthy === false
+      ) {
+        // preferred scanners down but Critical Alchemy still healthy — use Critical Alchemy first (already in order)
+      }
       if (
         acceptFailoverTarget(
           role,
@@ -1799,22 +1865,22 @@ export function getRpcStats(): {
   if (!anyHealthy) {
     warning =
       'All RPC endpoints unhealthy — wallet buy detection is paused until RPC recovers. ' +
-      'Set a real Helius/QuickNode RPC_URL on Render (not a placeholder).';
+      'Set ALCHEMY_API_KEY_BACKUP + ALCHEMY_API_KEY on Render.';
   } else if (
     /mainnet-beta\.solana\.com|publicnode\.com/i.test(pActive?.endpoint.url || '')
   ) {
     warning =
-      'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Set HELIUS_API_KEY (+ ALCHEMY_API_KEY) for free faster failover.';
+      'Using a public Solana RPC on the Critical lane — rate limits can miss buys. Set ALCHEMY_API_KEY_BACKUP (+ ALCHEMY_API_KEY for Scanners).';
   } else if (pIdx !== preferredPrimary) {
-    warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
+    warning = `Critical lane emergency on ${pActive?.endpoint.label} (preferred ${pPref?.endpoint.label} down >${formatFailoverGrace(failoverDownMs())}).`;
   } else if (
     preferredSecondary !== preferredPrimary &&
     sIdx !== preferredSecondary
   ) {
-    warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
+    warning = `Scanners lane emergency on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
   } else if (share) {
     warning =
-      'Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. Set a distinct RPC_SECONDARY.';
+      'Critical and Scanners resolve to the same RPC — Zion shares CU with copy/signals. Set distinct ALCHEMY_API_KEY vs ALCHEMY_API_KEY_BACKUP.';
   }
 
   const gate = getRpcGateSnapshot();
@@ -1827,6 +1893,17 @@ export function getRpcStats(): {
 
   const quarantine = endpoints
     .filter((e) => isEndpointHardFailed(e))
+    // Idle Helius quarantine is expected under quota protect — do not surface as
+    // "RPC endpoints quarantined" noise while Alchemy Critical is sticky healthy.
+    .filter((e) => {
+      if (!isHeliusEndpoint(e)) return true;
+      const idx = endpoints.indexOf(e);
+      return (
+        idx === activePrimary ||
+        idx === activeSecondary ||
+        idx === preferredPrimary
+      );
+    })
     .map((e) => ({
       label: e.endpoint.label,
       remainingMs: Math.max(0, e.hardFailUntil - Date.now()),
@@ -1895,6 +1972,8 @@ export function getRpcStats(): {
   const scanFo =
     preferredSecondary !== preferredPrimary && sIdx !== preferredSecondary;
   const utilFo = uIdx !== preferredUtility;
+  // Honesty: emergency only when Critical/Scanners left their preferred sticky host.
+  // Idle quarantined Helius must not flip summary while Alchemy Critical is sticky.
   let summary: 'all_sticky' | 'degraded' | 'emergency_failover' | 'lane_down' =
     'all_sticky';
   if (!anyHealthy || pPref?.healthy === false) {
@@ -1903,7 +1982,9 @@ export function getRpcStats(): {
     summary = 'emergency_failover';
   } else if (
     gate.stressed ||
-    (loadControl && loadControl.shedBackground) ||
+    (loadControl &&
+      loadControl.shedBackground &&
+      loadControl.shedProtectsPaidCritical) ||
     (pPref?.latencyMs != null && pPref.latencyMs >= 450)
   ) {
     summary = 'degraded';
@@ -2426,6 +2507,43 @@ export function startRpcHealthMonitor(): void {
     if (!state) return false;
     // Quarantine: no probes until cooldown elapses (prevents retry storms).
     if (isEndpointHardFailed(state)) return false;
+
+    // Helius quota protect: never probe as Utility; idle emergency stays dark
+    // until Critical Alchemy is actually in hard emergency (or Helius is in use).
+    if (isHeliusEndpoint(state)) {
+      const inUse =
+        index === activePrimary ||
+        index === activeSecondary ||
+        index === activeUtility;
+      if (inUse) return true;
+      if (isEndpointRateLimited(state)) {
+        if (cycle % 16 === 0) {
+          console.warn(
+            `[rpc_helius_skipped_quota_protect] ${state.endpoint.label} rate-limited — no probe`
+          );
+        }
+        return false;
+      }
+      // Preferred Critical is sticky Alchemy and healthy → do not poke Helius.
+      const critPref = endpoints[preferredPrimary];
+      const critOnAlchemy =
+        critPref &&
+        isAlchemyEndpoint(critPref) &&
+        !isHeliusEndpoint(critPref) &&
+        preferredPrimary !== index;
+      const critEmergency = activePrimary !== preferredPrimary;
+      if (critOnAlchemy && !critEmergency) {
+        if (cycle % 16 === 0) {
+          console.warn(
+            `[rpc_helius_skipped_quota_protect] ${state.endpoint.label} idle — Alchemy Critical sticky`
+          );
+        }
+        return false;
+      }
+      // After Critical Alchemy hard-failed over: ultra-sparse recovery probes.
+      return cycle % 16 === 0;
+    }
+
     const isPublic = isPublicRpcUrl(state.endpoint.url);
     const isUtil = index === preferredUtility;
     const isPrimary = index === preferredPrimary;
@@ -2434,8 +2552,7 @@ export function startRpcHealthMonitor(): void {
     // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
     // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
     if (isUtil || index === activeUtility) {
-      // Preferred Utility already soft-failed elsewhere: probe it rarely so slow
-      // Triton/rpc-url getSlot samples do not keep painting the Multi-RPC row.
+      // Never treat Helius as utility (handled above).
       if (
         isUtil &&
         index !== activeUtility &&
@@ -2457,9 +2574,7 @@ export function startRpcHealthMonitor(): void {
     if (isPublic) {
       return cycle % 5 === 0;
     }
-    // Helius (critical): recovering while still sticky → every cycle;
-    // already on emergency failover → sparse (~8th, same as idle backups);
-    // healthy sticky → every 3rd (~135s).
+    // Preferred Critical (Alchemy): recovering → every cycle; healthy → every 3rd (~135s)
     if (isPrimary) {
       if (activePrimary !== preferredPrimary && index !== activePrimary) {
         return cycle % 8 === 0;
@@ -2467,8 +2582,7 @@ export function startRpcHealthMonitor(): void {
       if (!state.healthy || state.unhealthySince != null) return true;
       return cycle % 3 === 0;
     }
-    // Alchemy (scanners): recovering while sticky → every cycle;
-    // already failed over → sparse; healthy sticky → every 2nd (~90s).
+    // Alchemy Scanners: recovering → every cycle; healthy → every 2nd (~90s)
     if (isSecondary) {
       if (activeSecondary !== preferredSecondary && index !== activeSecondary) {
         return cycle % 8 === 0;
@@ -2476,7 +2590,7 @@ export function startRpcHealthMonitor(): void {
       if (!state.healthy || state.unhealthySince != null) return true;
       return cycle % 2 === 0;
     }
-    // Emergency backups: rare unless currently serving a lane
+    // Non-Helius emergency backups (BACKUP2): rare unless in use
     if (isEmergencyBackupIndex(index)) {
       const inUse =
         index === activePrimary ||
@@ -2507,13 +2621,18 @@ export function startRpcHealthMonitor(): void {
     if (Boolean(config.rpc?.shareLoad)) {
       push(preferredUtility);
       for (let i = 0; i < endpoints.length; i++) {
+        if (isHeliusEndpoint(endpoints[i])) continue;
         if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) push(i);
       }
       push(preferredPrimary);
       push(preferredSecondary);
       push(preferredQuicknode);
+      // Do not boot-probe idle Helius — quota protect.
     } else {
-      for (let i = 0; i < endpoints.length; i++) push(i);
+      for (let i = 0; i < endpoints.length; i++) {
+        if (isHeliusEndpoint(endpoints[i]) && i !== preferredPrimary) continue;
+        push(i);
+      }
     }
     for (const i of order) {
       await probeEndpoint(i);
@@ -2576,7 +2695,7 @@ export function startRpcHealthMonitor(): void {
   console.log(
     `[rpc] Health monitor started (every ${interval}ms` +
       (Boolean(config.rpc?.shareLoad)
-        ? '; sticky lanes: utility every tick, helius~3x, alchemy~2x, backups~8x unless in use'
+        ? '; sticky Alchemy: utility every tick; Helius emergency idle (no normal probes)'
         : '') +
       `) — endpoints: ` +
       endpoints.map((e) => `${e.endpoint.label}[${e.role}]`).join(', ') +

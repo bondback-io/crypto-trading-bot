@@ -2,22 +2,20 @@
  * RPC URL sanitization + free-tier multi-RPC manager.
  *
  * Priority order (failover pool):
- *   1. Helius Free     — HELIUS_RPC_URL or HELIUS_API_KEY
- *   2. Alchemy Free    — ALCHEMY_RPC_URL or ALCHEMY_API_KEY
- *   3. QuickNode       — QUICKNODE_RPC_URL (mid-tier paid failover for Critical/Scanners)
- *   4. RPC_URL / RPC_PRIMARY             — Triton api.mainnet.solana.com preferred for Utility
- *   5. Public Solana                     — https://solana-rpc.publicnode.com
- *   6. Official public fallback          — https://api.mainnet-beta.solana.com (last resort)
- *   7. RPC_SECONDARY                     — extra fallback (+ Zion lane when Alchemy unset)
- *   8. remaining RPC_FALLBACKS
- *   9. HELIUS + ALCHEMY_API_KEY_BACKUP2 / HELIUS_*_BACKUP — emergency only
+ *   1. Alchemy Critical — ALCHEMY_API_KEY_BACKUP (sticky Critical)
+ *   2. Alchemy Scanners — ALCHEMY_API_KEY (sticky Scanners)
+ *   3. ALCHEMY_API_KEY_BACKUP2 — emergency Alchemy sibling
+ *   4. HELIUS_API_KEY / HELIUS_API_KEY_BACKUP — emergency only (quota protect)
+ *   5. QuickNode — optional mid-tier hard failover
+ *   6. RPC_URL / publicnode / mainnet-beta — Utility + last resort
  *
  * Triple-lane layout (Share RPC load ON = sticky lanes):
- *   Primary (critical) → ALCHEMY_API_KEY_BACKUP — entries, migration, marks
- *   Secondary (scanners) → ALCHEMY_API_KEY — Market / Alpha / Zion
- *   Utility → publicnode, then Triton / RPC_URL, official mainnet-beta last resort
- * Emergency: HELIUS_API_KEY, ALCHEMY_API_KEY_BACKUP2, HELIUS_RPC_URL_BACKUP, QuickNode
- *   (hop off Critical when preferred EWMA > 200ms). If BACKUP unset, Helius stays Critical.
+ *   Primary (critical) → ALCHEMY_API_KEY_BACKUP
+ *   Secondary (scanners) → ALCHEMY_API_KEY
+ *   Utility → publicnode / Triton / RPC_URL (never Helius / paid backups)
+ * Emergency: Helius + BACKUP2 + QuickNode after repeated Critical hard failure.
+ * Soft latency hop stays on Alchemy siblings only.
+ * RPC_CRITICAL_PROVIDER=helius restores Helius as sticky Critical when quota resets.
  */
 
 /** Official Solana public RPC — last-resort only (often slow from Render/cloud). */
@@ -153,7 +151,17 @@ export function buildAlchemyBackup2RpcUrl(): string | null {
 
 export function isEmergencyBackupLabel(label: string | null | undefined): boolean {
   const l = (label || '').toLowerCase();
-  return l === 'helius-backup' || l === 'alchemy-backup2';
+  return (
+    l === 'helius' ||
+    l === 'helius-backup' ||
+    l === 'alchemy-backup2'
+  );
+}
+
+/** Sticky Critical provider policy. Default alchemy (Helius emergency-only). */
+export function getRpcCriticalProvider(): 'alchemy' | 'helius' {
+  const raw = (process.env.RPC_CRITICAL_PROVIDER || 'alchemy').trim().toLowerCase();
+  return raw === 'helius' ? 'helius' : 'alchemy';
 }
 
 /** True for QuickNode hosted Solana HTTP endpoints. */
@@ -340,8 +348,9 @@ export function normalizeRpcEndpoints(
 /**
  * Resolve dual-lane + free-tier multi-RPC list from env.
  *
- * Preferred primary:  ALCHEMY_API_KEY_BACKUP → else Helius → else RPC_URL → else public
- * Preferred secondary: Alchemy (if ≠ primary) → else RPC_SECONDARY → else next distinct
+ * Preferred primary:  ALCHEMY_API_KEY_BACKUP → else ALCHEMY_API_KEY → else RPC_URL → else public
+ *   (Helius only if RPC_CRITICAL_PROVIDER=helius)
+ * Preferred secondary: ALCHEMY_API_KEY (if ≠ primary) → else RPC_SECONDARY → else next distinct
  * Failover scan order follows the candidate array (see module header).
  */
 export function rpcEndpointsFromEnv(
@@ -355,6 +364,7 @@ export function rpcEndpointsFromEnv(
   const alchemyBackup = buildAlchemyBackupRpcUrl();
   const alchemyBackup2 = buildAlchemyBackup2RpcUrl();
   const quicknode = buildQuicknodeRpcUrl();
+  const criticalProvider = getRpcCriticalProvider();
 
   const rpcUrlRaw = (
     primaryEnv ??
@@ -458,8 +468,11 @@ export function rpcEndpointsFromEnv(
   // Pick preferred primary / secondary / utility URLs
   const alchemyCritical =
     alchemyBackup && alchemyBackup !== alchemy ? alchemyBackup : null;
+  // Default: never sticky-Critical on Helius (quota protect). Opt in via env.
   const primaryUrl =
-    alchemyCritical || helius || rpcUrl || alchemy || PUBLIC_SOLANA_RPC;
+    criticalProvider === 'helius'
+      ? helius || alchemyCritical || alchemy || rpcUrl || PUBLIC_SOLANA_RPC
+      : alchemyCritical || alchemy || rpcUrl || PUBLIC_SOLANA_RPC;
   let secondaryUrl = '';
   if (alchemy && alchemy !== primaryUrl) {
     secondaryUrl = alchemy;
@@ -575,11 +588,11 @@ export function rpcEndpointsFromEnv(
   console.log(
     `[rpc] Multi-RPC chain: ${chain}` +
       (alchemyCritical ? ' (Alchemy BACKUP sticky Critical)' : '') +
-      (alchemy ? ' (Alchemy sticky Scanners)' : '') +
+      (alchemy && alchemy !== primaryUrl ? ' (Alchemy sticky Scanners)' : '') +
       (helius
-        ? alchemyCritical
-          ? ' (Helius emergency)'
-          : ' (Helius sticky Critical — set ALCHEMY_API_KEY_BACKUP)'
+        ? criticalProvider === 'helius' && primaryUrl === helius
+          ? ' (Helius sticky Critical via RPC_CRITICAL_PROVIDER)'
+          : ' (Helius emergency-only)'
         : '') +
       (alchemyBackup2 ? ' (BACKUP2 emergency)' : '') +
       (heliusBackup ? ' (Helius backup emergency)' : '') +
@@ -592,10 +605,21 @@ export function rpcEndpointsFromEnv(
             ? ' (publicnode utility)'
             : '')
   );
-  if (!alchemyCritical) {
+  if (helius && criticalProvider !== 'helius') {
     console.warn(
-      '[rpc] ALCHEMY_API_KEY_BACKUP unset — Critical is not on the dedicated Alchemy key' +
-        (helius ? ' (using Helius). Set BACKUP as sticky Critical; Helius becomes emergency.' : '.')
+      '[rpc_helius_emergency_only] HELIUS_API_KEY registered but not preferred Critical — ' +
+        'idle until Alchemy Critical hard-fails (set RPC_CRITICAL_PROVIDER=helius to restore sticky Helius)'
+    );
+  }
+  if (!alchemyCritical && !alchemy) {
+    console.warn(
+      '[rpc] ALCHEMY_API_KEY_BACKUP / ALCHEMY_API_KEY unset — Critical/Scanners fall back to RPC_URL / public. Set dual Alchemy keys for sticky lanes.'
+    );
+  } else if (!alchemyCritical) {
+    console.warn(
+      '[rpc] ALCHEMY_API_KEY_BACKUP unset — Critical using ' +
+        (primaryUrl === alchemy ? 'ALCHEMY_API_KEY' : labelFor(primaryUrl, 'primary')) +
+        '. Set BACKUP as dedicated Critical key.'
     );
   }
   if (!alchemy) {
@@ -646,7 +670,7 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Public — Favourites soft-watch, import, activity; paid backups never used here',
   ],
   emergency: [
-    'HELIUS_API_KEY + ALCHEMY_API_KEY_BACKUP2 — hop when Critical EWMA > 200ms',
-    'HELIUS_RPC_URL_BACKUP + QuickNode — idle until repeated preferred failure',
+    'HELIUS_API_KEY + HELIUS_API_KEY_BACKUP — emergency only after Critical Alchemy hard-fails',
+    'ALCHEMY_API_KEY_BACKUP2 + QuickNode — idle until repeated preferred failure',
   ],
 } as const;
