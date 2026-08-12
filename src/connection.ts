@@ -26,6 +26,7 @@ import {
   isPublicRpcUrl,
   isQuicknodeRpcUrl,
   isOfficialMainnetBetaRpcUrl,
+  isEmergencyBackupLabel,
   type RpcLaneRole,
 } from './rpcUrl';
 import {
@@ -64,8 +65,8 @@ export interface RpcEndpointStats {
   lastCheckedAt: number | null;
   unhealthySince: number | null;
   isActive: boolean;
-  /** Preferred endpoint for primary, secondary, or utility lane */
-  lane?: RpcRole | null;
+  /** Lane tag for Multi-RPC table: critical | scanners | utility | emergency */
+  lane?: string | null;
 }
 
 interface EndpointState {
@@ -109,6 +110,9 @@ let preferredSecondary = 0;
 let preferredUtility = 0;
 /** Mid-tier paid failover (QuickNode); -1 when unset */
 let preferredQuicknode = -1;
+/** Emergency-only sibling indexes; -1 when unset. Never preferred lanes. */
+let preferredHeliusBackup = -1;
+let preferredAlchemyBackup = -1;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
@@ -612,6 +616,12 @@ function ensureEndpoints(): void {
     (e) =>
       e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
   );
+  preferredHeliusBackup = endpoints.findIndex(
+    (e) => e.endpoint.label === 'helius-backup'
+  );
+  preferredAlchemyBackup = endpoints.findIndex(
+    (e) => e.endpoint.label === 'alchemy-backup'
+  );
   activePrimary = preferredPrimary;
   activeSecondary = preferredSecondary;
   activeUtility = preferredUtility;
@@ -633,7 +643,13 @@ function ensureEndpoints(): void {
       (preferredQuicknode >= 0
         ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
         : '') +
-      ` · cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
+      (preferredHeliusBackup >= 0 || preferredAlchemyBackup >= 0
+        ? ` · emergency backups→${[preferredHeliusBackup, preferredAlchemyBackup]
+            .filter((i) => i >= 0)
+            .map((i) => endpoints[i]?.endpoint.label)
+            .join(',')}`
+        : '') +
+      ` · sticky lanes; emergency failover after ${formatFailoverGrace(failoverDownMs())} down` +
       (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
   );
   if (preferredPrimary === preferredSecondary) {
@@ -740,6 +756,12 @@ function downForMs(state: EndpointState | undefined): number {
 }
 
 function setActiveForRole(role: RpcRole, index: number): void {
+  const prev =
+    role === 'primary'
+      ? activePrimary
+      : role === 'secondary'
+        ? activeSecondary
+        : activeUtility;
   if (role === 'primary') {
     activePrimary = index;
     activeIndex = index;
@@ -748,13 +770,51 @@ function setActiveForRole(role: RpcRole, index: number): void {
   } else {
     activeUtility = index;
   }
+  if (prev === index) return;
+  const pref = preferredIndexFor(role);
+  const label = endpoints[index]?.endpoint.label || 'unknown';
+  const laneTag =
+    role === 'primary'
+      ? 'rpc_lane_critical'
+      : role === 'secondary'
+        ? 'rpc_lane_scanner'
+        : 'rpc_lane_utility';
+  const emergency =
+    index !== pref &&
+    (isEmergencyBackupIndex(index) ||
+      role === 'primary' ||
+      role === 'secondary');
+  if (emergency && role !== 'utility') {
+    console.warn(
+      `[rpc_emergency_failover] ${laneTag} → ${label} (preferred ${endpoints[pref]?.endpoint.label || pref})`
+    );
+  } else if (index === pref) {
+    console.log(`[${laneTag}] sticky ${label}`);
+  } else if (role === 'utility') {
+    console.log(`[${laneTag}] public hop → ${label}`);
+  }
+}
+
+function isEmergencyBackupIndex(index: number): boolean {
+  if (index < 0) return false;
+  if (index === preferredHeliusBackup || index === preferredAlchemyBackup) {
+    return true;
+  }
+  return isEmergencyBackupLabel(endpoints[index]?.endpoint.label);
 }
 
 function isHeliusEndpoint(state: EndpointState | undefined): boolean {
   if (!state) return false;
   const label = (state.endpoint.label || '').toLowerCase();
   const u = (state.endpoint.url || '').toLowerCase();
-  return label === 'helius' || u.includes('helius');
+  return label === 'helius' || label === 'helius-backup' || u.includes('helius');
+}
+
+function isAlchemyEndpoint(state: EndpointState | undefined): boolean {
+  if (!state) return false;
+  const label = (state.endpoint.label || '').toLowerCase();
+  const u = (state.endpoint.url || '').toLowerCase();
+  return label === 'alchemy' || label === 'alchemy-backup' || u.includes('alchemy');
 }
 
 /** Share ON: Scanners must not burn Helius (trade Critical only). */
@@ -787,6 +847,8 @@ function isQuicknodeBusyAsPaidFailover(): boolean {
  * QN is healthy/faster, and not already serving primary/secondary.
  */
 function utilityMayUseQuicknodeSoft(pref: EndpointState): boolean {
+  // Share ON: Favourites/activity never burn paid mid-tier / backups.
+  if (Boolean(config.rpc?.shareLoad)) return false;
   if (preferredQuicknode < 0) return false;
   if ((pref.latencyMs ?? 0) < UTILITY_QUICKNODE_STRESS_MS) return false;
   if (isQuicknodeBusyAsPaidFailover()) return false;
@@ -883,6 +945,50 @@ function resolveIndexForRole(role: RpcRole): number {
   const shareLoad = Boolean(config.rpc?.shareLoad);
   const avoidPublicForCritical = shareLoad && role === 'primary';
 
+  // Emergency-only backups / cross-provider — never for Utility Favourites.
+  if (shareLoad && role === 'primary') {
+    const critOrder = [
+      preferredHeliusBackup,
+      preferredSecondary,
+      preferredQuicknode,
+    ];
+    for (const alt of critOrder) {
+      if (
+        acceptFailoverTarget(
+          role,
+          preferred,
+          pref,
+          alt,
+          latencySoft,
+          rateLimited,
+          downMs,
+          avoidPublicForCritical
+        )
+      ) {
+        return alt;
+      }
+    }
+  }
+  if (shareLoad && role === 'secondary') {
+    const scanOrder = [preferredAlchemyBackup, preferredQuicknode];
+    for (const alt of scanOrder) {
+      if (
+        acceptFailoverTarget(
+          role,
+          preferred,
+          pref,
+          alt,
+          latencySoft,
+          rateLimited,
+          downMs,
+          avoidPublicForCritical
+        )
+      ) {
+        return alt;
+      }
+    }
+  }
+
   // Utility + public preferred is slow: try another public/fallback
   // before burning Alchemy/Helius/QuickNode CU on wallet polls.
   // Prefer stronger utility (rpc-url) over weak publicnode when both healthy.
@@ -902,6 +1008,9 @@ function resolveIndexForRole(role: RpcRole): number {
       }
       // Official mainnet-beta getSlot looks fast but wallet polls stay slow — never soft-pick it.
       if (isOfficialMainnetBetaRpcUrl(e.endpoint.url)) {
+        continue;
+      }
+      if (isEmergencyBackupIndex(i) || isHeliusEndpoint(e) || isAlchemyEndpoint(e)) {
         continue;
       }
       const isAltPublic =
@@ -1060,6 +1169,9 @@ function resolveIndexForRole(role: RpcRole): number {
     // Share+Utility: only public/fallback/utility (or QN if severe) — never Helius/Alchemy.
     if (shareLoad && role === 'utility') {
       const e = endpoints[i]!;
+      if (isEmergencyBackupIndex(i) || isHeliusEndpoint(e) || isAlchemyEndpoint(e)) {
+        continue;
+      }
       const isQn =
         e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url);
       const isAltPublic =
@@ -1558,6 +1670,46 @@ export function getRpcStats(): {
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null;
   utilityWeakPublic: boolean;
+  summary: 'all_sticky' | 'degraded' | 'emergency_failover' | 'lane_down';
+  plainLanguage: string;
+  lanes: {
+    critical: {
+      preferredLabel: string;
+      activeLabel: string;
+      host: string;
+      latencyMs: number | null;
+      healthy: boolean;
+      failover: boolean;
+      configured: boolean;
+      mode: 'sticky' | 'emergency' | 'unset';
+    };
+    scanners: {
+      preferredLabel: string;
+      activeLabel: string;
+      host: string;
+      latencyMs: number | null;
+      healthy: boolean;
+      failover: boolean;
+      configured: boolean;
+      mode: 'sticky' | 'emergency' | 'unset';
+    };
+    utility: {
+      preferredLabel: string;
+      activeLabel: string;
+      host: string;
+      latencyMs: number | null;
+      healthy: boolean;
+      failover: boolean;
+      configured: boolean;
+      mode: 'sticky' | 'public_hop';
+    };
+    emergency: Array<{
+      label: string;
+      host: string;
+      configured: boolean;
+      inUse: boolean;
+    }>;
+  };
 } {
   ensureEndpoints();
   // Observational only — do NOT resolve/failover or mutate adaptive load from
@@ -1655,6 +1807,120 @@ export function getRpcStats(): {
     }
   };
 
+  const hostOf = (url: string) => {
+    try {
+      return new URL(url).host || maskUrl(url);
+    } catch {
+      return maskUrl(url);
+    }
+  };
+  const critConfigured = Boolean(pPref && isHeliusEndpoint(pPref));
+  const scanConfigured = Boolean(sPref && isAlchemyEndpoint(sPref));
+  const critFo = pIdx !== preferredPrimary;
+  const scanFo =
+    preferredSecondary !== preferredPrimary && sIdx !== preferredSecondary;
+  const utilFo = uIdx !== preferredUtility;
+  let summary: 'all_sticky' | 'degraded' | 'emergency_failover' | 'lane_down' =
+    'all_sticky';
+  if (!anyHealthy || pPref?.healthy === false) {
+    summary = 'lane_down';
+  } else if (critFo || scanFo) {
+    summary = 'emergency_failover';
+  } else if (
+    gate.stressed ||
+    (loadControl && loadControl.shedBackground) ||
+    (pPref?.latencyMs != null && pPref.latencyMs >= 450)
+  ) {
+    summary = 'degraded';
+  }
+  const lanes = {
+    critical: {
+      preferredLabel: pPref?.endpoint.label || 'unset',
+      activeLabel: pActive?.endpoint.label || 'unset',
+      host: hostOf(pActive?.endpoint.url || ''),
+      latencyMs: pPref?.latencyMs ?? pActive?.latencyMs ?? null,
+      healthy: Boolean(pPref?.healthy),
+      failover: critFo,
+      configured: critConfigured,
+      mode: (!critConfigured
+        ? 'unset'
+        : critFo
+          ? 'emergency'
+          : 'sticky') as 'sticky' | 'emergency' | 'unset',
+    },
+    scanners: {
+      preferredLabel: sPref?.endpoint.label || 'unset',
+      activeLabel: sActive?.endpoint.label || 'unset',
+      host: hostOf(sActive?.endpoint.url || ''),
+      latencyMs: sPref?.latencyMs ?? sActive?.latencyMs ?? null,
+      healthy: Boolean(sPref?.healthy),
+      failover: scanFo,
+      configured: scanConfigured,
+      mode: (!scanConfigured
+        ? 'unset'
+        : scanFo
+          ? 'emergency'
+          : 'sticky') as 'sticky' | 'emergency' | 'unset',
+    },
+    utility: {
+      preferredLabel: uPref?.endpoint.label || 'public',
+      activeLabel: uActive?.endpoint.label || 'public',
+      host: hostOf(uActive?.endpoint.url || ''),
+      latencyMs: uActive?.latencyMs ?? uPref?.latencyMs ?? null,
+      healthy: Boolean(uPref?.healthy),
+      failover: utilFo,
+      configured: true,
+      mode: (utilFo ? 'public_hop' : 'sticky') as 'sticky' | 'public_hop',
+    },
+    emergency: [
+      {
+        label: 'helius-backup',
+        host:
+          preferredHeliusBackup >= 0
+            ? hostOf(endpoints[preferredHeliusBackup]?.endpoint.url || '')
+            : '',
+        configured: preferredHeliusBackup >= 0,
+        inUse: preferredHeliusBackup >= 0 && pIdx === preferredHeliusBackup,
+      },
+      {
+        label: 'alchemy-backup',
+        host:
+          preferredAlchemyBackup >= 0
+            ? hostOf(endpoints[preferredAlchemyBackup]?.endpoint.url || '')
+            : '',
+        configured: preferredAlchemyBackup >= 0,
+        inUse:
+          preferredAlchemyBackup >= 0 &&
+          (sIdx === preferredAlchemyBackup || pIdx === preferredAlchemyBackup),
+      },
+      {
+        label: 'quicknode',
+        host:
+          preferredQuicknode >= 0
+            ? hostOf(endpoints[preferredQuicknode]?.endpoint.url || '')
+            : '',
+        configured: preferredQuicknode >= 0,
+        inUse:
+          preferredQuicknode >= 0 &&
+          (pIdx === preferredQuicknode || sIdx === preferredQuicknode),
+      },
+    ],
+  };
+  const emergInUse = lanes.emergency.filter((e) => e.inUse).map((e) => e.label);
+  const plainLanguage = [
+    `Critical ${lanes.critical.activeLabel}` +
+      (lanes.critical.mode === 'emergency' ? ' EMERGENCY' : ' sticky') +
+      (lanes.critical.latencyMs != null
+        ? ` ${Math.round(lanes.critical.latencyMs)}ms`
+        : ''),
+    `Scanners ${lanes.scanners.activeLabel}` +
+      (lanes.scanners.mode === 'emergency' ? ' EMERGENCY' : ''),
+    `Utility ${lanes.utility.activeLabel}`,
+    emergInUse.length
+      ? `backups IN USE (${emergInUse.join(',')})`
+      : 'backups idle',
+  ].join(' · ');
+
   return {
     active: pActive?.endpoint.label || 'unknown',
     activeUrl: maskUrl(pActive?.endpoint.url || ''),
@@ -1686,13 +1952,19 @@ export function getRpcStats(): {
     supports: RPC_LANE_SUPPORTS,
     endpoints: endpoints.map((s, i) => {
       const total = s.successCount + s.failureCount;
-      let lane: RpcRole | null = null;
-      if (i === preferredPrimary) lane = 'primary';
+      let lane: string | null = null;
+      if (
+        isEmergencyBackupLabel(s.endpoint.label) ||
+        s.endpoint.label === 'quicknode' ||
+        isQuicknodeRpcUrl(s.endpoint.url)
+      ) {
+        lane = 'emergency';
+      } else if (i === preferredPrimary) lane = 'critical';
       else if (
         i === preferredSecondary &&
         preferredSecondary !== preferredPrimary
       )
-        lane = 'secondary';
+        lane = 'scanners';
       else if (
         i === preferredUtility &&
         preferredUtility !== preferredPrimary &&
@@ -1725,6 +1997,9 @@ export function getRpcStats(): {
     quarantine,
     loadControl,
     utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
+    summary,
+    plainLanguage,
+    lanes,
   };
 }
 
@@ -1927,10 +2202,13 @@ export async function getLiveBalanceSol(
   const pubkey = getWalletPublicKey(walletId);
   if (!pubkey) return null;
 
+  const read = () =>
+    withRpc('getBalance', (conn) => conn.getBalance(pubkey), 'primary');
+
   try {
-    const lamports = await withRpc('getBalance', (conn) =>
-      conn.getBalance(pubkey)
-    );
+    const lamports = Boolean(config.rpc?.shareLoad)
+      ? await runWithRpcRole('primary', read, 'live_balance')
+      : await read();
     return lamports / LAMPORTS_PER_SOL;
   } catch (err) {
     console.error('[connection] Failed to fetch balance:', err);
@@ -2096,6 +2374,15 @@ export function startRpcHealthMonitor(): void {
       if (!state.healthy || state.unhealthySince != null) return true;
       return cycle % 2 === 0;
     }
+    // Emergency backups: rare unless currently serving a lane
+    if (isEmergencyBackupIndex(index)) {
+      const inUse =
+        index === activePrimary ||
+        index === activeSecondary ||
+        index === activeUtility;
+      if (inUse) return true;
+      return cycle % 8 === 0;
+    }
     // QuickNode: rare when failing; otherwise every 4th (~180s) — avoid retry storms
     if (
       index === preferredQuicknode ||
@@ -2171,6 +2458,7 @@ export function startRpcHealthMonitor(): void {
           utilityLatencyMs: uState?.latencyMs ?? null,
           utilityWeakPublic: isWeakPublicUtilityUrl(uState?.endpoint.url),
           utilityFailover: activeUtility !== preferredUtility,
+          primaryFailover: activePrimary !== preferredPrimary,
           primaryQueued: gate.lanes.primary.queued,
           secondaryIdle:
             gate.lanes.secondary.inFlight === 0 &&
@@ -2185,7 +2473,7 @@ export function startRpcHealthMonitor(): void {
   console.log(
     `[rpc] Health monitor started (every ${interval}ms` +
       (Boolean(config.rpc?.shareLoad)
-        ? '; share-load: public/utility every tick, helius~3x, alchemy/quicknode~2x'
+        ? '; sticky lanes: utility every tick, helius~3x, alchemy~2x, backups~8x unless in use'
         : '') +
       `) — endpoints: ` +
       endpoints.map((e) => `${e.endpoint.label}[${e.role}]`).join(', ') +

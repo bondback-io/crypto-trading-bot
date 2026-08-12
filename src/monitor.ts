@@ -26,7 +26,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { utilityPollScale } from './rpcLoadControl';
+import { getRpcLoadControlSnapshot, utilityPollScale } from './rpcLoadControl';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
@@ -1909,6 +1909,11 @@ export function startMonitor(): void {
     ) {
       return;
     }
+    try {
+      if (getRpcLoadControlSnapshot().shedBackground) return;
+    } catch {
+      /* */
+    }
     void (async () => {
       await refreshAllWalletActivity();
       filterActiveWallets({ persistActiveOnly: false });
@@ -1989,6 +1994,18 @@ async function pollAllWallets(): Promise<void> {
       pollIntervalMs: config.pollIntervalMs,
     });
     return;
+  }
+  try {
+    if (getRpcLoadControlSnapshot().shedBackground) {
+      logBackgroundDeferred(
+        'Favourites wallet watch',
+        'background_rpc_throttled',
+        { pollIntervalMs: config.pollIntervalMs }
+      );
+      return;
+    }
+  } catch {
+    /* load control optional */
   }
 
   pollInFlight = true;
@@ -2156,43 +2173,53 @@ export async function checkWalletLastTrade(
 }> {
   const role = getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad));
   try {
-    return await runWithRpcRole(
-      role,
-      async () => {
-    try {
-      const pubkey = new PublicKey(address);
-      const conn = getConnection();
-      const cutoff30d = Math.floor((Date.now() - 30 * MS_PER_DAY) / 1000);
+    const deduped = await runDedupedRpcJob(
+      `${role}:activity:${address}`,
+      () =>
+        runWithRpcRole(
+          role,
+          async () => {
+            try {
+              const pubkey = new PublicKey(address);
+              const conn = getConnection();
+              const cutoff30d = Math.floor((Date.now() - 30 * MS_PER_DAY) / 1000);
 
-      const signatures = await conn.getSignaturesForAddress(pubkey, {
-        limit: 40,
-      });
+              const signatures = await conn.getSignaturesForAddress(pubkey, {
+                limit: 40,
+              });
 
-      if (signatures.length === 0) {
-        return { lastTradedAt: null, tradesLast30d: 0 };
-      }
+              if (signatures.length === 0) {
+                return { lastTradedAt: null, tradesLast30d: 0 };
+              }
 
-      const newest = signatures[0];
-      const lastTradedAt = newest.blockTime
-        ? newest.blockTime * 1000
-        : Date.now();
+              const newest = signatures[0];
+              const lastTradedAt = newest.blockTime
+                ? newest.blockTime * 1000
+                : Date.now();
 
-      const tradesLast30d = signatures.filter(
-        (s) => s.blockTime != null && s.blockTime >= cutoff30d
-      ).length;
+              const tradesLast30d = signatures.filter(
+                (s) => s.blockTime != null && s.blockTime >= cutoff30d
+              ).length;
 
-      return {
-        lastTradedAt,
-        tradesLast30d,
-        signature: newest.signature,
-      };
-    } catch (err) {
-      console.warn(`[monitor] Activity check failed for ${address.slice(0, 8)}…:`, err);
-      // Do NOT invent zeros — callers must keep prior lastTradedAt / tradesLast30d
-      return { lastTradedAt: null, tradesLast30d: 0, failed: true };
-    }
-  },
-      'activity'
+              return {
+                lastTradedAt,
+                tradesLast30d,
+                signature: newest.signature,
+              };
+            } catch (err) {
+              console.warn(
+                `[monitor] Activity check failed for ${address.slice(0, 8)}…:`,
+                err
+              );
+              return { lastTradedAt: null, tradesLast30d: 0, failed: true };
+            }
+          },
+          'activity'
+        ),
+      { join: true }
+    );
+    return (
+      deduped || { lastTradedAt: null, tradesLast30d: 0, failed: true }
     );
   } catch (err) {
     if (isRpcGateSkipError(err)) {
@@ -3098,27 +3125,34 @@ async function drainBuyEventQueue(): Promise<void> {
 async function fetchParsedTx(
   signature: string
 ): Promise<ParsedTransactionWithMeta | null> {
-  const conn = getConnection();
-  try {
-    const tx = await conn.getParsedTransaction(signature, {
-      maxSupportedTransactionVersion: 0,
-    });
-    if (tx) return tx;
-  } catch (err) {
-    console.warn(
-      `[monitor] getParsedTransaction failed ${signature.slice(0, 8)}…:`,
-      err instanceof Error ? err.message : err
-    );
-  }
-  // Brief retry — public RPCs often return null under load
-  await new Promise((r) => setTimeout(r, 250));
-  try {
-    return await getConnection().getParsedTransaction(signature, {
-      maxSupportedTransactionVersion: 0,
-    });
-  } catch {
-    return null;
-  }
+  const role = getRpcRoleFor('wallet_poll', Boolean(config.rpc?.shareLoad));
+  const out = await runDedupedRpcJob(
+    `${role}:getParsedTransaction:${signature}`,
+    async () => {
+      const conn = getConnection();
+      try {
+        const tx = await conn.getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 0,
+        });
+        if (tx) return tx;
+      } catch (err) {
+        console.warn(
+          `[monitor] getParsedTransaction failed ${signature.slice(0, 8)}…:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        return await getConnection().getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 0,
+        });
+      } catch {
+        return null;
+      }
+    },
+    { join: true }
+  );
+  return out ?? null;
 }
 
 async function pollWallet(

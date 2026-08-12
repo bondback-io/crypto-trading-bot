@@ -295,6 +295,7 @@ export function isRpcGateSkipError(err: unknown): err is RpcGateSkipError {
 
 /** In-flight dedupe: same key shares one promise; later callers await or skip. */
 const inflightJobs = new Map<string, Promise<unknown>>();
+let lastDedupLogAt = 0;
 
 export async function runDedupedRpcJob<T>(
   key: string,
@@ -308,6 +309,10 @@ export async function runDedupedRpcJob<T>(
       lanes[roleHint].deduped += 1;
     } else {
       lanes.utility.deduped += 1;
+    }
+    if (Date.now() - lastDedupLogAt > 15_000) {
+      lastDedupLogAt = Date.now();
+      console.warn(`[duplicate_rpc_suppressed] ${String(key).slice(0, 96)}`);
     }
     if (opts?.join === false) return undefined;
     return (await existing) as T;

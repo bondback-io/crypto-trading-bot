@@ -273,6 +273,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       color: #fca5a5;
       background: rgba(127, 29, 29, 0.25);
     }
+    .rpc-health-panel .rpc-lane-grid {
+      display: flex;
+      flex-direction: column;
+    }
     .rpc-health-panel .rpc-prov-row {
       display: flex;
       flex-wrap: wrap;
@@ -10852,39 +10856,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card rpc-health-panel" id="rpc-health-panel">
-          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Live Helius/Alchemy pool status: primary+backup load share and failover. Hosts only — API keys never shown. Refreshes with the dashboard status poll."></span></div>
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Sticky lanes: Critical=Helius, Scanners=Alchemy, Utility=public. Backups are emergency-only. Hosts only — API keys never shown."></span></div>
           <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
-            <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
+            <span class="rpc-health-chip" id="rpc-chip-all">All sticky</span>
             <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
-            <span class="rpc-health-chip" id="rpc-chip-failover">Failover active</span>
-            <span class="rpc-health-chip" id="rpc-chip-down">Provider down</span>
+            <span class="rpc-health-chip" id="rpc-chip-failover">Emergency failover</span>
+            <span class="rpc-health-chip" id="rpc-chip-down">Lane down</span>
           </div>
-          <div id="rpc-health-providers">
-            <div class="rpc-prov-row" data-provider="helius">
-              <span class="rpc-prov-name">Helius</span>
-              <div class="rpc-prov-pills">
-                <span class="rpc-ep-pill" id="rpc-helius-primary">primary —</span>
-                <span class="rpc-ep-pill" id="rpc-helius-backup">backup —</span>
-              </div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-helius-meta">—</span>
+          <div id="rpc-health-providers" class="rpc-lane-grid">
+            <div class="rpc-prov-row" data-lane="critical">
+              <span class="rpc-prov-name">Critical</span>
+              <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-critical-pill">—</span></div>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-critical-meta">Helius sticky</span>
             </div>
-            <div class="rpc-share-mode" id="rpc-helius-share">—</div>
-            <div class="rpc-prov-row" data-provider="alchemy">
-              <span class="rpc-prov-name">Alchemy</span>
-              <div class="rpc-prov-pills">
-                <span class="rpc-ep-pill" id="rpc-alchemy-primary">primary —</span>
-                <span class="rpc-ep-pill" id="rpc-alchemy-backup">backup —</span>
-              </div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-alchemy-meta">—</span>
+            <div class="rpc-prov-row" data-lane="scanners">
+              <span class="rpc-prov-name">Scanners</span>
+              <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-scanners-pill">—</span></div>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-scanners-meta">Alchemy sticky</span>
             </div>
-            <div class="rpc-share-mode" id="rpc-alchemy-share">—</div>
+            <div class="rpc-prov-row" data-lane="utility">
+              <span class="rpc-prov-name">Utility</span>
+              <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-utility-pill">—</span></div>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-utility-meta">public — paid backups not used</span>
+            </div>
+            <div class="rpc-prov-row" data-lane="emergency">
+              <span class="rpc-prov-name">Emergency</span>
+              <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-emergency-pill">idle</span></div>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">backups unused until repeated primary failure</span>
+            </div>
           </div>
           <p class="rpc-plain" id="rpc-health-plain">—</p>
         </div>
 
         <div class="card" id="rpc-status-card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Includes Helius/Alchemy backup endpoints when configured. Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
-          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Sticky lanes when Share is ON: Critical=Helius, Scanners=Alchemy, Utility=public. Backups (HELIUS/ALCHEMY_RPC_URL_BACKUP) are emergency-only after repeated preferred failure. Off dumps everything onto primary — not recommended."></span></div>
+          <div class="toggle-row mb-2"><span title="ON = sticky Helius/Alchemy/public lanes (recommended). OFF = dump all work onto primary — not recommended.">Share RPC load (sticky lanes)</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
               <span>Soft watch cap</span>
@@ -10894,17 +10900,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
+            <div class="mb-1"><strong style="color:#34d399">Critical → Helius (sticky)</strong> — entries, turbo, migration, live balance / marks</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy (sticky)</strong> — Market / Alpha / Zion</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites soft-watch, import, activity (never paid backups)</div>
+            <div class="mb-1"><strong style="color:#fca5a5">Emergency</strong> — HELIUS/ALCHEMY_RPC_URL_BACKUP + QuickNode after repeated preferred failure</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Classic three-lane RPC (Share ON)</strong> — Restored to 1.2.262-era stack: Helius Critical (<code>HELIUS_RPC_URL</code> / <code>HELIUS_API_KEY</code>) · Alchemy Scanners (<code>ALCHEMY_RPC_URL</code> / <code>ALCHEMY_API_KEY</code>) · Utility public Solana (<code>RPC_URL</code>). Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Under Share ON, Scanners never fail onto Helius (QuickNode/public instead). Status polls are observational — they do not flip lanes. Soft-watch starts after ~45s post-deploy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Sticky three-lane RPC (Share ON, recommended)</strong> — Critical = Helius, Scanners = Alchemy, Utility = public. Backups are idle until the preferred lane fails repeatedly (or 429). No equal share-load across backups.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Share OFF</strong> — dumps most work onto primary (not recommended; burns Helius).</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email, GMGN/Kolscan HTTP, DexScreener marks.</div>
+            <div class="mint">Status polls are observational. Soft-watch starts ~45s after deploy. Under stress, Favourites/scanners shed automatically.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -26388,7 +26393,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         // that stuck slim-refresh forever while Helius showed DOWN and piggyback worked.
         window._rpcStressed = Boolean(
           rpc &&
-            (rpc.summary === 'failover_active' ||
+            (rpc.summary === 'emergency_failover' ||
+              rpc.summary === 'lane_down' ||
+              rpc.summary === 'failover_active' ||
               rpc.summary === 'provider_down' ||
               rpc.summary === 'degraded' ||
               (rpc.gate && rpc.gate.stressed) ||
@@ -26809,14 +26816,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           el.classList.remove('is-on', 'is-warn', 'is-bad');
           if (on) el.classList.add(kind || 'is-on');
         };
-        setChip('rpc-chip-all', summary === 'all_healthy', 'is-on');
+        const lanes = (rpcObj && rpcObj.lanes) || {};
+        const critFo = Boolean(lanes.critical && lanes.critical.failover);
+        const scanFo = Boolean(lanes.scanners && lanes.scanners.failover);
+        setChip('rpc-chip-all', summary === 'all_sticky' || summary === 'all_healthy', 'is-on');
         setChip('rpc-chip-degraded', summary === 'degraded', 'is-warn');
-        setChip(
-          'rpc-chip-failover',
-          summary === 'failover_active',
-          'is-warn'
-        );
-        setChip('rpc-chip-down', summary === 'provider_down', 'is-bad');
+        setChip('rpc-chip-failover', summary === 'emergency_failover' || critFo || scanFo, 'is-warn');
+        setChip('rpc-chip-down', summary === 'lane_down' || summary === 'provider_down', 'is-bad');
         const plain = document.getElementById('rpc-health-plain');
         if (plain) {
           plain.textContent =
@@ -26824,176 +26830,77 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (rpcObj && rpcObj.warning) ||
             '—';
         }
-        function paintProv(name) {
-          const pool =
-            (rpcObj && rpcObj.pools && rpcObj.pools[name]) || {};
-          const members = pool.members || [];
-          const bySlot = function (slot, allowSoloFallback) {
-            const exact = members.find(function (m) {
-              return m.slot === slot;
-            });
-            if (exact) return exact;
-            if (allowSoloFallback && members.length === 1) {
-              return members[0];
+        function paintLaneCard(key, unsetHint) {
+          const row = lanes[key] || {};
+          const pill = document.getElementById('rpc-lane-' + key + '-pill');
+          const meta = document.getElementById('rpc-lane-' + key + '-meta');
+          if (pill) {
+            pill.classList.remove('is-healthy', 'is-degraded', 'is-down', 'is-active');
+            if (row.mode === 'unset' || row.configured === false) {
+              pill.classList.add('is-down');
+              pill.textContent = unsetHint || 'unset';
+            } else if (row.mode === 'emergency') {
+              pill.classList.add('is-degraded', 'is-active');
+              pill.textContent =
+                (row.activeLabel || '—') +
+                (row.latencyMs != null ? ' · ' + Math.round(row.latencyMs) + 'ms' : '') +
+                ' · emergency';
+            } else {
+              pill.classList.add(row.healthy === false ? 'is-down' : 'is-healthy', 'is-active');
+              pill.textContent =
+                (row.activeLabel || '—') +
+                (row.latencyMs != null ? ' · ' + Math.round(row.latencyMs) + 'ms' : '') +
+                (row.mode === 'public_hop' ? ' · hop' : ' · sticky');
             }
-            return null;
-          };
-          const primary = bySlot('primary', true) || bySlot('solo', true);
-          const backup = bySlot('backup', false);
-          const paintPill = function (elId, mem, emptyLabel) {
-            const el = document.getElementById(elId);
-            if (!el) return;
-            el.classList.remove(
-              'is-healthy',
-              'is-degraded',
-              'is-down',
-              'is-active'
-            );
-            if (!mem) {
-              if (emptyLabel === 'backup') {
-                el.textContent = 'backup unset';
-              } else {
-                el.textContent = 'primary unset';
-              }
-              return;
-            }
-            const st = mem.state || 'down';
-            el.classList.add(
-              st === 'healthy'
-                ? 'is-healthy'
-                : st === 'degraded'
-                  ? 'is-degraded'
-                  : 'is-down'
-            );
-            if (mem.isActive) el.classList.add('is-active');
-            const slotLabel =
-              mem.slot === 'solo'
-                ? 'PRIMARY'
-                : mem.slot === 'backup'
-                  ? 'BACKUP'
-                  : 'PRIMARY';
-            const readyBit =
-              mem.slot === 'backup' && st === 'healthy'
-                ? ' ready'
-                : mem.slot === 'solo'
-                  ? ' (solo)'
-                  : '';
-            const failBit =
-              mem.consecutiveFailures > 0
-                ? ' · fails×' + mem.consecutiveFailures
-                : mem.consecutiveSuccesses > 0 && mem.consecutiveSuccesses < 2
-                  ? ' · recover ' + mem.consecutiveSuccesses + '/2'
-                  : '';
-            const coolBit =
-              mem.cooldownRemainingMs > 0
-                ? ' · cool ' + Math.ceil(mem.cooldownRemainingMs / 1000) + 's'
-                : '';
-            el.textContent =
-              slotLabel +
-              readyBit +
-              (mem.isActive ? ' ●' : '') +
-              ' · ' +
-              (mem.host || mem.label || '—') +
-              (mem.latencyEwmaMs != null
-                ? ' · ' + Math.round(mem.latencyEwmaMs) + 'ms'
-                : '') +
-              ' · ' +
-              st +
-              failBit +
-              coolBit;
-            el.title =
-              (mem.label || '') +
-              ' · ' +
-              st +
-              (mem.lastError && mem.lastError !== 'none'
-                ? ' · last ' + mem.lastError
-                : '') +
-              (mem.lastErrorDetail ? ' · ' + mem.lastErrorDetail : '') +
-              failBit +
-              coolBit;
-          };
-          paintPill('rpc-' + name + '-primary', primary, 'primary');
-          paintPill('rpc-' + name + '-backup', backup, 'backup');
-          const meta = document.getElementById('rpc-' + name + '-meta');
-          if (meta) {
-            const fo =
-              pool.lastFailoverAt != null
-                ? 'fo ' +
-                  new Date(pool.lastFailoverAt).toLocaleTimeString()
-                : 'fo —';
-            const cnt =
-              pool.failoverCountRecent != null && pool.failoverCountRecent > 0
-                ? '×' + pool.failoverCountRecent + '/10m'
-                : '';
-            const errMem =
-              members.find(function (m) {
-                return m.lastError && m.lastError !== 'none';
-              }) || null;
-            const bak =
-              pool.backupStatus === 'ready' ? 'backup ready' : 'backup unset';
-            const stickyBit =
-              pool.softStickyRemainingMs > 0
-                ? ' · sticky ' +
-                  Math.ceil(Number(pool.softStickyRemainingMs) / 1000) +
-                  's'
-                : pool.shareMode === 'failover'
-                  ? ' · backup active'
-                  : '';
-            const downBit =
-              pool.preferredDownForMs > 0
-                ? ' · pref down ' +
-                  Math.round(Number(pool.preferredDownForMs) / 1000) +
-                  's'
-                : '';
-            const errBit = errMem
-              ? ' · err ' +
-                errMem.lastError +
-                (errMem.lastErrorDetail
-                  ? ' (' +
-                    String(errMem.lastErrorDetail).slice(0, 48) +
-                    ')'
-                  : '')
-              : '';
-            meta.textContent =
-              (pool.primaryConfigured ? 'primary configured' : 'primary unset') +
-              ' · ' +
-              bak +
-              ' · active ' +
-              (pool.activeLabel || '—') +
-              stickyBit +
-              downBit +
-              ' · ' +
-              fo +
-              (cnt ? ' ' + cnt : '') +
-              errBit;
           }
-          const shareEl = document.getElementById('rpc-' + name + '-share');
-          if (shareEl) {
-            shareEl.classList.remove('is-sharing', 'is-failover', 'is-down');
-            const mode = pool.shareMode || 'empty';
-            if (mode === 'sharing') shareEl.classList.add('is-sharing');
-            else if (mode === 'failover') shareEl.classList.add('is-failover');
-            else if (mode === 'down' || mode === 'empty')
-              shareEl.classList.add('is-down');
-            shareEl.textContent =
-              pool.shareLabel ||
-              (mode === 'empty'
-                ? 'not configured — set ' +
-                  (name === 'helius'
-                    ? 'HELIUS_RPC_URL or HELIUS_API_KEY'
-                    : 'ALCHEMY_RPC_URL or ALCHEMY_API_KEY')
-                : mode);
+          if (meta) {
+            meta.textContent =
+              (row.host || '') +
+              (row.preferredLabel && row.preferredLabel !== row.activeLabel
+                ? ' · pref ' + row.preferredLabel
+                : '') +
+              (row.healthy === false ? ' · preferred down' : '');
           }
         }
-        paintProv('helius');
-        paintProv('alchemy');
+        paintLaneCard('critical', 'set HELIUS_RPC_URL or HELIUS_API_KEY');
+        paintLaneCard('scanners', 'set ALCHEMY_RPC_URL or ALCHEMY_API_KEY');
+        paintLaneCard('utility', 'public utility');
+        const emerg = Array.isArray(lanes.emergency) ? lanes.emergency : [];
+        const emergPill = document.getElementById('rpc-lane-emergency-pill');
+        const emergMeta = document.getElementById('rpc-lane-emergency-meta');
+        const inUse = emerg.filter(function (e) { return e && e.inUse; });
+        const configured = emerg.filter(function (e) { return e && e.configured; });
+        if (emergPill) {
+          emergPill.classList.remove('is-healthy', 'is-degraded', 'is-down', 'is-active');
+          if (inUse.length) {
+            emergPill.classList.add('is-degraded', 'is-active');
+            emergPill.textContent = 'IN USE · ' + inUse.map(function (e) { return e.label; }).join(', ');
+          } else if (configured.length) {
+            emergPill.classList.add('is-healthy');
+            emergPill.textContent = 'idle · ' + configured.length + ' backup(s)';
+          } else {
+            emergPill.textContent = 'no backups configured';
+          }
+        }
+        if (emergMeta) {
+          emergMeta.textContent = configured.length
+            ? configured.map(function (e) {
+                return e.label + (e.host ? ' ' + e.host : '') + (e.inUse ? ' ACTIVE' : ' idle');
+              }).join(' · ')
+            : 'set HELIUS_RPC_URL_BACKUP / ALCHEMY_RPC_URL_BACKUP for emergency only';
+        }
+        return;
       }
-      const activeEp = (rpc.endpoints || []).find(e => e.isActive) || {};
+      const critLane = (rpc.lanes && rpc.lanes.critical) || {};
+      const activeEp =
+        (rpc.endpoints || []).find(function (e) {
+          return e.lane === 'critical' || e.isActive;
+        }) || {};
       const rpcActiveEl = document.getElementById('rpc-active');
       const rpcWrap = document.getElementById('rpc-status-wrap');
       const rpcIcon = document.getElementById('rpc-health-icon');
       if (rpcActiveEl) {
-        const rpcLabel = String(rpc.active || '—');
+        const rpcLabel = String(critLane.activeLabel || rpc.active || '—');
         rpcActiveEl.textContent = rpcLabel.length > 18
           ? rpcLabel.slice(0, 16) + '…'
           : rpcLabel;
@@ -27001,15 +26908,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (rpcWrap) {
         rpcWrap.classList.remove('rpc-ok', 'rpc-bad', 'rpc-unknown');
-        if (rpc.ok === false) rpcWrap.classList.add('rpc-bad');
+        if (rpc.ok === false || critLane.healthy === false) rpcWrap.classList.add('rpc-bad');
+        else if (critLane.failover) rpcWrap.classList.add('rpc-unknown');
         else if (rpc.ok === true) rpcWrap.classList.add('rpc-ok');
         else rpcWrap.classList.add('rpc-unknown');
         const latTip =
-          activeEp.latencyMs != null ? ' · ' + activeEp.latencyMs + 'ms' : '';
+          critLane.latencyMs != null
+            ? ' · ' + Math.round(critLane.latencyMs) + 'ms'
+            : activeEp.latencyMs != null
+              ? ' · ' + activeEp.latencyMs + 'ms'
+              : '';
         rpcWrap.title =
           rpc.ok === false
             ? (rpc.warning || 'RPC unhealthy — wallet buys may not be detected')
-            : 'Active Solana RPC: ' + (rpc.active || '—') + latTip;
+            : 'Critical lane: ' + (critLane.activeLabel || rpc.active || '—') + latTip;
       }
       setStatusIcon(rpcIcon, rpc.ok === false ? 'activityBad' : 'activity');
       try {
@@ -27017,13 +26929,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (_) {}
       const rpcLatEl = document.getElementById('rpc-latency');
       if (rpcLatEl) {
-        const ms = activeEp.latencyMs != null ? Number(activeEp.latencyMs) : null;
+        const ms =
+          critLane.latencyMs != null
+            ? Number(critLane.latencyMs)
+            : activeEp.latencyMs != null
+              ? Number(activeEp.latencyMs)
+              : null;
         rpcLatEl.textContent = ms != null && Number.isFinite(ms) ? Math.round(ms) + 'ms' : '—';
         rpcLatEl.classList.toggle('is-slow', ms != null && ms >= 400 && ms < 1200);
         rpcLatEl.classList.toggle('is-bad', ms != null && ms >= 1200);
       }
       document.getElementById('rpc-summary').textContent =
-        'Primary active: ' + (rpc.active || '—') +
+        'Critical lane: ' + ((rpc.lanes && rpc.lanes.critical && rpc.lanes.critical.activeLabel) || rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
         ' · Share load: ' + (rpc.shareLoad ? 'ON' : 'OFF') +
         ' · Soft watch: ' + (function () {
@@ -27146,15 +27063,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (rpcBody) {
         const eps = (rpc.endpoints || []).slice().sort(function (a, b) {
           const rank = function (e) {
-            const p = e.provider || '';
-            const slot = e.slot || '';
-            if (p === 'helius' && (slot === 'primary' || slot === 'solo')) return 10;
-            if (p === 'helius' && slot === 'backup') return 11;
-            if (p === 'alchemy' && (slot === 'primary' || slot === 'solo')) return 20;
-            if (p === 'alchemy' && slot === 'backup') return 21;
+            if (e.lane === 'critical' || e.role === 'primary') return 10;
+            if (e.lane === 'scanners' || e.role === 'secondary') return 20;
             if (e.lane === 'utility' || e.role === 'utility') return 30;
-            if (e.lane === 'primary' || e.role === 'primary') return 40;
-            if (e.lane === 'secondary' || e.role === 'secondary') return 50;
+            if (e.lane === 'emergency') return 40;
             return 90;
           };
           return rank(a) - rank(b);
@@ -27164,9 +27076,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : eps.map(e => {
               const lane =
                 e.lane ||
-                (e.slot === 'backup' ? 'backup' : '') ||
-                e.role ||
-                '—';
+                (e.role === 'primary'
+                  ? 'critical'
+                  : e.role === 'secondary'
+                    ? 'scanners'
+                    : e.role || '—');
               const label =
                 e.label ||
                 'rpc';

@@ -59,6 +59,7 @@ function recompute(external?: {
   utilityLatencyMs?: number | null;
   utilityWeakPublic?: boolean;
   utilityFailover?: boolean;
+  primaryFailover?: boolean;
   primaryQueued?: number;
   /** @deprecated Lifetime gate skips — ignored (was locking scanner×3 forever). */
   secondarySkipped?: number;
@@ -120,6 +121,13 @@ function recompute(external?: {
     reasons.push('Critical queue > 0 → shed scanners/utility');
   }
 
+  if (external?.primaryFailover) {
+    shedBackground = true;
+    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
+    reasons.push('Critical emergency failover → shed background');
+  }
+
   const uLat = external?.utilityLatencyMs;
   if (external?.utilityWeakPublic) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
@@ -152,10 +160,10 @@ function recompute(external?: {
     updatedAt: now,
   };
 
-  if (reasons.length && now - lastLogAt > 20_000) {
+  if (reasons.length && now - lastLogAt > 15_000) {
     lastLogAt = now;
     console.warn(
-      `[rpc-load] adaptive backoff: scanner×${lastSnapshot.scannerSlowFactor} ` +
+      `[background_rpc_throttled] scanner×${lastSnapshot.scannerSlowFactor} ` +
         `utility×${lastSnapshot.utilitySlowFactor}` +
         (shedBackground ? ' shedBackground=ON' : '') +
         ` — ${reasons.join('; ')}`
@@ -170,6 +178,7 @@ export function updateRpcLoadSignals(signals: {
   utilityLatencyMs?: number | null;
   utilityWeakPublic?: boolean;
   utilityFailover?: boolean;
+  primaryFailover?: boolean;
   primaryQueued?: number;
   secondarySkipped?: number;
   secondaryIdle?: boolean;
@@ -222,10 +231,11 @@ export function utilityPollScale(): {
   gapScale: number;
   skipActivity: boolean;
 } {
-  const f = getRpcLoadControlSnapshot().utilitySlowFactor;
+  const snap = getRpcLoadControlSnapshot();
+  const f = snap.utilitySlowFactor;
   return {
     cycleCapScale: 1 / f,
     gapScale: f,
-    skipActivity: f >= 2.5,
+    skipActivity: f >= 2.5 || snap.shedBackground,
   };
 }

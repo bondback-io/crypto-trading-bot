@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.305',
+    title: 'Sticky RPC lanes + lane-based monitor',
+    sections: ['execution', 'overview'],
+    items: [
+      'Helius/Alchemy/public stay sticky; HELIUS/ALCHEMY_RPC_URL_BACKUP and QuickNode are emergency-only (no equal share-load). Utility never burns paid backups.',
+      'Under Critical stress, Favourites/scanners/probes shed; in-flight RPC is deduped. Stats → RPC Health is four lane cards (Critical / Scanners / Utility / Emergency); header pill shows Critical host + ms.',
+    ],
+  },
+  {
     version: '1.2.304',
     title: 'Stabilize Helius primary + cut false quarantine',
     sections: ['execution', 'overview'],
