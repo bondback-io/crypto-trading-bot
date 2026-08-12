@@ -10902,7 +10902,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
             <div class="mb-1"><strong style="color:#34d399">Critical → ALCHEMY_API_KEY_BACKUP (sticky)</strong> — entries, turbo, migration, live balance / marks</div>
             <div class="mb-1"><strong style="color:#38bdf8">Scanners → ALCHEMY_API_KEY (sticky)</strong> — Market / Alpha / Zion; never borrows Critical or Helius; own-lane throttle only</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites soft-watch, import, activity (never paid backups)</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public only</strong> — Favourites soft-watch, import, activity (never Helius / Critical / Scanners keys)</div>
             <div class="mb-1"><strong style="color:#fca5a5">Emergency</strong> — HELIUS_API_KEY idle until Critical Alchemy hard-fails (429 / down ~30s); then BACKUP2 → Helius → Helius backup → QuickNode</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
@@ -26847,21 +26847,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 ' · emergency';
             } else {
               pill.classList.add(row.healthy === false ? 'is-down' : 'is-healthy', 'is-active');
+              const stickyLabel =
+                key === 'critical'
+                  ? (row.preferredLabel || row.activeLabel || '—')
+                  : (row.activeLabel || '—');
               pill.textContent =
-                (row.activeLabel || '—') +
+                stickyLabel +
                 (row.latencyMs != null ? ' · ' + Math.round(row.latencyMs) + 'ms' : '') +
                 (row.mode === 'public_hop' ? ' · hop' : ' · sticky');
             }
           }
           if (meta) {
-            const prefBits =
-              row.preferredLabel && row.preferredLabel !== row.activeLabel
-                ? ' · pref ' +
-                  row.preferredLabel +
-                  (row.preferredLatencyMs != null
-                    ? ' ' + Math.round(row.preferredLatencyMs) + 'ms'
-                    : '')
-                : '';
+            let prefBits = '';
+            if (key === 'critical' && row.failover && row.preferredLabel) {
+              prefBits =
+                ' · pref ' +
+                row.preferredLabel +
+                (row.preferredLatencyMs != null
+                  ? ' ' + Math.round(row.preferredLatencyMs) + 'ms'
+                  : '');
+            } else if (
+              row.preferredLabel &&
+              row.preferredLabel !== row.activeLabel
+            ) {
+              prefBits =
+                ' · pref ' +
+                row.preferredLabel +
+                (row.preferredLatencyMs != null
+                  ? ' ' + Math.round(row.preferredLatencyMs) + 'ms'
+                  : '');
+            } else if (
+              key === 'critical' &&
+              row.activeLatencyMs != null &&
+              row.preferredLatencyMs != null &&
+              row.activeLatencyMs !== row.preferredLatencyMs
+            ) {
+              prefBits = ' · active ' + Math.round(row.activeLatencyMs) + 'ms';
+            }
             meta.textContent =
               (row.host || '') +
               prefBits +
@@ -26921,7 +26943,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const rpcWrap = document.getElementById('rpc-status-wrap');
       const rpcIcon = document.getElementById('rpc-health-icon');
       if (rpcActiveEl) {
-        const rpcLabel = String(critLane.activeLabel || rpc.active || '—');
+        const stickyCrit = !critLane.failover;
+        const rpcLabel = String(
+          (stickyCrit ? critLane.preferredLabel : critLane.activeLabel) ||
+            rpc.active ||
+            '—'
+        );
         rpcActiveEl.textContent = rpcLabel.length > 18
           ? rpcLabel.slice(0, 16) + '…'
           : rpcLabel;
@@ -26942,7 +26969,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         rpcWrap.title =
           rpc.ok === false
             ? (rpc.warning || 'RPC unhealthy — wallet buys may not be detected')
-            : 'Critical lane: ' + (critLane.activeLabel || rpc.active || '—') + latTip;
+            : 'Critical lane: ' +
+              ((critLane.failover ? critLane.activeLabel : critLane.preferredLabel) ||
+                rpc.active ||
+                '—') +
+              latTip +
+              (critLane.failover && critLane.preferredLatencyMs != null
+                ? ' (pref ' + Math.round(critLane.preferredLatencyMs) + 'ms)'
+                : '');
       }
       setStatusIcon(rpcIcon, rpc.ok === false ? 'activityBad' : 'activity');
       try {
@@ -27055,6 +27089,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         if (lc.secondarySkipsRecent != null && lc.secondarySkipsRecent > 0) {
           parts.push('Scanners skips60s=' + lc.secondarySkipsRecent);
+        }
+        if (rpc.criticalKeyIsolated) parts.push('Critical key isolated');
+        if (rpc.nonCriticalBlockedFromCritical) {
+          parts.push('blocked→Critical ' + rpc.nonCriticalBlockedFromCritical);
         }
         if (rpc.utilityWeakPublic) parts.push('Utility=weak public (Favourites slowed)');
         if (q.length) {

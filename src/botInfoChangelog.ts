@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.311',
+    title: 'Helius out of Utility + Critical key isolation',
+    sections: ['execution', 'overview'],
+    items: [
+      'Utility stays public-only — Helius is never preferred/probed as Utility; emergency lane only.',
+      'Non-critical work cannot borrow the Critical Alchemy key; live_balance is coalesced; Critical UI shows preferred sticky latency.',
+    ],
+  },
+  {
     version: '1.2.310',
     title: 'Scanners-only decongest — Critical untouched',
     sections: ['execution', 'overview'],

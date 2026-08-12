@@ -501,49 +501,136 @@ export function isUtilityOnWeakPublic(): boolean {
   return isWeakPublicUtilityUrl(state.endpoint.url);
 }
 
-/** Stronger utility candidate: configured rpc-url / utility role that is not weak public. */
-function isStrongUtilityEndpoint(state: EndpointState | undefined): boolean {
-  if (!state) return false;
-  if (isWeakPublicUtilityUrl(state.endpoint.url)) return false;
-  if (isEndpointHardFailed(state) || isEndpointRateLimited(state)) return false;
-  const label = (state.endpoint.label || '').toLowerCase();
-  if (state.role === 'utility') return true;
-  if (label === 'rpc-url' || state.role === 'fallback') {
-    // Custom RPC_URL / mid-tier fallback — prefer over publicnode/mainnet-beta.
-    return !isPublicRpcUrl(state.endpoint.url) || label === 'rpc-url';
+/** Paid / emergency keys must never serve Utility (Favourites / soft-watch). */
+function isForbiddenUtilityEndpoint(
+  state: EndpointState | undefined,
+  index: number
+): boolean {
+  if (!state) return true;
+  if (index === preferredPrimary || index === preferredSecondary) return true;
+  if (isHeliusEndpoint(state)) return true;
+  if (isAlchemyEndpoint(state)) return true;
+  if (isEmergencyBackupIndex(index) || isEmergencyBackupLabel(state.endpoint.label)) {
+    return true;
+  }
+  if (
+    state.endpoint.label === 'quicknode' ||
+    isQuicknodeRpcUrl(state.endpoint.url)
+  ) {
+    return true;
   }
   return false;
 }
 
+/**
+ * Stronger utility candidate: public / Triton rpc-url that is not weak —
+ * never Helius, Alchemy, Critical, Scanners, or emergency backups.
+ */
+function isStrongUtilityEndpoint(
+  state: EndpointState | undefined,
+  index = -1
+): boolean {
+  if (!state) return false;
+  if (index >= 0 && isForbiddenUtilityEndpoint(state, index)) return false;
+  if (isHeliusEndpoint(state) || isAlchemyEndpoint(state)) return false;
+  if (isWeakPublicUtilityUrl(state.endpoint.url)) return false;
+  if (isEndpointHardFailed(state) || isEndpointRateLimited(state)) return false;
+  const label = (state.endpoint.label || '').toLowerCase();
+  if (state.role === 'utility') {
+    // Dedicated utility must still be public-ish (not a mis-tagged paid key).
+    return (
+      isPublicRpcUrl(state.endpoint.url) ||
+      label === 'rpc-url' ||
+      label === 'publicnode' ||
+      label === 'utility'
+    );
+  }
+  if (label === 'rpc-url') {
+    return (
+      isPublicRpcUrl(state.endpoint.url) ||
+      !state.endpoint.url.toLowerCase().includes('helius')
+    ) && !isAlchemyEndpoint(state) && !isHeliusEndpoint(state);
+  }
+  // Never promote role=fallback (Helius/Alchemy/QN) into Utility.
+  return false;
+}
+
+let loggedHeliusRemovedFromUtility = false;
+
 function pickPreferredUtilityIndex(): number {
-  // 1) Dedicated utility role that is not weak public
+  const wouldHaveBeenHelius = (): boolean => {
+    for (let i = 0; i < endpoints.length; i++) {
+      const e = endpoints[i];
+      if (!e) continue;
+      if (isWeakPublicUtilityUrl(e.endpoint.url)) continue;
+      if (isEndpointHardFailed(e) || isEndpointRateLimited(e)) continue;
+      if (e.role === 'fallback' && isHeliusEndpoint(e)) return true;
+      if (
+        (e.endpoint.label === 'rpc-url' || e.role === 'fallback') &&
+        isHeliusEndpoint(e)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // 1) Dedicated utility role that is strong (non-weak public / Triton)
   for (let i = 0; i < endpoints.length; i++) {
     const e = endpoints[i];
-    if (e?.role === 'utility' && isStrongUtilityEndpoint(e)) return i;
+    if (e?.role === 'utility' && isStrongUtilityEndpoint(e, i)) return i;
   }
-  // 2) rpc-url / non-public fallback
+  // 2) rpc-url only when public/usable and not paid emergency
   for (let i = 0; i < endpoints.length; i++) {
     const e = endpoints[i];
     if (!e) continue;
     const label = (e.endpoint.label || '').toLowerCase();
-    if (
-      (label === 'rpc-url' || e.role === 'fallback') &&
-      isStrongUtilityEndpoint(e)
-    ) {
+    if (label === 'rpc-url' && isStrongUtilityEndpoint(e, i)) {
       return i;
     }
   }
-  // 3) Any non-weak, non-primary/secondary public-ish
+  // 3) Any other non-forbidden public
   for (let i = 0; i < endpoints.length; i++) {
     if (i === preferredPrimary || i === preferredSecondary) continue;
-    if (isStrongUtilityEndpoint(endpoints[i])) return i;
+    const e = endpoints[i];
+    if (!e || isForbiddenUtilityEndpoint(e, i)) continue;
+    if (isPublicRpcUrl(e.endpoint.url) && !isWeakPublicUtilityUrl(e.endpoint.url)) {
+      if (!isEndpointHardFailed(e) && !isEndpointRateLimited(e)) return i;
+    }
   }
-  // 4) Classic: first utility role, else first public
+  // 4) Stay on role-utility even if weak public — never promote Helius
   const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
+  if (utilIdx >= 0 && !isForbiddenUtilityEndpoint(endpoints[utilIdx], utilIdx)) {
+    if (wouldHaveBeenHelius() && !loggedHeliusRemovedFromUtility) {
+      loggedHeliusRemovedFromUtility = true;
+      console.warn(
+        `[helius_removed_from_utility] keeping ${endpoints[utilIdx]?.endpoint.label} ` +
+          `(public) — Helius stays emergency-only`
+      );
+    }
+    return utilIdx;
+  }
+  const pub = endpoints.findIndex(
+    (e, i) =>
+      isPublicRpcUrl(e.endpoint.url) && !isForbiddenUtilityEndpoint(e, i)
+  );
+  if (pub >= 0) {
+    if (wouldHaveBeenHelius() && !loggedHeliusRemovedFromUtility) {
+      loggedHeliusRemovedFromUtility = true;
+      console.warn(
+        `[helius_removed_from_utility] keeping ${endpoints[pub]?.endpoint.label} ` +
+          `(public) — Helius stays emergency-only`
+      );
+    }
+    return pub;
+  }
+  // Last resort: role-utility index even if weak; never Critical/Scanners paid key
   if (utilIdx >= 0) return utilIdx;
-  const pub = endpoints.findIndex((e) => isPublicRpcUrl(e.endpoint.url));
-  if (pub >= 0) return pub;
-  return preferredSecondary;
+  for (let i = 0; i < endpoints.length; i++) {
+    if (i === preferredPrimary || i === preferredSecondary) continue;
+    if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) return i;
+  }
+  return utilIdx >= 0 ? utilIdx : preferredUtility >= 0 ? preferredUtility : 0;
 }
 
 /** Sticky window so Utility does not thrash between weak publics. */
@@ -651,14 +738,6 @@ function ensureEndpoints(): void {
   );
   const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
   preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
-  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
-  preferredUtility = pickPreferredUtilityIndex();
-  if (utilIdx >= 0 && preferredUtility !== utilIdx) {
-    console.log(
-      `[rpc] Utility preferred ${endpoints[preferredUtility]?.endpoint.label} ` +
-        `(stronger than role-utility ${endpoints[utilIdx]?.endpoint.label})`
-    );
-  }
   preferredQuicknode = endpoints.findIndex(
     (e) =>
       e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
@@ -677,6 +756,36 @@ function ensureEndpoints(): void {
   preferredAlchemyBackup2 = endpoints.findIndex(
     (e) => e.endpoint.label === 'alchemy-backup2'
   );
+  // Utility pick after emergency indexes are known so forbidden checks are accurate.
+  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
+  preferredUtility = pickPreferredUtilityIndex();
+  if (
+    preferredUtility >= 0 &&
+    isHeliusEndpoint(endpoints[preferredUtility])
+  ) {
+    // Absolute safety: never leave Utility on Helius.
+    const pub = endpoints.findIndex(
+      (e, i) =>
+        e.role === 'utility' ||
+        (isPublicRpcUrl(e.endpoint.url) && !isForbiddenUtilityEndpoint(e, i))
+    );
+    if (pub >= 0) preferredUtility = pub;
+    if (!loggedHeliusRemovedFromUtility) {
+      loggedHeliusRemovedFromUtility = true;
+      console.warn(
+        `[helius_removed_from_utility] forced Utility off Helius → ${endpoints[preferredUtility]?.endpoint.label}`
+      );
+    }
+  }
+  if (utilIdx >= 0 && preferredUtility !== utilIdx) {
+    const pref = endpoints[preferredUtility];
+    if (pref && !isHeliusEndpoint(pref) && !isAlchemyEndpoint(pref)) {
+      console.log(
+        `[rpc] Utility preferred ${pref.endpoint.label} ` +
+          `(stronger than role-utility ${endpoints[utilIdx]?.endpoint.label})`
+      );
+    }
+  }
   activePrimary = preferredPrimary;
   activeSecondary = preferredSecondary;
   activeUtility = preferredUtility;
@@ -717,6 +826,19 @@ function ensureEndpoints(): void {
     console.warn(
       '[rpc] Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. ' +
         'Set a distinct RPC_SECONDARY (must differ from RPC_URL).'
+    );
+  }
+  if (
+    Boolean(config.rpc?.shareLoad) &&
+    preferredPrimary !== preferredSecondary &&
+    preferredPrimary !== preferredUtility &&
+    !isHeliusEndpoint(endpoints[preferredUtility]) &&
+    !isAlchemyEndpoint(endpoints[preferredUtility])
+  ) {
+    console.log(
+      `[critical_key_isolated] Critical=${endpoints[preferredPrimary]?.endpoint.label} ` +
+        `Scanners=${endpoints[preferredSecondary]?.endpoint.label} ` +
+        `Utility=${endpoints[preferredUtility]?.endpoint.label} (public) · Helius emergency-only`
     );
   }
 }
@@ -888,11 +1010,30 @@ function isAlchemyEndpoint(state: EndpointState | undefined): boolean {
   );
 }
 
-/** Share ON: Scanners must not burn Helius (trade Critical only). */
+/** Share ON: non-Critical lanes must not burn Helius or Critical Alchemy key. */
 function shareBlocksHeliusForRole(role: RpcRole, idx: number): boolean {
   if (!config.rpc?.shareLoad || role === 'primary') return false;
   if (idx === preferredPrimary) return true;
   return isHeliusEndpoint(endpoints[idx]);
+}
+
+let lastNonCriticalBlockLogAt = 0;
+let nonCriticalBlockedFromCritical = 0;
+
+/** Block Scanners/Utility from landing on preferred Critical Alchemy key. */
+function blocksCriticalKeyForRole(role: RpcRole, idx: number): boolean {
+  if (role === 'primary') return false;
+  if (idx !== preferredPrimary) return false;
+  nonCriticalBlockedFromCritical += 1;
+  const now = Date.now();
+  if (now - lastNonCriticalBlockLogAt > 15_000) {
+    lastNonCriticalBlockLogAt = now;
+    console.warn(
+      `[noncritical_blocked_from_critical_key] ${role} blocked from ` +
+        `${endpoints[preferredPrimary]?.endpoint.label} (count=${nonCriticalBlockedFromCritical})`
+    );
+  }
+  return true;
 }
 
 function piggybackOrder(role: RpcRole): RpcRole[] {
@@ -940,6 +1081,10 @@ function acceptFailoverTarget(
   avoidPublicForCritical: boolean
 ): boolean {
   if (altIdx < 0 || altIdx === preferred || altIdx >= endpoints.length) return false;
+  if (blocksCriticalKeyForRole(role, altIdx)) return false;
+  if (role === 'utility' && isForbiddenUtilityEndpoint(endpoints[altIdx], altIdx)) {
+    return false;
+  }
   const other = endpoints[altIdx];
   if (!other?.healthy || isEndpointRateLimited(other) || isEndpointHardFailed(other))
     return false;
@@ -984,15 +1129,19 @@ function resolveIndexForRole(role: RpcRole): number {
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
   const latencySoft = latencyFailoverReady(pref);
+  const shareLoadEarly = Boolean(config.rpc?.shareLoad);
 
-  // Utility: if preferred is weak public but a stronger non-public/rpc-url is healthy, prefer it.
+  // Utility: never hop onto Helius/Alchemy/Critical. Share ON stays sticky on public.
+  // Share OFF may hop only to another allowed public/rpc-url.
   if (role === 'utility' && pref && isWeakPublicUtilityUrl(pref.endpoint.url)) {
-    for (let i = 0; i < endpoints.length; i++) {
-      if (i === preferred) continue;
-      const e = endpoints[i];
-      if (!e?.healthy || !isStrongUtilityEndpoint(e)) continue;
-      setActiveForRole(role, i);
-      return i;
+    if (!shareLoadEarly) {
+      for (let i = 0; i < endpoints.length; i++) {
+        if (i === preferred) continue;
+        const e = endpoints[i];
+        if (!e?.healthy || !isStrongUtilityEndpoint(e, i)) continue;
+        setActiveForRole(role, i);
+        return i;
+      }
     }
   }
 
@@ -1218,6 +1367,7 @@ function resolveIndexForRole(role: RpcRole): number {
         continue; // Helius is trade-only under Share ON
       }
       const otherPreferred = preferredIndexFor(otherRole);
+      if (blocksCriticalKeyForRole(role, otherPreferred)) continue;
       if (shareBlocksHeliusForRole(role, otherPreferred)) continue;
       if (
         acceptFailoverTarget(
@@ -1496,10 +1646,11 @@ function recordFailure(index: number, error: string): void {
   ) {
     const isPrefPrimary = index === preferredPrimary;
     const isHealthProbe = rpcFeatureAls.getStore() === 'health_probe';
-    // Preferred Helius: never quarantine on health-probe timeouts (recovery is
-    // probe-only under Share ON). Real traffic still needs 3 consecutive fails.
+    // Preferred Critical: never quarantine on health-probe timeouts. Require
+    // 3 consecutive real-traffic fails before quarantine; probe-only needs 2
+    // consecutive probe fails before marking unhealthy (reduces false DOWN).
     if (isPrefPrimary && isHealthProbe) {
-      /* mark unhealthy below; keep probing every health cycle */
+      /* mark unhealthy below only after streak; keep probing */
     } else if (state.consecutiveFailures >= (isPrefPrimary ? 3 : 2)) {
       enterQuarantine(state, error.slice(0, 120));
     }
@@ -1508,7 +1659,12 @@ function recordFailure(index: number, error: string): void {
     enterQuarantine(state, error.slice(0, 120));
   }
 
-  const threshold = isRateLimit ? 1 : config.rpc?.failureThreshold ?? 3;
+  const threshold = isRateLimit
+    ? 1
+    : index === preferredPrimary &&
+        rpcFeatureAls.getStore() === 'health_probe'
+      ? 2
+      : config.rpc?.failureThreshold ?? 3;
   if (state.consecutiveFailures < threshold) return;
 
   const wasHealthy = state.healthy;
@@ -1577,9 +1733,11 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
   const gate = getRpcGateSnapshot();
   // Unhealthy / recovering preferred needs a full budget — a 4s stress cap
   // false-fails public RPCs and keeps "preferred DOWN" forever.
+  // Preferred Critical always gets the full timeout (never the stressed 4s cap).
   const recovering = !state.healthy || state.unhealthySince != null;
+  const isPrefCritical = index === preferredPrimary;
   const effectiveTimeout =
-    recovering || !(gate.stressed || gate.backlog > 0)
+    isPrefCritical || recovering || !(gate.stressed || gate.backlog > 0)
       ? timeoutMs
       : Math.min(timeoutMs, 4_000);
 
@@ -1636,7 +1794,9 @@ async function withRpcInner<T>(
   const order: number[] = [];
   const pushUnique = (i: number) => {
     if (i < 0 || i >= endpoints.length || order.includes(i)) return;
+    if (blocksCriticalKeyForRole(r, i)) return;
     if (shareBlocksHeliusForRole(r, i)) return;
+    if (r === 'utility' && isForbiddenUtilityEndpoint(endpoints[i], i)) return;
     order.push(i);
   };
   pushUnique(startIndex);
@@ -1782,6 +1942,8 @@ export function getRpcStats(): {
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null;
   utilityWeakPublic: boolean;
+  nonCriticalBlockedFromCritical: number;
+  criticalKeyIsolated: boolean;
   summary: 'all_sticky' | 'degraded' | 'emergency_failover' | 'lane_down';
   plainLanguage: string;
   lanes: {
@@ -1791,6 +1953,7 @@ export function getRpcStats(): {
       host: string;
       latencyMs: number | null;
       preferredLatencyMs: number | null;
+      activeLatencyMs: number | null;
       healthy: boolean;
       failover: boolean;
       configured: boolean;
@@ -1977,9 +2140,15 @@ export function getRpcStats(): {
     critical: {
       preferredLabel: pPref?.endpoint.label || 'unset',
       activeLabel: pActive?.endpoint.label || 'unset',
-      host: hostOf(pActive?.endpoint.url || ''),
-      latencyMs: pActive?.latencyMs ?? null,
+      host: hostOf(
+        (critFo ? pActive : pPref)?.endpoint.url || pActive?.endpoint.url || ''
+      ),
+      // Sticky: show preferred Critical EWMA (honest). Emergency: active ms.
+      latencyMs: critFo
+        ? (pActive?.latencyMs ?? null)
+        : (pPref?.latencyMs ?? pActive?.latencyMs ?? null),
       preferredLatencyMs: pPref?.latencyMs ?? null,
+      activeLatencyMs: pActive?.latencyMs ?? null,
       healthy: Boolean(pPref?.healthy),
       failover: critFo,
       configured: critConfigured,
@@ -2110,25 +2279,30 @@ export function getRpcStats(): {
     endpoints: endpoints.map((s, i) => {
       const total = s.successCount + s.failureCount;
       let lane: string | null = null;
-      if (i === preferredPrimary) lane = 'critical';
-      else if (
-        i === preferredSecondary &&
-        preferredSecondary !== preferredPrimary
-      )
-        lane = 'scanners';
-      else if (
-        i === preferredUtility &&
-        preferredUtility !== preferredPrimary &&
-        preferredUtility !== preferredSecondary
-      )
-        lane = 'utility';
-      else if (
+      // Emergency labels always paint emergency — never utility (even if mis-preferred).
+      if (
+        isHeliusEndpoint(s) ||
         isEmergencyBackupIndex(i) ||
         isEmergencyBackupLabel(s.endpoint.label) ||
         s.endpoint.label === 'quicknode' ||
         isQuicknodeRpcUrl(s.endpoint.url)
-      )
+      ) {
         lane = 'emergency';
+      } else if (i === preferredPrimary) {
+        lane = 'critical';
+      } else if (
+        i === preferredSecondary &&
+        preferredSecondary !== preferredPrimary
+      ) {
+        lane = 'scanners';
+      } else if (
+        i === preferredUtility &&
+        preferredUtility !== preferredPrimary &&
+        preferredUtility !== preferredSecondary &&
+        !isForbiddenUtilityEndpoint(s, i)
+      ) {
+        lane = 'utility';
+      }
       return {
         url: maskUrl(s.endpoint.url),
         label: s.endpoint.label,
@@ -2155,6 +2329,13 @@ export function getRpcStats(): {
     quarantine,
     loadControl,
     utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
+    nonCriticalBlockedFromCritical,
+    criticalKeyIsolated:
+      Boolean(config.rpc?.shareLoad) &&
+      preferredPrimary !== preferredSecondary &&
+      preferredPrimary !== preferredUtility &&
+      !isHeliusEndpoint(uPref) &&
+      !isAlchemyEndpoint(uPref),
     summary,
     plainLanguage,
     lanes,
@@ -2354,24 +2535,45 @@ export function peekTradingWalletPublicKey(walletId: string): string | null {
   }
 }
 
+const LIVE_BALANCE_TTL_MS = 10_000;
+const liveBalanceCache = new Map<string, { sol: number; at: number }>();
+const liveBalanceInflight = new Map<string, Promise<number | null>>();
+
 export async function getLiveBalanceSol(
   walletId?: string
 ): Promise<number | null> {
   const pubkey = getWalletPublicKey(walletId);
   if (!pubkey) return null;
+  const cacheKey = pubkey.toBase58();
+  const cached = liveBalanceCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.at < LIVE_BALANCE_TTL_MS) {
+    return cached.sol;
+  }
+  if (liveBalanceInflight.has(cacheKey)) {
+    return liveBalanceInflight.get(cacheKey)!;
+  }
 
   const read = () =>
     withRpc('getBalance', (conn) => conn.getBalance(pubkey), 'primary');
 
-  try {
-    const lamports = Boolean(config.rpc?.shareLoad)
-      ? await runWithRpcRole('primary', read, 'live_balance')
-      : await read();
-    return lamports / LAMPORTS_PER_SOL;
-  } catch (err) {
-    console.error('[connection] Failed to fetch balance:', err);
-    return null;
-  }
+  const job = (async (): Promise<number | null> => {
+    try {
+      const lamports = Boolean(config.rpc?.shareLoad)
+        ? await runWithRpcRole('primary', read, 'live_balance')
+        : await read();
+      const sol = lamports / LAMPORTS_PER_SOL;
+      liveBalanceCache.set(cacheKey, { sol, at: Date.now() });
+      return sol;
+    } catch (err) {
+      console.error('[connection] Failed to fetch balance:', err);
+      return cached?.sol ?? null;
+    } finally {
+      liveBalanceInflight.delete(cacheKey);
+    }
+  })();
+  liveBalanceInflight.set(cacheKey, job);
+  return job;
 }
 
 /** Public-safe list of trading wallets with pubkeys + balances (no secrets) */
@@ -2493,13 +2695,21 @@ export function startRpcHealthMonitor(): void {
     if (isEndpointHardFailed(state)) return false;
 
     // Helius quota protect: never probe as Utility; idle emergency stays dark
-    // until Critical Alchemy is actually in hard emergency (or Helius is in use).
+    // until Critical Alchemy is actually in hard emergency (or Helius is in use
+    // as Critical/Scanners active — never because Utility preferred it).
     if (isHeliusEndpoint(state)) {
       const inUse =
-        index === activePrimary ||
-        index === activeSecondary ||
-        index === activeUtility;
+        index === activePrimary || index === activeSecondary;
       if (inUse) return true;
+      if (index === activeUtility || index === preferredUtility) {
+        // Should not happen after helius_removed_from_utility — never probe.
+        if (cycle % 16 === 0) {
+          console.warn(
+            `[helius_removed_from_utility] skip probe — ${state.endpoint.label} not utility`
+          );
+        }
+        return false;
+      }
       if (isEndpointRateLimited(state)) {
         if (cycle % 16 === 0) {
           console.warn(
@@ -2574,12 +2784,10 @@ export function startRpcHealthMonitor(): void {
       if (!state.healthy || state.unhealthySince != null) return true;
       return cycle % 2 === 0;
     }
-    // Non-Helius emergency backups (BACKUP2): rare unless in use
+    // Non-Helius emergency backups (BACKUP2): rare unless in use as Critical/Scanners
     if (isEmergencyBackupIndex(index)) {
       const inUse =
-        index === activePrimary ||
-        index === activeSecondary ||
-        index === activeUtility;
+        index === activePrimary || index === activeSecondary;
       if (inUse) return true;
       return cycle % 8 === 0;
     }
