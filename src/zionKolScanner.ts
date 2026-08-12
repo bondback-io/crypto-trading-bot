@@ -753,12 +753,26 @@ export async function runZionScannerPollOnce(): Promise<void> {
   if (defer.defer) {
     logBackgroundDeferred('Zion KOL Scanner', defer.reason || 'Scanners busy');
     lastError = `delayed — ${defer.reason}`;
+    try {
+      const { noteSignalBlockedByGate } =
+        require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+      noteSignalBlockedByGate(`zion_defer: ${defer.reason || 'Scanners busy'}`);
+    } catch {
+      /* */
+    }
     return;
   }
   const adapt = shouldSkipScannerTick('zion');
   if (adapt.skip) {
     logBackgroundDeferred('Zion KOL Scanner', adapt.reason || 'adaptive');
     lastError = `delayed — ${adapt.reason}`;
+    try {
+      const { noteSignalBlockedByGate } =
+        require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+      noteSignalBlockedByGate(`zion_adaptive: ${adapt.reason || 'scanner×'}`);
+    } catch {
+      /* */
+    }
     return;
   }
   pollInFlight = true;

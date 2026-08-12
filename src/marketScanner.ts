@@ -13,7 +13,8 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick, adaptiveScannerIntervalMs, shouldSkipScannerSideWork } from './rpcLoadControl';
+import { shouldSkipScannerTick, adaptiveScannerIntervalMs, shouldSkipScannerSideWork, isSignalsRpcHealthy } from './rpcLoadControl';
+import { noteSignalBlockedByGate } from './signalIntakeStats';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
@@ -1453,6 +1454,7 @@ export async function runScannerPollOnce(): Promise<number> {
   if (defer.defer) {
     logBackgroundDeferred('Market Scanner', defer.reason || 'Scanners busy');
     lastSkipReason = `delayed — ${defer.reason}`;
+    noteSignalBlockedByGate(`defer: ${defer.reason || 'Scanners busy'}`);
     // Still stamp lastPollAt so the UI does not look "frozen" while deferred.
     lastPollAt = Date.now();
     lastPollMs = 0;
@@ -1462,19 +1464,30 @@ export async function runScannerPollOnce(): Promise<number> {
   if (adapt.skip) {
     logBackgroundDeferred('Market Scanner', adapt.reason || 'adaptive');
     lastSkipReason = `delayed — ${adapt.reason}`;
+    noteSignalBlockedByGate(`adaptive: ${adapt.reason || 'scanner×'}`);
     lastPollAt = Date.now();
     lastPollMs = 0;
     return 0;
   }
   const qDepth = pendingBuyQueueDepth();
-  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH) {
+  // When Scanners RPC is healthy, do not skip the whole poll for Favourites
+  // buy-queue depth — mid-enrich still yields; core intake must keep flowing.
+  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH && !isSignalsRpcHealthy()) {
     skippedForBuyQueue += 1;
     lastSkipReason = `skip poll — ${qDepth} wallet buy(s) pending (threshold ${SCANNER_YIELD_QUEUE_DEPTH})`;
+    noteSignalBlockedByGate(
+      `buy_queue_yield: ${qDepth} pending (threshold ${SCANNER_YIELD_QUEUE_DEPTH})`
+    );
     console.log(
       `[marketScanner] Skipping poll — ${qDepth} wallet buy(s) pending ` +
         `(threshold ${SCANNER_YIELD_QUEUE_DEPTH})`
     );
     return 0;
+  }
+  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH && isSignalsRpcHealthy()) {
+    console.log(
+      `[marketScanner] Buy queue ${qDepth} — continuing poll (signals_rpc_healthy); mid-enrich still yields`
+    );
   }
   pollInFlight = true;
   const t0 = Date.now();

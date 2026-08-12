@@ -488,11 +488,25 @@ export async function runAlphaScanFeedPass(): Promise<number> {
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
     logBackgroundDeferred('AlphaScan', defer.reason || 'Scanners busy');
+    try {
+      const { noteSignalBlockedByGate } =
+        require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+      noteSignalBlockedByGate(`alpha_defer: ${defer.reason || 'Scanners busy'}`);
+    } catch {
+      /* */
+    }
     return 0;
   }
   const adapt = shouldSkipScannerTick('alpha_scan');
   if (adapt.skip) {
     logBackgroundDeferred('AlphaScan', adapt.reason || 'adaptive');
+    try {
+      const { noteSignalBlockedByGate } =
+        require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+      noteSignalBlockedByGate(`alpha_adaptive: ${adapt.reason || 'scanner×'}`);
+    } catch {
+      /* */
+    }
     return 0;
   }
 

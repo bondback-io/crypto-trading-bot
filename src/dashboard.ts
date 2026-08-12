@@ -7706,12 +7706,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="mint mt-1 text-xs" id="watched-sub">—</div>
         </div>
         <div class="card">
-          <div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours."></span></div>
+          <div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="24h activity count below. LIVE uses last-15m wallet/scanner activity. Intake line = recent scanner admissions (15m) vs gate blocks — not the same as 24h LIVE."></span></div>
           <div class="text-lg font-semibold" id="signals">—</div>
           <div class="signal-light mt-1.5" id="signal-light" title="Green = recent wallet-buy. Amber = quiet/paused. Red = stopped / no wallets / RPC down.">
             <span class="dot dot-quiet" id="signal-light-dot"></span>
             <span id="signal-light-label">—</span>
           </div>
+          <div class="mint mt-1 text-xs" id="signal-intake-line" title="Recent scanner intake (15m) vs whole-poll gate blocks">—</div>
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
@@ -27115,6 +27116,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (lc.secondarySkipsRecent != null && lc.secondarySkipsRecent > 0) {
           parts.push('Scanners skips60s=' + lc.secondarySkipsRecent);
         }
+        if (lc.signalsRpcHealthy) parts.push('signals_rpc_healthy');
+        const si = (status.monitor && status.monitor.signalIntake) || {};
+        if (si.signalsAdmitted15m != null || si.signalsBlockedByGate15m != null) {
+          parts.push(
+            'signals15m admitted=' + (si.signalsAdmitted15m || 0) +
+            ' blocked=' + (si.signalsBlockedByGate15m || 0) +
+            ' ' + (si.signalsPerMin || 0) + '/min'
+          );
+        }
         if (rpc.criticalKeyIsolated) parts.push('Critical key isolated');
         if (rpc.nonCriticalBlockedFromCritical) {
           parts.push('blocked→Critical ' + rpc.nonCriticalBlockedFromCritical);
@@ -27256,6 +27266,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       document.getElementById('signals').textContent = status.monitor.recentSignals;
       (function updateSignalLight() {
         const light = status.monitor.signalLight || {};
+        const intake = status.monitor.signalIntake || {};
         const state = light.state || ((!status.monitor.running || status.monitor.paused) ? (status.monitor.paused ? 'paused' : 'off') : 'quiet');
         const label = light.label || (
           state === 'live' ? 'Signals: LIVE' :
@@ -27266,6 +27277,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const dot = document.getElementById('signal-light-dot');
         const lab = document.getElementById('signal-light-label');
         const wrap = document.getElementById('signal-light');
+        const intakeEl = document.getElementById('signal-intake-line');
         if (dot) {
           const cls =
             state === 'live' ? 'dot-live' :
@@ -27275,13 +27287,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           dot.className = 'dot ' + cls;
         }
         if (lab) lab.textContent = label;
+        const ageMs = intake.lastSignalAgeMs != null ? intake.lastSignalAgeMs : light.ageMs;
+        const age =
+          ageMs == null ? 'none yet' :
+          ageMs < 60_000 ? Math.round(ageMs / 1000) + 's ago' :
+          Math.round(ageMs / 60000) + 'm ago';
         if (wrap) {
-          const age = light.ageMs != null ? Math.round(light.ageMs / 60000) + 'm ago' : 'none yet';
           wrap.title =
-            'Green = wallet-buy seen in last 15m (monitor running + wallets watched). ' +
+            'Green = activity in last 15m (monitor running). ' +
             'Amber = running but quiet (or paused). ' +
             'Red = stopped, no wallets, or RPC unhealthy. ' +
-            'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? status.monitor.recentSignals ?? 0);
+            'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? status.monitor.recentSignals ?? 0) +
+            ' · Intake 15m admitted: ' + (intake.signalsAdmitted15m ?? 0) +
+            ' · blocked: ' + (intake.signalsBlockedByGate15m ?? 0) +
+            ' · /min: ' + (intake.signalsPerMin ?? 0) +
+            ' · scanners_rpc_healthy: ' + (intake.signalsRpcHealthy ? 'yes' : 'no');
+        }
+        if (intakeEl) {
+          const top = Array.isArray(intake.topBlockReasons) && intake.topBlockReasons[0]
+            ? intake.topBlockReasons[0].reason
+            : '';
+          intakeEl.textContent =
+            'Intake 15m: ' + (intake.signalsAdmitted15m ?? 0) + ' admitted · ' +
+            (intake.signalsPerMin ?? 0) + '/min · age ' + age +
+            ' · gate blocks ' + (intake.signalsBlockedByGate15m ?? 0) +
+            ' · RPC ' + (intake.signalsRpcHealthy ? 'healthy' : 'not healthy') +
+            (top ? ' · top: ' + top : '');
         }
       })();
       (function updateEntryPathLight() {

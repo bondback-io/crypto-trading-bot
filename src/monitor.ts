@@ -8578,6 +8578,16 @@ function pushActivityFeed(event: WalletBuyEvent): void {
   event.detectedAt = detected;
   signals24hTimestamps.push(detected);
   pruneSignals24hCount();
+  try {
+    const { noteSignalAdmitted } =
+      require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+    // Count early scanner/hybrid intake for 15m admitted / signals/min.
+    if (event.entrySource === 'scanner' || event.entrySource === 'hybrid') {
+      noteSignalAdmitted();
+    }
+  } catch {
+    /* */
+  }
 }
 
 function pruneSignals24hCount(now = Date.now()): void {
@@ -9008,6 +9018,14 @@ export function getMonitorStatus(): {
   lastOpenMarkRefreshAt: number;
   lastPollRateLimited: boolean;
   pollRotationOffset: number;
+  signalIntake: {
+    signalsRpcHealthy: boolean;
+    signalsAdmitted15m: number;
+    signalsBlockedByGate15m: number;
+    signalsPerMin: number;
+    lastSignalAgeMs: number | null;
+    topBlockReasons: Array<{ reason: string; count: number }>;
+  };
 } {
   const risk = getRiskStatus({
     equitySol: paperTrader.getEquitySol(),
@@ -9020,6 +9038,26 @@ export function getMonitorStatus(): {
   const enabled = config.smartWallets.filter((w) => w.enabled).length;
   const signalLight = getSignalLightStatus();
   const entryPathLight = getEntryPathLightStatus();
+
+  let signalsRpcHealthy = false;
+  let intake = {
+    signalsAdmitted15m: 0,
+    signalsBlockedByGate15m: 0,
+    signalsPerMin: 0,
+    topBlockReasons: [] as Array<{ reason: string; count: number }>,
+  };
+  try {
+    const { isSignalsRpcHealthy, getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    const { getSignalIntakeStats } =
+      require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+    signalsRpcHealthy =
+      isSignalsRpcHealthy() ||
+      Boolean(getRpcLoadControlSnapshot().signalsRpcHealthy);
+    intake = getSignalIntakeStats();
+  } catch {
+    /* */
+  }
 
   return {
     running,
@@ -9061,6 +9099,14 @@ export function getMonitorStatus(): {
     lastOpenMarkRefreshAt,
     lastPollRateLimited,
     pollRotationOffset,
+    signalIntake: {
+      signalsRpcHealthy,
+      signalsAdmitted15m: intake.signalsAdmitted15m,
+      signalsBlockedByGate15m: intake.signalsBlockedByGate15m,
+      signalsPerMin: intake.signalsPerMin,
+      lastSignalAgeMs: signalLight.ageMs ?? null,
+      topBlockReasons: intake.topBlockReasons,
+    },
   };
 }
 

@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.313',
+    title: 'Restore scanner signals when Scanners RPC is healthy',
+    sections: ['execution', 'overview'],
+    items: [
+      'When Scanners latency is healthy (~<150ms), low-pri bonding_curve/token_metrics skips no longer latch scanner×3; whole-poll skips are bypassed so Market intake keeps flowing.',
+      'Favourites buy-queue depth no longer cancels the whole Market poll while signals_rpc_healthy (mid-enrich still yields); Overview shows 15m admitted / gate blocks / signals/min beside LIVE.',
+    ],
+  },
+  {
     version: '1.2.312',
     title: 'Clear false STRESSED + secondary backlog prune',
     sections: ['execution', 'overview'],
