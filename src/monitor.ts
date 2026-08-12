@@ -16,6 +16,7 @@ import {
   getConnection,
   getRpcStats,
   getRpcUrl,
+  peekRpcUrl,
   runWithRpcRole,
   isRpcGateSkipError,
   isUtilityOnWeakPublic,
@@ -1679,7 +1680,7 @@ export function getSoftWatchRuntimeSnapshot(): {
   const pollRole = getRpcRoleFor('wallet_poll', cap.shareLoad);
   let utilityHost: string | null = null;
   try {
-    utilityHost = new URL(getRpcUrl(pollRole)).hostname;
+    utilityHost = new URL(peekRpcUrl(pollRole)).hostname;
   } catch {
     utilityHost = null;
   }

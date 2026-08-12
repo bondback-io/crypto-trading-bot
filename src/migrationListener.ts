@@ -19,8 +19,10 @@ import { config } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   getConnection,
+  getRpcGateSnapshot,
   getRpcUrl,
   noteActiveRpcFailure,
+  peekRpcLatencyMs,
   runWithRpcRole,
   shouldDeferHeavyRpc,
 } from './connection';
@@ -87,6 +89,8 @@ let onPriorityHandler: MigrationHandler | null = null;
 
 const MIGRATION_TTL_MS = 30 * 60 * 1000;
 const POLL_MS = 12_000;
+/** When Helius is hot or the gate is stressed, back off polls (still Critical lane). */
+const POLL_MS_STRESSED = 20_000;
 const MAX_PROCESSED_SIGS = 800;
 const WS_STALE_MS = 4 * 60 * 1000;
 const HEALTH_CHECK_MS = 45_000;
@@ -101,12 +105,28 @@ const MAX_WS_PARSE_IN_FLIGHT = 1;
 const seededPollPrograms = new Set<string>();
 let rateLimitedUntil = 0;
 let lastRateLimitLogAt = 0;
+let lastMigrationPollAt = 0;
+let lastTimeoutLogAt = 0;
 
+/** True 429 / provider rate-limit only — timeouts must not mark Helius unhealthy. */
 function isRpcRateLimitError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return (
-    /429|rate.?limit|-32429|too many requests/i.test(msg) ||
-    /connect.?timeout|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|fetch failed/i.test(msg)
+  return /429|rate.?limit|-32429|too many requests/i.test(msg);
+}
+
+function isRpcTimeoutOrFetchError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|probe timeout/i.test(
+    msg
+  );
+}
+
+function noteMigrationTimeout(err: unknown): void {
+  if (Date.now() - lastTimeoutLogAt < 15_000) return;
+  lastTimeoutLogAt = Date.now();
+  const msg = err instanceof Error ? err.message : String(err);
+  console.warn(
+    `[migration] RPC timeout/fetch failed — skipping this cycle (not marking Helius unhealthy): ${String(msg).slice(0, 120)}`
   );
 }
 
@@ -465,6 +485,17 @@ function looksLikeMigrationLogs(
 async function pollMigrations(): Promise<void> {
   if (!running) return;
   if (Date.now() < rateLimitedUntil) return;
+  let gateStressed = false;
+  try {
+    gateStressed = Boolean(getRpcGateSnapshot().stressed);
+  } catch {
+    gateStressed = false;
+  }
+  const primaryMs = peekRpcLatencyMs('primary');
+  const heliusHot = primaryMs != null && primaryMs >= 500;
+  const minGap = gateStressed || heliusHot ? POLL_MS_STRESSED : POLL_MS;
+  if (lastMigrationPollAt && Date.now() - lastMigrationPollAt < minGap) return;
+  lastMigrationPollAt = Date.now();
 
   const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
   return runWithRpcRole(role, async () => {
@@ -523,6 +554,10 @@ async function pollMigrations(): Promise<void> {
       armRateLimitBackoff(err);
       return;
     }
+    if (isRpcTimeoutOrFetchError(err)) {
+      noteMigrationTimeout(err);
+      return;
+    }
     console.error('[migration] Poll error:', err);
   }
   }, 'migration');
@@ -571,6 +606,10 @@ async function processMigrationTx(
     if (isRpcRateLimitError(err)) {
       armRateLimitBackoff(err);
       return false;
+    }
+    if (isRpcTimeoutOrFetchError(err)) {
+      noteMigrationTimeout(err);
+      return true;
     }
     // Leave sig unmarked so a transient RPC miss can retry next poll
     if (Math.random() < 0.08) {

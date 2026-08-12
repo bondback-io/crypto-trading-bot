@@ -2,8 +2,8 @@
  * RPC URL sanitization + free-tier multi-RPC manager.
  *
  * Priority order (failover pool):
- *   1. Helius Free     — HELIUS_API_KEY  → https://mainnet.helius-rpc.com/?api-key=…
- *   2. Alchemy Free    — ALCHEMY_API_KEY → https://solana-mainnet.g.alchemy.com/v2/…
+ *   1. Helius Free     — HELIUS_RPC_URL or HELIUS_API_KEY
+ *   2. Alchemy Free    — ALCHEMY_RPC_URL or ALCHEMY_API_KEY
  *   3. QuickNode       — QUICKNODE_RPC_URL (mid-tier paid failover for Critical/Scanners)
  *   4. RPC_URL / RPC_PRIMARY             — Triton api.mainnet.solana.com preferred for Utility
  *   5. Public Solana                     — https://solana-rpc.publicnode.com
@@ -82,15 +82,25 @@ function isUsableApiKey(key: string | null | undefined): boolean {
   return true;
 }
 
-/** Build Helius mainnet HTTP RPC URL from API key (null if unset/placeholder). */
+/** Build Helius mainnet HTTP RPC URL from HELIUS_RPC_URL or API key. */
 export function buildHeliusRpcUrl(apiKey?: string | null): string | null {
+  const fromUrl = (process.env.HELIUS_RPC_URL || '').trim();
+  if (fromUrl && isUsableRpcUrl(fromUrl)) return fromUrl;
+  if (fromUrl && isUsableApiKey(fromUrl)) {
+    return `https://mainnet.helius-rpc.com/?api-key=${fromUrl}`;
+  }
   const key = (apiKey ?? process.env.HELIUS_API_KEY)?.trim();
   if (!isUsableApiKey(key)) return null;
   return `https://mainnet.helius-rpc.com/?api-key=${key}`;
 }
 
-/** Build Alchemy Solana mainnet HTTP RPC URL from API key (null if unset/placeholder). */
+/** Build Alchemy Solana mainnet HTTP RPC URL from ALCHEMY_RPC_URL or API key. */
 export function buildAlchemyRpcUrl(apiKey?: string | null): string | null {
+  const fromUrl = (process.env.ALCHEMY_RPC_URL || '').trim();
+  if (fromUrl && isUsableRpcUrl(fromUrl)) return fromUrl;
+  if (fromUrl && isUsableApiKey(fromUrl)) {
+    return `https://solana-mainnet.g.alchemy.com/v2/${fromUrl}`;
+  }
   const key = (apiKey ?? process.env.ALCHEMY_API_KEY)?.trim();
   if (!isUsableApiKey(key)) return null;
   return `https://solana-mainnet.g.alchemy.com/v2/${key}`;
@@ -480,10 +490,14 @@ export function rpcEndpointsFromEnv(
             ? ' (publicnode utility)'
             : '')
   );
-  if (!helius && !alchemy) {
+  if (!helius) {
     console.warn(
-      '[rpc] HELIUS_API_KEY / ALCHEMY_API_KEY unset — using RPC_URL / public. ' +
-        'Set free Helius + Alchemy keys for better speed and automatic failover.'
+      '[rpc] HELIUS_API_KEY / HELIUS_RPC_URL unset — preferred primary is not Helius ' +
+        '(using RPC_URL / Alchemy / public). Set a Helius key for Critical-lane stability.'
+    );
+  } else if (!alchemy) {
+    console.warn(
+      '[rpc] ALCHEMY_API_KEY / ALCHEMY_RPC_URL unset — scanners use RPC_SECONDARY / public.'
     );
   }
 

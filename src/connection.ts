@@ -1111,6 +1111,43 @@ export function getRpcUrl(role?: RpcRole): string {
   return endpoints[idx]?.endpoint.url || DEFAULT_RPC;
 }
 
+/** Observational URL for a lane — does not failover or mutate active indexes. */
+export function peekRpcUrl(role?: RpcRole): string {
+  ensureEndpoints();
+  const r = role ?? currentRole();
+  const clamp = (i: number, fallback: number) =>
+    i >= 0 && i < endpoints.length ? i : fallback;
+  const idx =
+    r === 'secondary'
+      ? clamp(activeSecondary, preferredSecondary)
+      : r === 'utility'
+        ? clamp(activeUtility, preferredUtility)
+        : clamp(activePrimary, preferredPrimary);
+  return endpoints[idx]?.endpoint.url || DEFAULT_RPC;
+}
+
+/** Observational EWMA latency for a lane (null if never sampled). */
+export function peekRpcLatencyMs(role: RpcRole): number | null {
+  ensureEndpoints();
+  const clamp = (i: number, fallback: number) =>
+    i >= 0 && i < endpoints.length ? i : fallback;
+  const pref =
+    role === 'secondary'
+      ? preferredSecondary
+      : role === 'utility'
+        ? preferredUtility
+        : preferredPrimary;
+  const active =
+    role === 'secondary'
+      ? activeSecondary
+      : role === 'utility'
+        ? activeUtility
+        : activePrimary;
+  const state = endpoints[clamp(pref, active)] || endpoints[clamp(active, pref)];
+  const ms = state?.latencyMs;
+  return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+}
+
 export function getConnection(role?: RpcRole): Connection {
   ensureEndpoints();
   const r = role ?? currentRole();
@@ -1233,8 +1270,13 @@ function recordFailure(index: number, error: string): void {
       error
     )
   ) {
-    // Hard network/timeout failures — quarantine so health/withRpc stop hammering it.
-    if (state.consecutiveFailures >= 2) {
+    const isPrefPrimary = index === preferredPrimary;
+    const isHealthProbe = rpcFeatureAls.getStore() === 'health_probe';
+    // Preferred Helius: never quarantine on health-probe timeouts (recovery is
+    // probe-only under Share ON). Real traffic still needs 3 consecutive fails.
+    if (isPrefPrimary && isHealthProbe) {
+      /* mark unhealthy below; keep probing every health cycle */
+    } else if (state.consecutiveFailures >= (isPrefPrimary ? 3 : 2)) {
       enterQuarantine(state, error.slice(0, 120));
     }
   } else if (state.consecutiveFailures >= (config.rpc?.failureThreshold ?? 3)) {
@@ -1614,8 +1656,8 @@ export function getRpcStats(): {
   };
 
   return {
-    active: getActiveEndpointLabel('primary'),
-    activeUrl: maskUrl(getRpcUrl('primary')),
+    active: pActive?.endpoint.label || 'unknown',
+    activeUrl: maskUrl(pActive?.endpoint.url || ''),
     primary: {
       label: pActive?.endpoint.label || 'primary',
       url: maskUrl(pActive?.endpoint.url || ''),

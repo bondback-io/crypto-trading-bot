@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.304',
+    title: 'Stabilize Helius primary + cut false quarantine',
+    sections: ['execution', 'overview'],
+    items: [
+      'Migration timeouts are not 429s — do not mark Helius unhealthy; poll backs off to 20s when primary EWMA ≥500ms or gate stressed.',
+      'Preferred Helius: no quarantine on health-probe timeouts; 3 consecutive real-traffic timeouts before quarantine. Honor HELIUS_RPC_URL / ALCHEMY_RPC_URL. GET /api/rpc no longer flips lanes.',
+    ],
+  },
+  {
     version: '1.2.303',
     title: 'Fix dashboard JS parse stall from Status error regex',
     sections: ['overview'],
