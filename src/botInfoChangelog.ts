@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.303',
+    title: 'Fix dashboard JS parse stall from Status error regex',
+    sections: ['overview'],
+    items: [
+      'Status refresh error sanitizer used /[\\r\\n]/ and /\\s/ inside the HTML template literal, which broke the browser script parse so refresh never ran (all metrics dashed). Replaced with string splits / indexOf.',
+    ],
+  },
+  {
     version: '1.2.302',
     title: 'Unstick dashboard refresh under RPC stress',
     sections: ['overview', 'execution'],

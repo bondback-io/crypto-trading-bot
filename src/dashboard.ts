@@ -28230,13 +28230,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (detail) {
           let msg = '';
           try {
-            msg = String((err && err.message) || '').replace(/[\r\n]+/g, ' ').trim();
+            // Avoid /[\\r\\n]/ and /\\s/ regexes here — this file is a template
+            // literal, so those escapes break the browser script parse and stall the UI.
+            msg = String((err && err.message) || '')
+              .split(String.fromCharCode(10)).join(' ')
+              .split(String.fromCharCode(13)).join(' ')
+              .trim();
           } catch (_) {
             msg = '';
           }
           if (/map is not a function/i.test(msg)) {
             msg = 'bad activity data';
-          } else if (!msg || msg.length > 120 || /function\s*\(|=>\s*\{/.test(msg)) {
+          } else if (!msg || msg.length > 120 || msg.indexOf('function') >= 0 || msg.indexOf('=>') >= 0) {
             msg = 'refresh failed';
           } else {
             msg = msg.slice(0, 120);
