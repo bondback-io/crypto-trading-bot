@@ -26399,8 +26399,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               rpc.summary === 'provider_down' ||
               rpc.summary === 'degraded' ||
               (rpc.gate && rpc.gate.stressed) ||
-              (lc && lc.shedBackground) ||
-              (lc && (lc.utilitySlowFactor || 1) >= 2))
+              (lc && lc.shedBackground))
         );
       } catch (_) {
         window._rpcStressed = false;
@@ -26820,7 +26819,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const critFo = Boolean(lanes.critical && lanes.critical.failover);
         const scanFo = Boolean(lanes.scanners && lanes.scanners.failover);
         setChip('rpc-chip-all', summary === 'all_sticky' || summary === 'all_healthy', 'is-on');
-        setChip('rpc-chip-degraded', summary === 'degraded', 'is-warn');
+        setChip(
+          'rpc-chip-degraded',
+          summary === 'degraded' ||
+            (rpcObj && rpcObj.degradedParts && rpcObj.degradedParts.critical),
+          'is-warn'
+        );
         setChip('rpc-chip-failover', summary === 'emergency_failover', 'is-warn');
         setChip('rpc-chip-down', summary === 'lane_down' || summary === 'provider_down', 'is-bad');
         const plain = document.getElementById('rpc-health-plain');
@@ -27063,16 +27067,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ' ' + (row.inFlight != null ? row.inFlight : '—') + '/' + (row.maxConcurrent != null ? row.maxConcurrent : '—') +
             ' q' + (row.queued != null ? row.queued : 0) +
             ' skip' + (row.skipped != null ? row.skipped : 0);
-          if (role === 'secondary' && row.deduped != null) {
-            return base + ' dedupe' + row.deduped;
+          if (role === 'secondary') {
+            let extra = '';
+            if (row.deduped != null) extra += ' dedupe' + row.deduped;
+            const reasons = row.skippedByReason || {};
+            const bits = [];
+            if (reasons.rate) bits.push('rate' + reasons.rate);
+            if (reasons.queue_full) bits.push('qfull' + reasons.queue_full);
+            if (reasons.wait_timeout) bits.push('timeout' + reasons.wait_timeout);
+            if (reasons.stale) bits.push('stale' + reasons.stale);
+            if (reasons.evicted_low_pri) bits.push('evict' + reasons.evicted_low_pri);
+            if (bits.length) extra += ' [' + bits.join(',') + ']';
+            return base + extra;
           }
           return base;
         };
+        const stressBits = [];
+        if (g.stressed) stressBits.push('STRESSED Critical/Scanners');
+        if (g.utilityStressed) stressBits.push('utility busy');
+        if (g.stressedSince) {
+          stressBits.push('since ' + Math.round((Date.now() - Number(g.stressedSince)) / 1000) + 's');
+        }
         gateEl.textContent = g.lanes
           ? ('Lane gate: ' + fmt('primary') + ' · ' + fmt('secondary') + ' · ' + fmt('utility') +
-            (g.stressed ? ' · STRESSED (background queued/skipped)' : ''))
+            (stressBits.length ? ' · ' + stressBits.join(' · ') : '') +
+            (g.backlog != null ? ' · backlog ' + g.backlog : ''))
           : 'Lane gate: —';
-        gateEl.style.color = g.stressed ? '#fbbf24' : '#94a3b8';
+        gateEl.style.color = g.stressed ? '#fbbf24' : (g.utilityStressed ? '#94a3b8' : '#94a3b8');
       }
       const loadEl = document.getElementById('rpc-load-status');
       if (loadEl) {
@@ -27084,8 +27105,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             'Adaptive: scanner×' + (lc.scannerSlowFactor || 1) +
             ' utility×' + (lc.utilitySlowFactor || 1) +
             (lc.shedBackground ? ' shedON' : '') +
-            (lc.throttledByOwnLaneOnly ? ' scanners=ownLaneOnly' : '')
+            (lc.throttledByOwnLaneOnly ? ' scanners=ownLaneOnly' : '') +
+            (lc.utilityShedHard ? ' utilityShedHard' : '')
           );
+        }
+        if (rpc.degradedBy && rpc.degradedBy !== 'none') {
+          parts.push('degradedBy=' + rpc.degradedBy);
         }
         if (lc.secondarySkipsRecent != null && lc.secondarySkipsRecent > 0) {
           parts.push('Scanners skips60s=' + lc.secondarySkipsRecent);
@@ -27094,7 +27119,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (rpc.nonCriticalBlockedFromCritical) {
           parts.push('blocked→Critical ' + rpc.nonCriticalBlockedFromCritical);
         }
-        if (rpc.utilityWeakPublic) parts.push('Utility=weak public (Favourites slowed)');
+        if (rpc.utilityWeakPublic) parts.push('Utility=weak public (Favourites hard-shed)');
         if (q.length) {
           parts.push(
             'Quarantine: ' + q.map(function (row) {
@@ -27102,11 +27127,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             }).join(', ')
           );
         }
-        if (lc.reasons && lc.reasons.length) {
-          parts.push(lc.reasons.slice(0, 2).join('; '));
+        if (lc.criticalReasons && lc.criticalReasons.length) {
+          parts.push(lc.criticalReasons[0]);
+        } else if (lc.utilityReasons && lc.utilityReasons.length) {
+          parts.push(lc.utilityReasons[0]);
+        } else if (lc.reasons && lc.reasons.length) {
+          parts.push(lc.reasons[0]);
         }
         loadEl.textContent = parts.length ? parts.join(' · ') : 'Load control: normal';
-        loadEl.style.color = (lc.shedBackground || q.length || rpc.utilityWeakPublic || (lc.scannerSlowFactor || 1) > 1) ? '#fbbf24' : '#94a3b8';
+        loadEl.style.color = (lc.shedBackground || (rpc.degradedParts && rpc.degradedParts.critical) || (lc.scannerSlowFactor || 1) > 1)
+          ? '#fbbf24'
+          : (rpc.utilityWeakPublic || lc.utilityShedHard ? '#94a3b8' : '#94a3b8');
       }
       const rpcBanner = document.getElementById('rpc-banner');
       if (rpcBanner) {

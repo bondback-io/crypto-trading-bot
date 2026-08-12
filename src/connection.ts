@@ -1945,6 +1945,12 @@ export function getRpcStats(): {
   nonCriticalBlockedFromCritical: number;
   criticalKeyIsolated: boolean;
   summary: 'all_sticky' | 'degraded' | 'emergency_failover' | 'lane_down';
+  degradedParts: {
+    critical: boolean;
+    scanners: boolean;
+    utility: boolean;
+  };
+  degradedBy: 'none' | 'critical' | 'scanners' | 'utility';
   plainLanguage: string;
   lanes: {
     critical: {
@@ -2033,8 +2039,13 @@ export function getRpcStats(): {
   const gate = getRpcGateSnapshot();
   if (!warning && gate.stressed) {
     warning =
-      'RPC lane gate stressed — background work is being queued/skipped to protect Critical. ' +
-      `Utility queue ${gate.lanes.utility.queued}, skipped ${gate.lanes.utility.skipped}.`;
+      'Critical/Scanners gate live-stressed — background queued/skipped. ' +
+      `Primary q${gate.lanes.primary.queued} inFlight ${gate.lanes.primary.inFlight}/${gate.lanes.primary.maxConcurrent}; ` +
+      `Scanners q${gate.lanes.secondary.queued} inFlight ${gate.lanes.secondary.inFlight}/${gate.lanes.secondary.maxConcurrent}.`;
+  } else if (!warning && gate.utilityStressed) {
+    warning =
+      'Utility lane busy (Favourites/activity) — not Critical STRESSED. ' +
+      `Utility q${gate.lanes.utility.queued} inFlight ${gate.lanes.utility.inFlight}/${gate.lanes.utility.maxConcurrent}.`;
   }
   // Lifetime skip counter is diagnostic only — do not warn/slow from it.
 
@@ -2121,21 +2132,56 @@ export function getRpcStats(): {
   const utilFo = uIdx !== preferredUtility;
   // Honesty: emergency only when Critical/Scanners left their preferred sticky host.
   // Idle quarantined Helius must not flip summary while Alchemy Critical is sticky.
+  // Global degraded = Critical pressure only — not utility lifetime skips / weak public.
+  const primaryLiveStress =
+    gate.lanes.primary.queued > 0 ||
+    gate.lanes.primary.inFlight >= gate.lanes.primary.maxConcurrent;
+  const scannersLiveStress =
+    gate.lanes.secondary.queued > 2 ||
+    gate.lanes.secondary.inFlight >= gate.lanes.secondary.maxConcurrent;
+  const criticalDegraded = Boolean(
+    primaryLiveStress ||
+      (loadControl &&
+        loadControl.shedBackground &&
+        loadControl.shedProtectsPaidCritical) ||
+      (pPref?.latencyMs != null && pPref.latencyMs >= 450)
+  );
+  const scannersDegraded = Boolean(
+    scannersLiveStress ||
+      (loadControl && loadControl.scannerSlowFactor >= 3)
+  );
+  const utilityDegraded = Boolean(
+    gate.utilityStressed ||
+      (loadControl &&
+        (loadControl.utilityShedHard ||
+          loadControl.utilitySlowFactor >= 2.5 ||
+          loadControl.degradedBy === 'utility')) ||
+      isWeakPublicUtilityUrl(uActive?.endpoint.url)
+  );
+  const degradedParts = {
+    critical: criticalDegraded,
+    scanners: scannersDegraded,
+    utility: utilityDegraded,
+  };
   let summary: 'all_sticky' | 'degraded' | 'emergency_failover' | 'lane_down' =
     'all_sticky';
   if (!anyHealthy || pPref?.healthy === false) {
     summary = 'lane_down';
   } else if (critFo || scanFo) {
     summary = 'emergency_failover';
-  } else if (
-    gate.stressed ||
-    (loadControl &&
-      loadControl.shedBackground &&
-      loadControl.shedProtectsPaidCritical) ||
-    (pPref?.latencyMs != null && pPref.latencyMs >= 450)
-  ) {
+  } else if (criticalDegraded) {
     summary = 'degraded';
   }
+  const degradedBy =
+    loadControl?.degradedBy && loadControl.degradedBy !== 'none'
+      ? loadControl.degradedBy
+      : criticalDegraded
+        ? 'critical'
+        : scannersDegraded
+          ? 'scanners'
+          : utilityDegraded
+            ? 'utility'
+            : 'none';
   const lanes = {
     critical: {
       preferredLabel: pPref?.endpoint.label || 'unset',
@@ -2337,6 +2383,8 @@ export function getRpcStats(): {
       !isHeliusEndpoint(uPref) &&
       !isAlchemyEndpoint(uPref),
     summary,
+    degradedParts,
+    degradedBy,
     plainLanguage,
     lanes,
   };

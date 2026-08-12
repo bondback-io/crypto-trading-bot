@@ -1,12 +1,22 @@
 /**
  * Per-lane RPC concurrency + rate limits + in-flight job dedupe.
  * Prevents unbounded parallel calls that choke providers a few minutes after boot.
+ *
+ * Global STRESSED is live Critical+Scanners only — never lifetime utility.skipped.
  */
 
 /** Mirrors connection.RpcRole — kept local to avoid circular imports. */
 export type RpcGateRole = 'primary' | 'secondary' | 'utility';
 
 export type RpcGateDecision = 'run' | 'queued' | 'skipped_rate' | 'skipped_busy' | 'deduped';
+
+export type RpcSkipReason =
+  | 'rate'
+  | 'queue_full'
+  | 'wait_timeout'
+  | 'busy'
+  | 'stale'
+  | 'evicted_low_pri';
 
 export type RpcLaneGateStats = {
   role: RpcGateRole;
@@ -20,12 +30,17 @@ export type RpcLaneGateStats = {
   hitRateLimit: number;
   skipped: number;
   deduped: number;
+  skippedByReason: Record<string, number>;
 };
 
 export type RpcGateSnapshot = {
   lanes: Record<RpcGateRole, RpcLaneGateStats>;
   backlog: number;
+  /** Live Critical+Scanners pressure only (clears when those lanes quiet). */
   stressed: boolean;
+  /** Live utility queue/inFlight — Favourites defer, not global STRESSED. */
+  utilityStressed: boolean;
+  stressedSince: number | null;
 };
 
 type Waiter = {
@@ -46,6 +61,7 @@ type LaneState = {
   skipped: number;
   deduped: number;
   lastLogAt: number;
+  skippedByReason: Record<string, number>;
 };
 
 const CRITICAL_FEATURES = new Set([
@@ -55,6 +71,9 @@ const CRITICAL_FEATURES = new Set([
   'send_tx',
   'confirm_tx',
 ]);
+
+/** Low-priority secondary enrich — drop these first under queue pressure. */
+const LOW_PRI_SECONDARY = new Set(['bonding_curve', 'token_metrics']);
 
 function envInt(name: string, fallback: number, min: number, max: number): number {
   const raw = process.env[name];
@@ -112,6 +131,7 @@ function emptyLane(): LaneState {
     skipped: 0,
     deduped: 0,
     lastLogAt: 0,
+    skippedByReason: {},
   };
 }
 
@@ -127,6 +147,62 @@ function refill(lane: LaneState, role: RpcGateRole): void {
 function isCritical(feature?: string): boolean {
   if (!feature) return false;
   return CRITICAL_FEATURES.has(feature) || feature.startsWith('trade_');
+}
+
+function featureBucket(feature?: string): string {
+  const f = (feature || 'other').toLowerCase();
+  if (f.includes('bonding_curve')) return 'bonding_curve';
+  if (f.includes('token_metrics') || f.includes('holder')) return 'token_metrics';
+  if (f.includes('market_scanner') || f === 'market_scanner') return 'market_scanner';
+  if (f.includes('zion') || f === 'zion') return 'zion';
+  if (f.includes('alpha')) return 'alpha_scan';
+  return 'other';
+}
+
+function isLowPriSecondary(feature?: string): boolean {
+  return LOW_PRI_SECONDARY.has(featureBucket(feature));
+}
+
+function enrichStaleMs(feature?: string): number {
+  return isLowPriSecondary(feature) ? 1_500 : 3_000;
+}
+
+let lastSkipReasonLogAt = 0;
+let lastStaleDropLogAt = 0;
+let stressedSince: number | null = null;
+let lastDegradedClearedLogAt = 0;
+
+function bumpSkip(
+  role: RpcGateRole,
+  reason: RpcSkipReason,
+  feature?: string
+): void {
+  const lane = lanes[role];
+  lane.skipped += 1;
+  lane.skippedByReason[reason] = (lane.skippedByReason[reason] || 0) + 1;
+  const bucket = featureBucket(feature);
+  lane.skippedByReason[`feature:${bucket}`] =
+    (lane.skippedByReason[`feature:${bucket}`] || 0) + 1;
+  if (role === 'secondary') {
+    const now = Date.now();
+    if (now - lastSkipReasonLogAt > 12_000) {
+      lastSkipReasonLogAt = now;
+      console.warn(
+        `[secondary_skip_reason] reason=${reason} feature=${feature || 'ungated'} ` +
+          `bucket=${bucket}`
+      );
+    }
+  }
+}
+
+function noteSkipSample(role: RpcGateRole, feature?: string): void {
+  try {
+    const { noteBackgroundRpcSkip } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    noteBackgroundRpcSkip(role, feature);
+  } catch {
+    /* */
+  }
 }
 
 function logGate(
@@ -158,6 +234,62 @@ function logScannerCapped(
   );
 }
 
+/** Reject and remove aged waiters; returns how many dropped. */
+function pruneStaleWaiters(role: RpcGateRole): number {
+  const lane = lanes[role];
+  const limits = laneLimits(role);
+  const now = Date.now();
+  let dropped = 0;
+  const keep: Waiter[] = [];
+  for (const w of lane.waiters) {
+    const ttl =
+      role === 'secondary' ? enrichStaleMs(w.feature) : limits.maxWaitMs;
+    if (now - w.enqueuedAt > ttl) {
+      dropped += 1;
+      bumpSkip(role, 'stale', w.feature);
+      noteSkipSample(role, w.feature);
+      try {
+        w.reject(new RpcGateSkipError('busy', role, w.feature));
+      } catch {
+        /* */
+      }
+    } else {
+      keep.push(w);
+    }
+  }
+  lane.waiters = keep;
+  if (dropped > 0 && now - lastStaleDropLogAt > 12_000) {
+    lastStaleDropLogAt = now;
+    console.warn(
+      `[background_job_dropped_stale] role=${role} dropped=${dropped} remaining=${lane.waiters.length}`
+    );
+  }
+  return dropped;
+}
+
+/** Evict oldest low-priority secondary waiters to free a slot. */
+function evictLowPriSecondaryWaiters(need = 1): number {
+  const lane = lanes.secondary;
+  let evicted = 0;
+  for (let i = 0; i < lane.waiters.length && evicted < need; ) {
+    const w = lane.waiters[i]!;
+    if (isLowPriSecondary(w.feature)) {
+      lane.waiters.splice(i, 1);
+      bumpSkip('secondary', 'evicted_low_pri', w.feature);
+      noteSkipSample('secondary', w.feature);
+      try {
+        w.reject(new RpcGateSkipError('busy', 'secondary', w.feature));
+      } catch {
+        /* */
+      }
+      evicted += 1;
+    } else {
+      i += 1;
+    }
+  }
+  return evicted;
+}
+
 /**
  * Acquire a lane slot (concurrency + rate). Critical work waits; non-critical
  * may skip when the lane is saturated so background polls cannot pile up.
@@ -171,19 +303,14 @@ export async function acquireRpcLane(
   const critical = isCritical(feature);
 
   refill(lane, role);
+  if (role === 'secondary') pruneStaleWaiters(role);
 
   // Rate limit: critical waits briefly for a token; non-critical may skip.
   if (lane.tokens < 1) {
     lane.hitRateLimit += 1;
     if (!critical) {
-      lane.skipped += 1;
-      try {
-        const { noteBackgroundRpcSkip } =
-          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-        noteBackgroundRpcSkip(role, feature);
-      } catch {
-        /* */
-      }
+      bumpSkip(role, 'rate', feature);
+      noteSkipSample(role, feature);
       logGate(role, 'background delayed (rate limit / load protection)', {
         feature: feature || 'ungated',
         inFlight: lane.inFlight,
@@ -212,35 +339,56 @@ export async function acquireRpcLane(
   // Concurrency: wait in queue or skip.
   if (lane.inFlight >= limits.maxConcurrent) {
     lane.hitConcurrency += 1;
+
+    // Secondary: free space by dropping stale / low-pri before refusing signal work.
+    if (role === 'secondary' && !critical) {
+      pruneStaleWaiters(role);
+      if (
+        lane.waiters.length >= Math.max(0, limits.maxQueue - 1) ||
+        lane.inFlight >= limits.maxConcurrent
+      ) {
+        evictLowPriSecondaryWaiters(1);
+      }
+    }
+
     if (!critical && lane.waiters.length >= limits.maxQueue) {
-      lane.skipped += 1;
-      try {
-        const { noteBackgroundRpcSkip } =
-          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-        noteBackgroundRpcSkip(role, feature);
-      } catch {
-        /* */
+      // Last chance: evict low-pri if incoming is higher priority.
+      if (
+        role === 'secondary' &&
+        !isLowPriSecondary(feature) &&
+        evictLowPriSecondaryWaiters(1) > 0
+      ) {
+        /* fall through to enqueue */
+      } else {
+        bumpSkip(role, 'queue_full', feature);
+        noteSkipSample(role, feature);
+        logGate(role, 'background delayed (concurrency / load protection)', {
+          feature: feature || 'ungated',
+          inFlight: lane.inFlight,
+          queued: lane.waiters.length,
+          maxConcurrent: limits.maxConcurrent,
+        });
+        if (role === 'secondary') {
+          logScannerCapped('busy', feature, lane, limits);
+        }
+        throw new RpcGateSkipError('busy', role, feature);
       }
-      logGate(role, 'background delayed (concurrency / load protection)', {
-        feature: feature || 'ungated',
-        inFlight: lane.inFlight,
-        queued: lane.waiters.length,
-        maxConcurrent: limits.maxConcurrent,
-      });
-      if (role === 'secondary') {
-        logScannerCapped('busy', feature, lane, limits);
-      }
-      throw new RpcGateSkipError('busy', role, feature);
     }
     if (!critical && limits.maxQueue <= 0) {
-      lane.skipped += 1;
-      try {
-        const { noteBackgroundRpcSkip } =
-          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-        noteBackgroundRpcSkip(role, feature);
-      } catch {
-        /* */
-      }
+      bumpSkip(role, 'busy', feature);
+      noteSkipSample(role, feature);
+      throw new RpcGateSkipError('busy', role, feature);
+    }
+
+    // Still full after eviction attempts — skip low-pri immediately.
+    if (
+      role === 'secondary' &&
+      !critical &&
+      isLowPriSecondary(feature) &&
+      lane.waiters.length >= Math.max(0, limits.maxQueue - 1)
+    ) {
+      bumpSkip(role, 'busy', feature);
+      noteSkipSample(role, feature);
       throw new RpcGateSkipError('busy', role, feature);
     }
 
@@ -266,7 +414,8 @@ export async function acquireRpcLane(
           // Critical: proceed anyway (may briefly exceed cap) rather than fail entry.
           resolve();
         } else {
-          lane.skipped += 1;
+          bumpSkip(role, 'wait_timeout', feature);
+          noteSkipSample(role, feature);
           reject(new RpcGateSkipError('busy', role, feature));
         }
       }, maxWait);
@@ -291,6 +440,7 @@ export async function acquireRpcLane(
     if (released) return;
     released = true;
     lane.inFlight = Math.max(0, lane.inFlight - 1);
+    if (role === 'secondary') pruneStaleWaiters(role);
     const next = lane.waiters.shift();
     if (next) next.resolve();
   };
@@ -361,7 +511,9 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
     const lane = lanes[role];
     const limits = laneLimits(role);
     refill(lane, role);
-    backlog += lane.waiters.length + Math.max(0, lane.inFlight - Math.floor(limits.maxConcurrent * 0.75));
+    backlog +=
+      lane.waiters.length +
+      Math.max(0, lane.inFlight - Math.floor(limits.maxConcurrent * 0.75));
     out[role] = {
       role,
       inFlight: lane.inFlight,
@@ -374,20 +526,46 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
       hitRateLimit: lane.hitRateLimit,
       skipped: lane.skipped,
       deduped: lane.deduped,
+      skippedByReason: { ...lane.skippedByReason },
     };
   }
+  // Live Critical+Scanners only — never lifetime utility.skipped / hitConcurrency.
   const stressed =
-    out.utility.queued > 0 ||
-    out.utility.skipped > 0 ||
+    out.primary.queued > 0 ||
+    out.primary.inFlight >= out.primary.maxConcurrent ||
     out.secondary.queued > 2 ||
-    out.primary.hitConcurrency > 0 ||
-    out.primary.queued > 0;
-  return { lanes: out, backlog, stressed };
+    out.secondary.inFlight >= out.secondary.maxConcurrent;
+  const utilityStressed =
+    out.utility.queued > 0 ||
+    out.utility.inFlight >= out.utility.maxConcurrent;
+
+  const now = Date.now();
+  if (stressed) {
+    if (stressedSince == null) stressedSince = now;
+  } else if (stressedSince != null) {
+    const heldMs = now - stressedSince;
+    if (now - lastDegradedClearedLogAt > 15_000) {
+      lastDegradedClearedLogAt = now;
+      console.warn(
+        `[degraded_cleared_critical_healthy] gate STRESSED cleared after ${Math.round(heldMs / 1000)}s ` +
+          `(Critical+Scanners live pressure gone)`
+      );
+    }
+    stressedSince = null;
+  }
+
+  return {
+    lanes: out,
+    backlog,
+    stressed,
+    utilityStressed,
+    stressedSince,
+  };
 }
 
 /**
  * Scanners defer only on own-lane saturation / own-lane ×3.
- * Utility still yields when Critical is busy (Favourites protection).
+ * Utility yields when Critical busy or utility lane itself stressed.
  */
 export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = 'scanner'): {
   defer: boolean;
@@ -443,10 +621,10 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
       reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
     };
   }
-  if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
+  if (kind === 'utility' && (u.queued >= 2 || snap.utilityStressed)) {
     return {
       defer: true,
-      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued}, skipped ${u.skipped})`,
+      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued})`,
     };
   }
   return { defer: false, reason: null };

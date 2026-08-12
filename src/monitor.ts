@@ -1637,10 +1637,17 @@ export function resolveSoftWatchCap(): {
       require('./rpcGate') as typeof import('./rpcGate');
     const load = getRpcLoadControlSnapshot();
     const gate = getRpcGateSnapshot();
-    if (load.shedBackground || gate.stressed) {
+    if (load.shedBackground || gate.stressed || load.utilityShedHard) {
       const tightened = Math.min(effectiveCap, 4);
       if (tightened < effectiveCap) {
         effectiveCap = tightened;
+        pressureTightened = true;
+      }
+    }
+    if (load.utilityShedHard || load.utilitySlowFactor >= 3) {
+      const hard = Math.min(effectiveCap, 2);
+      if (hard < effectiveCap) {
+        effectiveCap = hard;
         pressureTightened = true;
       }
     }

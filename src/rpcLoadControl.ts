@@ -4,8 +4,11 @@
  *
  * Scanner slowdown is own-lane only (secondary skips / Scanners latency).
  * Critical stress still sheds Favourites/utility, never raises scanner×.
+ * Utility weak public sheds Favourites hard without latching global STRESSED.
  */
 import type { RpcGateRole } from './rpcGate';
+
+export type DegradedBy = 'none' | 'critical' | 'scanners' | 'utility';
 
 export type RpcLoadControlSnapshot = {
   /** 1 = normal; higher = slower (e.g. 2 = half rate). */
@@ -15,7 +18,8 @@ export type RpcLoadControlSnapshot = {
   shedBackground: boolean;
   /**
    * True when shedBackground is protecting a paid Critical lane.
-   * False when Critical is itself weak public — Favourites must not hard-stop.
+   * False when Critical is itself weak public — Favourites must not hard-stop
+   * from Critical shed alone (utility hard-shed is separate).
    */
   shedProtectsPaidCritical: boolean;
   /**
@@ -24,6 +28,12 @@ export type RpcLoadControlSnapshot = {
    */
   throttledByOwnLaneOnly: boolean;
   reasons: string[];
+  criticalReasons: string[];
+  utilityReasons: string[];
+  scannerReasons: string[];
+  degradedBy: DegradedBy;
+  /** Utility-only hard shed (weak public / high utility×) — not Critical shed. */
+  utilityShedHard: boolean;
   secondarySkipsRecent: number;
   updatedAt: number;
 };
@@ -43,12 +53,18 @@ let lastSnapshot: RpcLoadControlSnapshot = {
   shedProtectsPaidCritical: false,
   throttledByOwnLaneOnly: false,
   reasons: [],
+  criticalReasons: [],
+  utilityReasons: [],
+  scannerReasons: [],
+  degradedBy: 'none',
+  utilityShedHard: false,
   secondarySkipsRecent: 0,
   updatedAt: Date.now(),
 };
 
 let lastLogAt = 0;
 let lastOwnLaneLogAt = 0;
+let lastUtilityShedHardLogAt = 0;
 
 /** Record a non-critical skip so adaptive backoff can react. */
 export function noteBackgroundRpcSkip(role: RpcGateRole, feature?: string): void {
@@ -98,7 +114,8 @@ function recompute(external?: {
   let scannerSlowFactor = 1;
   let utilitySlowFactor = 1;
   let shedBackground = false;
-  const reasons: string[] = [];
+  const criticalReasons: string[] = [];
+  const utilityReasons: string[] = [];
   const scannerReasons: string[] = [];
   // When Critical is itself public, latency/failover must not kill Favourites —
   // there is no paid lane to protect.
@@ -129,9 +146,11 @@ function recompute(external?: {
   if (pLat != null && pLat >= 700) {
     if (paidCritical) {
       shedBackground = true;
-      reasons.push(`Critical latency ${Math.round(pLat)}ms → shed background`);
+      criticalReasons.push(
+        `Critical latency ${Math.round(pLat)}ms → shed background`
+      );
     } else {
-      reasons.push(
+      criticalReasons.push(
         `Critical (public) latency ${Math.round(pLat)}ms → soft slow only`
       );
     }
@@ -140,9 +159,11 @@ function recompute(external?: {
   } else if (pLat != null && pLat >= 450) {
     if (paidCritical) {
       shedBackground = true;
-      reasons.push(`Critical latency ${Math.round(pLat)}ms → shed Favourites/utility`);
+      criticalReasons.push(
+        `Critical latency ${Math.round(pLat)}ms → shed Favourites/utility`
+      );
     } else {
-      reasons.push(
+      criticalReasons.push(
         `Critical (public) latency ${Math.round(pLat)}ms → soft slow only`
       );
     }
@@ -154,35 +175,40 @@ function recompute(external?: {
   // Queue backlog protects trade entry via Favourites/utility shed — not scanner×.
   if ((external?.primaryQueued ?? 0) > 0) {
     shedBackground = true;
-    reasons.push('Critical queue > 0 → shed Favourites/utility');
+    criticalReasons.push('Critical queue > 0 → shed Favourites/utility');
   }
 
   if (external?.primaryFailover) {
     if (paidCritical) {
       shedBackground = true;
       utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-      reasons.push('Critical emergency failover → shed Favourites/utility');
+      criticalReasons.push(
+        'Critical emergency failover → shed Favourites/utility'
+      );
     } else {
       utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
-      reasons.push('Critical public failover → soft slow only');
+      criticalReasons.push('Critical public failover → soft slow only');
     }
   }
 
   const uLat = external?.utilityLatencyMs;
+  let utilityShedHard = false;
   if (external?.utilityWeakPublic) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    reasons.push('Utility on weak public RPC → cut Favourites/activity');
+    utilitySlowFactor = Math.max(utilitySlowFactor, 3.5);
+    utilityReasons.push('Utility on weak public RPC → hard-shed Favourites/activity');
+    utilityShedHard = true;
   }
   if (external?.utilityFailover) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-    reasons.push('Utility failover → reduce utility workload');
+    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
+    utilityReasons.push('Utility failover → reduce utility workload');
   }
   if (uLat != null && uLat >= 800) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    reasons.push(`Utility latency ${Math.round(uLat)}ms → slow polls`);
+    utilitySlowFactor = Math.max(utilitySlowFactor, 3);
+    utilityReasons.push(`Utility latency ${Math.round(uLat)}ms → hard slow polls`);
+    utilityShedHard = true;
   } else if (uLat != null && uLat >= 500) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
-    reasons.push(`Utility latency ${Math.round(uLat)}ms → soft slowdown`);
+    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
+    utilityReasons.push(`Utility latency ${Math.round(uLat)}ms → soft slowdown`);
   }
 
   const sLat = external?.secondaryLatencyMs;
@@ -191,11 +217,26 @@ function recompute(external?: {
     scannerReasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
   }
 
-  reasons.push(...scannerReasons);
+  if (utilitySlowFactor >= 3) utilityShedHard = true;
+
+  const reasons = [
+    ...criticalReasons,
+    ...utilityReasons,
+    ...scannerReasons,
+  ];
 
   const shedProtectsPaidCritical = shedBackground && paidCritical;
   const throttledByOwnLaneOnly =
     scannerSlowFactor > 1 && scannerReasons.length > 0;
+
+  let degradedBy: DegradedBy = 'none';
+  if (shedBackground || (pLat != null && pLat >= 450 && paidCritical)) {
+    degradedBy = 'critical';
+  } else if (scannerSlowFactor >= 3) {
+    degradedBy = 'scanners';
+  } else if (utilityShedHard || utilitySlowFactor >= 2.5) {
+    degradedBy = 'utility';
+  }
 
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
@@ -204,6 +245,11 @@ function recompute(external?: {
     shedProtectsPaidCritical,
     throttledByOwnLaneOnly,
     reasons,
+    criticalReasons,
+    utilityReasons,
+    scannerReasons,
+    degradedBy,
+    utilityShedHard,
     secondarySkipsRecent: secSkip,
     updatedAt: now,
   };
@@ -216,6 +262,8 @@ function recompute(external?: {
         (shedBackground ? ' shedBackground=ON' : '') +
         (shedProtectsPaidCritical ? ' paidCritical' : '') +
         (throttledByOwnLaneOnly ? ' ownLaneOnly' : '') +
+        (utilityShedHard ? ' utilityShedHard' : '') +
+        ` degradedBy=${degradedBy}` +
         ` — ${reasons.join('; ')}`
     );
   }
@@ -224,6 +272,13 @@ function recompute(external?: {
     console.warn(
       `[scanner_throttled_own_lane_only] scanner×${lastSnapshot.scannerSlowFactor} ` +
         `— ${scannerReasons.join('; ')}`
+    );
+  }
+  if (utilityShedHard && now - lastUtilityShedHardLogAt > 20_000) {
+    lastUtilityShedHardLogAt = now;
+    console.warn(
+      `[utility_shed_hard] utility×${lastSnapshot.utilitySlowFactor} ` +
+        `— ${utilityReasons.join('; ') || 'utility pressure'}`
     );
   }
 }
@@ -245,19 +300,26 @@ export function updateRpcLoadSignals(signals: {
 }
 
 export function getRpcLoadControlSnapshot(): RpcLoadControlSnapshot {
-  return { ...lastSnapshot, reasons: [...lastSnapshot.reasons] };
+  return {
+    ...lastSnapshot,
+    reasons: [...lastSnapshot.reasons],
+    criticalReasons: [...lastSnapshot.criticalReasons],
+    utilityReasons: [...lastSnapshot.utilityReasons],
+    scannerReasons: [...lastSnapshot.scannerReasons],
+  };
 }
 
 /**
- * Hard-stop Favourites only when shed is protecting a paid Critical lane
- * (or Critical queue is actively backing up). Soft slows still apply via
- * utilitySlowFactor / soft-watch cap.
+ * Hard-stop Favourites when:
+ * - paid Critical shed / Critical queue, OR
+ * - utility-only hard shed (weak public / utility×≥3)
  */
 export function shouldHardSkipFavouritesForShed(): boolean {
   const snap = getRpcLoadControlSnapshot();
+  if (snap.utilityShedHard || snap.utilitySlowFactor >= 3) return true;
   if (!snap.shedBackground) return false;
   if (snap.shedProtectsPaidCritical) return true;
-  return snap.reasons.some((r) => /Critical queue > 0/i.test(r));
+  return snap.criticalReasons.some((r) => /Critical queue > 0/i.test(r));
 }
 
 /** Effective scanner poll interval after adaptive slowdown. */
@@ -337,6 +399,6 @@ export function utilityPollScale(): {
   return {
     cycleCapScale: 1 / f,
     gapScale: f,
-    skipActivity: f >= 2.5 || snap.shedBackground,
+    skipActivity: f >= 2 || snap.utilityShedHard || snap.shedBackground,
   };
 }

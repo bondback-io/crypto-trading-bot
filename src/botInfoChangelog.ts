@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.312',
+    title: 'Clear false STRESSED + secondary backlog prune',
+    sections: ['execution', 'overview'],
+    items: [
+      'Global STRESSED/Degraded no longer latches on lifetime Utility skips — only live Critical/Scanners pressure; Utility weak public sheds Favourites hard separately.',
+      'Secondary skip reasons + stale/low-pri waiter drops (bonding_curve/token_metrics) collapse scanner queue backlog without changing Critical/Scanners endpoints.',
+    ],
+  },
+  {
     version: '1.2.311',
     title: 'Helius out of Utility + Critical key isolation',
     sections: ['execution', 'overview'],
