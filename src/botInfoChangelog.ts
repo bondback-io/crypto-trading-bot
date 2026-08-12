@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.302',
+    title: 'Unstick dashboard refresh under RPC stress',
+    sections: ['overview', 'execution'],
+    items: [
+      'Stop treating preferred-lane failover alone as dashboard stress (that kept slim refresh forever when Helius showed DOWN).',
+      'Refresh watchdog clears hung in-flight polls; soft-fail side APIs; full fan-out at least every ~30s under stress; isolate activity render errors.',
+    ],
+  },
+  {
     version: '1.2.301',
     title: 'Fix Status activity crash + faster Helius recovery',
     sections: ['overview', 'execution'],

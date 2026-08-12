@@ -26310,18 +26310,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function refresh() {
-      if (window._refreshInFlight) return;
       const now = Date.now();
+      // Watchdog: a hung Promise.all must not freeze polls forever.
+      if (
+        window._refreshInFlight &&
+        window._refreshStartedAt &&
+        now - window._refreshStartedAt > 35000
+      ) {
+        window._refreshInFlight = false;
+      }
+      if (window._refreshInFlight) return;
       const stressed = Boolean(window._rpcStressed);
-      // Under stress: ~10s cadence (skip if last full refresh was <9s ago).
+      // Under stress: ~10s cadence (skip if last refresh was <9s ago).
       if (stressed && window._lastRefreshAt && now - window._lastRefreshAt < 9000) {
         return;
       }
+      // Preferred-lane failover alone used to keep slim mode forever (Helius DOWN
+      // while piggybacking) — UI looked stalled. Force a full fan-out every ~30s.
+      const forceFull =
+        !stressed ||
+        !window._lastFullRefreshAt ||
+        now - window._lastFullRefreshAt >= 30000;
       window._refreshInFlight = true;
+      window._refreshStartedAt = now;
       const positionsGenAtStart = window._openPositionsGen || 0;
       try {
       let status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData;
-      if (stressed) {
+      if (stressed && !forceFull) {
         // Slim fan-out: keep status / positions / config; skip heavy side panels.
         [status, positions, cfg] = await Promise.all([
           fetchJSON('/api/status'),
@@ -26341,12 +26356,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
           fetchJSON('/api/status'),
           fetchJSON('/api/positions?fast=1'),
-          fetchJSON('/api/logs?limit=50'),
-          fetchJSON('/api/activity'),
+          fetchJSON('/api/logs?limit=50').catch(() => ({ logs: [] })),
+          fetchJSON('/api/activity').catch(() => []),
           fetchJSON('/api/config'),
-          fetchJSON('/wallets'),
-          fetchJSON('/api/migrations'),
-          fetchJSON('/paper-status'),
+          fetchJSON('/wallets').catch(() => window._lastWalletsRaw || []),
+          fetchJSON('/api/migrations').catch(() => ({ migrations: [] })),
+          fetchJSON('/paper-status').catch(() => window._lastPaper || {}),
           fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
           fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
           fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
@@ -26354,24 +26369,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         ]);
         window._lastWalletsRaw = walletsRaw;
         window._lastPaper = paper;
+        window._lastFullRefreshAt = Date.now();
       }
       // Harden: /api/activity is an array; never call .map on objects/strings/null
-      const activityList = Array.isArray(activity)
+      const activityList = (Array.isArray(activity)
         ? activity
         : Array.isArray(activity && activity.activity)
           ? activity.activity
-          : [];
+          : []
+      ).filter(function (row) {
+        return row && typeof row === 'object';
+      });
       window._lastRefreshAt = Date.now();
       try {
         const rpc = status && status.rpc;
         const lc = rpc && rpc.loadControl;
-        const laneHot = Boolean(
-          rpc &&
-            ((rpc.primary && (rpc.primary.failover || rpc.primary.healthy === false)) ||
-              (rpc.secondary && (rpc.secondary.failover || rpc.secondary.healthy === false)) ||
-              (rpc.utility && (rpc.utility.failover || rpc.utility.healthy === false)))
-        );
-        // Do not require rpc.summary (262-era stats omit it) — gate/load/failover are enough.
+        // Do NOT treat preferred-lane failover / unhealthy alone as dashboard stress —
+        // that stuck slim-refresh forever while Helius showed DOWN and piggyback worked.
         window._rpcStressed = Boolean(
           rpc &&
             (rpc.summary === 'failover_active' ||
@@ -26379,8 +26393,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               rpc.summary === 'degraded' ||
               (rpc.gate && rpc.gate.stressed) ||
               (lc && lc.shedBackground) ||
-              (lc && (lc.utilitySlowFactor || 1) >= 2) ||
-              laneHot)
+              (lc && (lc.utilitySlowFactor || 1) >= 2))
         );
       } catch (_) {
         window._rpcStressed = false;
@@ -27948,7 +27961,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </tr>\`).join('');
       }
 
-      const activityHtml = activityList.length === 0
+      let activityHtml = '<div style="color:var(--muted)">No recent buys detected</div>';
+      try {
+      activityHtml = activityList.length === 0
         ? '<div style="color:var(--muted)">No recent buys detected</div>'
         : activityList.map(a => {
             const m = a.metrics || {};
@@ -28007,6 +28022,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="mint">\${a.mint ? fmtMintCa(a.mint) : ''} · seen \${fmtTimeAgoCell(seenAt)}</span>\${ageNote}
           </div>\`;
           }).join('');
+      } catch (actErr) {
+        console.warn('[dashboard] activity render skipped:', actErr && actErr.message);
+        activityHtml = '<div style="color:var(--muted)">Activity temporarily unavailable</div>';
+      }
 
       const actEl = document.getElementById('activity');
       if (actEl) actEl.innerHTML = activityHtml;
