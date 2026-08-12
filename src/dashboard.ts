@@ -26329,7 +26329,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           fetchJSON('/api/config'),
         ]);
         logs = { logs: [] };
-        activity = { activity: [] };
+        activity = [];
         walletsRaw = window._lastWalletsRaw || [];
         migrations = { migrations: [] };
         paper = window._lastPaper || {};
@@ -26355,6 +26355,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window._lastWalletsRaw = walletsRaw;
         window._lastPaper = paper;
       }
+      // Harden: /api/activity is an array; never call .map on objects/strings/null
+      const activityList = Array.isArray(activity)
+        ? activity
+        : Array.isArray(activity && activity.activity)
+          ? activity.activity
+          : [];
       window._lastRefreshAt = Date.now();
       try {
         const rpc = status && status.rpc;
@@ -27942,9 +27948,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </tr>\`).join('');
       }
 
-      const activityHtml = activity.length === 0
+      const activityHtml = activityList.length === 0
         ? '<div style="color:var(--muted)">No recent buys detected</div>'
-        : activity.map(a => {
+        : activityList.map(a => {
             const m = a.metrics || {};
             const ar = a.antiRug || {};
             const riskColor = ar.riskLevel === 'critical' || ar.riskLevel === 'high'
@@ -28203,7 +28209,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         console.error('[dashboard] refresh failed:', err);
         const detail = document.getElementById('stat-detail');
         if (detail) {
-          detail.textContent = 'Refresh error: ' + ((err && err.message) || String(err));
+          let msg = '';
+          try {
+            msg = String((err && err.message) || '').replace(/[\r\n]+/g, ' ').trim();
+          } catch (_) {
+            msg = '';
+          }
+          if (/map is not a function/i.test(msg)) {
+            msg = 'bad activity data';
+          } else if (!msg || msg.length > 120 || /function\s*\(|=>\s*\{/.test(msg)) {
+            msg = 'refresh failed';
+          } else {
+            msg = msg.slice(0, 120);
+          }
+          detail.textContent = 'Refresh error: ' + msg;
         }
       } finally {
         window._refreshInFlight = false;

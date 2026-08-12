@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.301',
+    title: 'Fix Status activity crash + faster Helius recovery',
+    sections: ['overview', 'execution'],
+    items: [
+      'Overview Status refresh: normalize /api/activity to an array under RPC stress; short safe error text (no code dump).',
+      'Share ON: probe recovering Helius/Alchemy every health cycle; utility prefers publicnode/Triton before official mainnet-beta.',
+    ],
+  },
+  {
     version: '1.2.300',
     title: 'Stop false flush kills + Migration specialty MC spam',
     sections: ['scanners', 'microbots', 'execution'],

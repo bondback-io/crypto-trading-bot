@@ -2619,7 +2619,8 @@ export function createServer(): express.Application {
   });
 
   app.get('/api/activity', (_req: Request, res: Response) => {
-    res.json(getRecentActivity());
+    const list = getRecentActivity();
+    res.json(Array.isArray(list) ? list : []);
   });
 
   app.get('/api/signals', (_req: Request, res: Response) => {

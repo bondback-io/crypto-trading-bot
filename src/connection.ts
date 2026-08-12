@@ -2044,10 +2044,16 @@ export function startRpcHealthMonitor(): void {
     if (isPublic) {
       return cycle % 5 === 0;
     }
-    // Helius (critical): every 3rd cycle (~135s at 45s interval)
-    if (isPrimary) return cycle % 3 === 0;
-    // Alchemy (scanners): every 2nd cycle (~90s)
-    if (isSecondary) return cycle % 2 === 0;
+    // Helius (critical): recovering → every cycle; healthy → every 3rd (~135s)
+    if (isPrimary) {
+      if (!state.healthy || state.unhealthySince != null) return true;
+      return cycle % 3 === 0;
+    }
+    // Alchemy (scanners): recovering → every cycle; healthy → every 2nd (~90s)
+    if (isSecondary) {
+      if (!state.healthy || state.unhealthySince != null) return true;
+      return cycle % 2 === 0;
+    }
     // QuickNode: rare when failing; otherwise every 4th (~180s) — avoid retry storms
     if (
       index === preferredQuicknode ||
