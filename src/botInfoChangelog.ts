@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.306',
+    title: 'Critical Alchemy backup hop + honest Helius probes',
+    sections: ['execution', 'overview'],
+    items: [
+      'ALCHEMY_API_KEY_BACKUP is a dedicated Critical hop when Helius EWMA > 200ms (not the Scanners key). Critical pill shows active ms; pref Helius ms stays on the subtitle.',
+      'While Critical is already on emergency failover, preferred Helius is probed on the sparse backup cadence (~every 8th cycle) instead of every tick.',
+    ],
+  },
+  {
     version: '1.2.305',
     title: 'Sticky RPC lanes + lane-based monitor',
     sections: ['execution', 'overview'],

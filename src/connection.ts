@@ -350,6 +350,10 @@ const LATENCY_EWMA_ALPHA = 0.22;
 const LATENCY_STRESS_MS = 500;
 /** EWMA below this → clear latency stress (hysteresis). */
 const LATENCY_RECOVER_MS = 320;
+/** Critical + dedicated backup (ALCHEMY_API_KEY_BACKUP): hop off Helius sooner. */
+const CRITICAL_BACKUP_STRESS_MS = 200;
+const CRITICAL_BACKUP_RECOVER_MS = 150;
+const CRITICAL_BACKUP_GRACE_MS = 3_000;
 /**
  * Utility may soft-fail onto QuickNode only when preferred EWMA is this hot
  * (after public/fallback alternatives) and QN is not already serving Critical/Scanners.
@@ -362,9 +366,34 @@ const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
 /** Don't re-log latency piggyback more often than this. */
 const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
 
+function hasDedicatedCriticalBackup(): boolean {
+  return preferredHeliusBackup >= 0 || preferredAlchemyBackup >= 0;
+}
+
+function isPreferredCriticalState(state: EndpointState | undefined): boolean {
+  return Boolean(state && endpoints[preferredPrimary] === state);
+}
+
+function latencyStressThresholdMs(state: EndpointState | undefined): number {
+  if (hasDedicatedCriticalBackup() && isPreferredCriticalState(state)) {
+    return CRITICAL_BACKUP_STRESS_MS;
+  }
+  return LATENCY_STRESS_MS;
+}
+
+function latencyRecoverThresholdMs(state: EndpointState | undefined): number {
+  if (hasDedicatedCriticalBackup() && isPreferredCriticalState(state)) {
+    return CRITICAL_BACKUP_RECOVER_MS;
+  }
+  return LATENCY_RECOVER_MS;
+}
+
 function latencyStressGraceMs(state: EndpointState | undefined): number {
   if (state && isPublicRpcUrl(state.endpoint.url)) {
     return LATENCY_STRESS_GRACE_PUBLIC_MS;
+  }
+  if (hasDedicatedCriticalBackup() && isPreferredCriticalState(state)) {
+    return CRITICAL_BACKUP_GRACE_MS;
   }
   return LATENCY_STRESS_GRACE_MS;
 }
@@ -884,7 +913,7 @@ function acceptFailoverTarget(
     const reason = rateLimited
       ? 'rate-limited'
       : latencySoft
-        ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${LATENCY_STRESS_MS}ms for ${Math.round(latencyStressGraceMs(pref) / 1000)}s`
+        ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${latencyStressThresholdMs(pref)}ms for ${Math.round(latencyStressGraceMs(pref) / 1000)}s`
         : `preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s`;
     const now = Date.now();
     if (
@@ -949,6 +978,7 @@ function resolveIndexForRole(role: RpcRole): number {
   if (shareLoad && role === 'primary') {
     const critOrder = [
       preferredHeliusBackup,
+      preferredAlchemyBackup,
       preferredSecondary,
       preferredQuicknode,
     ];
@@ -1321,11 +1351,11 @@ function updateLatencyStress(state: EndpointState): void {
     state.latencyStressedSince = null;
     return;
   }
-  if (ewma < LATENCY_RECOVER_MS) {
+  if (ewma < latencyRecoverThresholdMs(state)) {
     state.latencyStressedSince = null;
     return;
   }
-  if (ewma >= LATENCY_STRESS_MS) {
+  if (ewma >= latencyStressThresholdMs(state)) {
     if (state.latencyStressedSince == null) {
       state.latencyStressedSince = Date.now();
       console.warn(
@@ -1338,7 +1368,8 @@ function updateLatencyStress(state: EndpointState): void {
 /** Preferred is OK on errors but EWMA has stayed hot long enough to piggyback. */
 function latencyFailoverReady(state: EndpointState | undefined): boolean {
   if (!state?.latencyStressedSince) return false;
-  if (state.latencyMs == null || state.latencyMs < LATENCY_STRESS_MS) return false;
+  if (state.latencyMs == null || state.latencyMs < latencyStressThresholdMs(state))
+    return false;
   return Date.now() - state.latencyStressedSince >= latencyStressGraceMs(state);
 }
 
@@ -1678,6 +1709,7 @@ export function getRpcStats(): {
       activeLabel: string;
       host: string;
       latencyMs: number | null;
+      preferredLatencyMs: number | null;
       healthy: boolean;
       failover: boolean;
       configured: boolean;
@@ -1688,6 +1720,7 @@ export function getRpcStats(): {
       activeLabel: string;
       host: string;
       latencyMs: number | null;
+      preferredLatencyMs: number | null;
       healthy: boolean;
       failover: boolean;
       configured: boolean;
@@ -1698,6 +1731,7 @@ export function getRpcStats(): {
       activeLabel: string;
       host: string;
       latencyMs: number | null;
+      preferredLatencyMs: number | null;
       healthy: boolean;
       failover: boolean;
       configured: boolean;
@@ -1838,7 +1872,8 @@ export function getRpcStats(): {
       preferredLabel: pPref?.endpoint.label || 'unset',
       activeLabel: pActive?.endpoint.label || 'unset',
       host: hostOf(pActive?.endpoint.url || ''),
-      latencyMs: pPref?.latencyMs ?? pActive?.latencyMs ?? null,
+      latencyMs: pActive?.latencyMs ?? null,
+      preferredLatencyMs: pPref?.latencyMs ?? null,
       healthy: Boolean(pPref?.healthy),
       failover: critFo,
       configured: critConfigured,
@@ -1852,7 +1887,8 @@ export function getRpcStats(): {
       preferredLabel: sPref?.endpoint.label || 'unset',
       activeLabel: sActive?.endpoint.label || 'unset',
       host: hostOf(sActive?.endpoint.url || ''),
-      latencyMs: sPref?.latencyMs ?? sActive?.latencyMs ?? null,
+      latencyMs: sActive?.latencyMs ?? null,
+      preferredLatencyMs: sPref?.latencyMs ?? null,
       healthy: Boolean(sPref?.healthy),
       failover: scanFo,
       configured: scanConfigured,
@@ -1866,7 +1902,8 @@ export function getRpcStats(): {
       preferredLabel: uPref?.endpoint.label || 'public',
       activeLabel: uActive?.endpoint.label || 'public',
       host: hostOf(uActive?.endpoint.url || ''),
-      latencyMs: uActive?.latencyMs ?? uPref?.latencyMs ?? null,
+      latencyMs: uActive?.latencyMs ?? null,
+      preferredLatencyMs: uPref?.latencyMs ?? null,
       healthy: Boolean(uPref?.healthy),
       failover: utilFo,
       configured: true,
@@ -2364,13 +2401,22 @@ export function startRpcHealthMonitor(): void {
     if (isPublic) {
       return cycle % 5 === 0;
     }
-    // Helius (critical): recovering → every cycle; healthy → every 3rd (~135s)
+    // Helius (critical): recovering while still sticky → every cycle;
+    // already on emergency failover → sparse (~8th, same as idle backups);
+    // healthy sticky → every 3rd (~135s).
     if (isPrimary) {
+      if (activePrimary !== preferredPrimary && index !== activePrimary) {
+        return cycle % 8 === 0;
+      }
       if (!state.healthy || state.unhealthySince != null) return true;
       return cycle % 3 === 0;
     }
-    // Alchemy (scanners): recovering → every cycle; healthy → every 2nd (~90s)
+    // Alchemy (scanners): recovering while sticky → every cycle;
+    // already failed over → sparse; healthy sticky → every 2nd (~90s).
     if (isSecondary) {
+      if (activeSecondary !== preferredSecondary && index !== activeSecondary) {
+        return cycle % 8 === 0;
+      }
       if (!state.healthy || state.unhealthySince != null) return true;
       return cycle % 2 === 0;
     }

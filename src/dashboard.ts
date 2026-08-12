@@ -10856,7 +10856,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card rpc-health-panel" id="rpc-health-panel">
-          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Sticky lanes: Critical=Helius, Scanners=Alchemy, Utility=public. Backups are emergency-only. Hosts only — API keys never shown."></span></div>
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Sticky lanes: Critical=Helius, Scanners=Alchemy, Utility=public. ALCHEMY_API_KEY_BACKUP hops Critical when Helius EWMA &gt; 200ms. Hosts only — API keys never shown."></span></div>
           <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
             <span class="rpc-health-chip" id="rpc-chip-all">All sticky</span>
             <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
@@ -10882,14 +10882,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="rpc-prov-row" data-lane="emergency">
               <span class="rpc-prov-name">Emergency</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-emergency-pill">idle</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">backups unused until repeated primary failure</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">ALCHEMY_API_KEY_BACKUP hops Critical when Helius &gt; 200ms</span>
             </div>
           </div>
           <p class="rpc-plain" id="rpc-health-plain">—</p>
         </div>
 
         <div class="card" id="rpc-status-card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Sticky lanes when Share is ON: Critical=Helius, Scanners=Alchemy, Utility=public. Backups (HELIUS/ALCHEMY_RPC_URL_BACKUP) are emergency-only after repeated preferred failure. Off dumps everything onto primary — not recommended."></span></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Sticky lanes when Share is ON: Critical=Helius, Scanners=Alchemy, Utility=public. ALCHEMY_API_KEY_BACKUP hops Critical off Helius when EWMA &gt; 200ms (use a distinct Alchemy app). Other backups are emergency-only after repeated failure. Off dumps everything onto primary — not recommended."></span></div>
           <div class="toggle-row mb-2"><span title="ON = sticky Helius/Alchemy/public lanes (recommended). OFF = dump all work onto primary — not recommended.">Share RPC load (sticky lanes)</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
@@ -10903,10 +10903,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-1"><strong style="color:#34d399">Critical → Helius (sticky)</strong> — entries, turbo, migration, live balance / marks</div>
             <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy (sticky)</strong> — Market / Alpha / Zion</div>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites soft-watch, import, activity (never paid backups)</div>
-            <div class="mb-1"><strong style="color:#fca5a5">Emergency</strong> — HELIUS/ALCHEMY_RPC_URL_BACKUP + QuickNode after repeated preferred failure</div>
+            <div class="mb-1"><strong style="color:#fca5a5">Emergency</strong> — ALCHEMY_API_KEY_BACKUP when Helius &gt; 200ms; HELIUS_RPC_URL_BACKUP + QuickNode after repeated failure</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Sticky three-lane RPC (Share ON, recommended)</strong> — Critical = Helius, Scanners = Alchemy, Utility = public. Backups are idle until the preferred lane fails repeatedly (or 429). No equal share-load across backups.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Sticky three-lane RPC (Share ON, recommended)</strong> — Critical = Helius, Scanners = Alchemy, Utility = public. Set ALCHEMY_API_KEY_BACKUP (distinct from Scanners) to hop Critical off Helius when EWMA &gt; 200ms. Other backups idle until repeated failure / 429. No equal share-load.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Share OFF</strong> — dumps most work onto primary (not recommended; burns Helius).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email, GMGN/Kolscan HTTP, DexScreener marks.</div>
             <div class="mint">Status polls are observational. Soft-watch starts ~45s after deploy. Under stress, Favourites/scanners shed automatically.</div>
@@ -26854,11 +26854,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             }
           }
           if (meta) {
+            const prefBits =
+              row.preferredLabel && row.preferredLabel !== row.activeLabel
+                ? ' · pref ' +
+                  row.preferredLabel +
+                  (row.preferredLatencyMs != null
+                    ? ' ' + Math.round(row.preferredLatencyMs) + 'ms'
+                    : '')
+                : '';
             meta.textContent =
               (row.host || '') +
-              (row.preferredLabel && row.preferredLabel !== row.activeLabel
-                ? ' · pref ' + row.preferredLabel
-                : '') +
+              prefBits +
               (row.healthy === false ? ' · preferred down' : '');
           }
         }
@@ -26887,7 +26893,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ? configured.map(function (e) {
                 return e.label + (e.host ? ' ' + e.host : '') + (e.inUse ? ' ACTIVE' : ' idle');
               }).join(' · ')
-            : 'set HELIUS_RPC_URL_BACKUP / ALCHEMY_RPC_URL_BACKUP for emergency only';
+            : 'set ALCHEMY_API_KEY_BACKUP (Critical hop >200ms) or HELIUS_RPC_URL_BACKUP';
         }
         return;
       }
