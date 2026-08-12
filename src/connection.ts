@@ -111,8 +111,10 @@ let preferredUtility = 0;
 /** Mid-tier paid failover (QuickNode); -1 when unset */
 let preferredQuicknode = -1;
 /** Emergency-only sibling indexes; -1 when unset. Never preferred lanes. */
+let preferredHelius = -1;
 let preferredHeliusBackup = -1;
 let preferredAlchemyBackup = -1;
+let preferredAlchemyBackup2 = -1;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
@@ -350,7 +352,7 @@ const LATENCY_EWMA_ALPHA = 0.22;
 const LATENCY_STRESS_MS = 500;
 /** EWMA below this → clear latency stress (hysteresis). */
 const LATENCY_RECOVER_MS = 320;
-/** Critical + dedicated backup (ALCHEMY_API_KEY_BACKUP): hop off Helius sooner. */
+/** Critical + dedicated emergency (Helius / BACKUP2): hop off preferred sooner. */
 const CRITICAL_BACKUP_STRESS_MS = 200;
 const CRITICAL_BACKUP_RECOVER_MS = 150;
 const CRITICAL_BACKUP_GRACE_MS = 3_000;
@@ -367,7 +369,11 @@ const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
 const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
 
 function hasDedicatedCriticalBackup(): boolean {
-  return preferredHeliusBackup >= 0 || preferredAlchemyBackup >= 0;
+  return (
+    preferredAlchemyBackup2 >= 0 ||
+    preferredHeliusBackup >= 0 ||
+    (preferredHelius >= 0 && preferredHelius !== preferredPrimary)
+  );
 }
 
 function isPreferredCriticalState(state: EndpointState | undefined): boolean {
@@ -645,11 +651,19 @@ function ensureEndpoints(): void {
     (e) =>
       e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
   );
+  preferredHelius = endpoints.findIndex(
+    (e) => e.endpoint.label === 'helius'
+  );
   preferredHeliusBackup = endpoints.findIndex(
     (e) => e.endpoint.label === 'helius-backup'
   );
   preferredAlchemyBackup = endpoints.findIndex(
-    (e) => e.endpoint.label === 'alchemy-backup'
+    (e) =>
+      e.endpoint.label === 'alchemy-critical' ||
+      e.endpoint.label === 'alchemy-backup'
+  );
+  preferredAlchemyBackup2 = endpoints.findIndex(
+    (e) => e.endpoint.label === 'alchemy-backup2'
   );
   activePrimary = preferredPrimary;
   activeSecondary = preferredSecondary;
@@ -672,8 +686,14 @@ function ensureEndpoints(): void {
       (preferredQuicknode >= 0
         ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
         : '') +
-      (preferredHeliusBackup >= 0 || preferredAlchemyBackup >= 0
-        ? ` · emergency backups→${[preferredHeliusBackup, preferredAlchemyBackup]
+      (preferredHeliusBackup >= 0 ||
+      preferredAlchemyBackup2 >= 0 ||
+      (preferredHelius >= 0 && preferredHelius !== preferredPrimary)
+        ? ` · emergency→${[
+            preferredHelius !== preferredPrimary ? preferredHelius : -1,
+            preferredAlchemyBackup2,
+            preferredHeliusBackup,
+          ]
             .filter((i) => i >= 0)
             .map((i) => endpoints[i]?.endpoint.label)
             .join(',')}`
@@ -826,7 +846,11 @@ function setActiveForRole(role: RpcRole, index: number): void {
 
 function isEmergencyBackupIndex(index: number): boolean {
   if (index < 0) return false;
-  if (index === preferredHeliusBackup || index === preferredAlchemyBackup) {
+  if (index === preferredPrimary) return false;
+  if (index === preferredHeliusBackup || index === preferredAlchemyBackup2) {
+    return true;
+  }
+  if (index === preferredHelius && preferredHelius !== preferredPrimary) {
     return true;
   }
   return isEmergencyBackupLabel(endpoints[index]?.endpoint.label);
@@ -843,7 +867,13 @@ function isAlchemyEndpoint(state: EndpointState | undefined): boolean {
   if (!state) return false;
   const label = (state.endpoint.label || '').toLowerCase();
   const u = (state.endpoint.url || '').toLowerCase();
-  return label === 'alchemy' || label === 'alchemy-backup' || u.includes('alchemy');
+  return (
+    label === 'alchemy' ||
+    label === 'alchemy-backup' ||
+    label === 'alchemy-critical' ||
+    label === 'alchemy-backup2' ||
+    u.includes('alchemy')
+  );
 }
 
 /** Share ON: Scanners must not burn Helius (trade Critical only). */
@@ -977,8 +1007,9 @@ function resolveIndexForRole(role: RpcRole): number {
   // Emergency-only backups / cross-provider — never for Utility Favourites.
   if (shareLoad && role === 'primary') {
     const critOrder = [
+      preferredAlchemyBackup2,
+      preferredHelius !== preferredPrimary ? preferredHelius : -1,
       preferredHeliusBackup,
-      preferredAlchemyBackup,
       preferredSecondary,
       preferredQuicknode,
     ];
@@ -1000,7 +1031,7 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
   if (shareLoad && role === 'secondary') {
-    const scanOrder = [preferredAlchemyBackup, preferredQuicknode];
+    const scanOrder = [preferredAlchemyBackup2, preferredQuicknode];
     for (const alt of scanOrder) {
       if (
         acceptFailoverTarget(
@@ -1848,8 +1879,18 @@ export function getRpcStats(): {
       return maskUrl(url);
     }
   };
-  const critConfigured = Boolean(pPref && isHeliusEndpoint(pPref));
-  const scanConfigured = Boolean(sPref && isAlchemyEndpoint(sPref));
+  const critConfigured = Boolean(
+    pPref &&
+      (pPref.endpoint.label === 'alchemy-critical' ||
+        pPref.endpoint.label === 'alchemy-backup' ||
+        isHeliusEndpoint(pPref) ||
+        isAlchemyEndpoint(pPref))
+  );
+  const scanConfigured = Boolean(
+    sPref &&
+      isAlchemyEndpoint(sPref) &&
+      preferredSecondary !== preferredPrimary
+  );
   const critFo = pIdx !== preferredPrimary;
   const scanFo =
     preferredSecondary !== preferredPrimary && sIdx !== preferredSecondary;
@@ -1911,6 +1952,31 @@ export function getRpcStats(): {
     },
     emergency: [
       {
+        label: 'helius',
+        host:
+          preferredHelius >= 0
+            ? hostOf(endpoints[preferredHelius]?.endpoint.url || '')
+            : '',
+        configured:
+          preferredHelius >= 0 && preferredHelius !== preferredPrimary,
+        inUse:
+          preferredHelius >= 0 &&
+          preferredHelius !== preferredPrimary &&
+          pIdx === preferredHelius,
+      },
+      {
+        label: 'alchemy-backup2',
+        host:
+          preferredAlchemyBackup2 >= 0
+            ? hostOf(endpoints[preferredAlchemyBackup2]?.endpoint.url || '')
+            : '',
+        configured: preferredAlchemyBackup2 >= 0,
+        inUse:
+          preferredAlchemyBackup2 >= 0 &&
+          (pIdx === preferredAlchemyBackup2 ||
+            sIdx === preferredAlchemyBackup2),
+      },
+      {
         label: 'helius-backup',
         host:
           preferredHeliusBackup >= 0
@@ -1918,17 +1984,6 @@ export function getRpcStats(): {
             : '',
         configured: preferredHeliusBackup >= 0,
         inUse: preferredHeliusBackup >= 0 && pIdx === preferredHeliusBackup,
-      },
-      {
-        label: 'alchemy-backup',
-        host:
-          preferredAlchemyBackup >= 0
-            ? hostOf(endpoints[preferredAlchemyBackup]?.endpoint.url || '')
-            : '',
-        configured: preferredAlchemyBackup >= 0,
-        inUse:
-          preferredAlchemyBackup >= 0 &&
-          (sIdx === preferredAlchemyBackup || pIdx === preferredAlchemyBackup),
       },
       {
         label: 'quicknode',
@@ -1990,13 +2045,7 @@ export function getRpcStats(): {
     endpoints: endpoints.map((s, i) => {
       const total = s.successCount + s.failureCount;
       let lane: string | null = null;
-      if (
-        isEmergencyBackupLabel(s.endpoint.label) ||
-        s.endpoint.label === 'quicknode' ||
-        isQuicknodeRpcUrl(s.endpoint.url)
-      ) {
-        lane = 'emergency';
-      } else if (i === preferredPrimary) lane = 'critical';
+      if (i === preferredPrimary) lane = 'critical';
       else if (
         i === preferredSecondary &&
         preferredSecondary !== preferredPrimary
@@ -2008,6 +2057,13 @@ export function getRpcStats(): {
         preferredUtility !== preferredSecondary
       )
         lane = 'utility';
+      else if (
+        isEmergencyBackupIndex(i) ||
+        isEmergencyBackupLabel(s.endpoint.label) ||
+        s.endpoint.label === 'quicknode' ||
+        isQuicknodeRpcUrl(s.endpoint.url)
+      )
+        lane = 'emergency';
       return {
         url: maskUrl(s.endpoint.url),
         label: s.endpoint.label,

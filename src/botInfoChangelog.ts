@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.307',
+    title: 'Alchemy BACKUP is sticky Critical; Helius + BACKUP2 emergency',
+    sections: ['execution', 'overview'],
+    items: [
+      'ALCHEMY_API_KEY_BACKUP is the sticky Critical lane (distinct from Scanners ALCHEMY_API_KEY). HELIUS_API_KEY is emergency-only; ALCHEMY_API_KEY_BACKUP2 is an extra Critical emergency hop.',
+      'When BACKUP is set, Critical hops to Helius / BACKUP2 if preferred EWMA stays above 200ms. If BACKUP is unset, Helius remains Critical (compat).',
+    ],
+  },
+  {
     version: '1.2.306',
     title: 'Critical Alchemy backup hop + honest Helius probes',
     sections: ['execution', 'overview'],
