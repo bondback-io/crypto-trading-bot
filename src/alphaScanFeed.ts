@@ -11,7 +11,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick } from './rpcLoadControl';
+import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
 import {
   fetchBondingCurve,
   getCachedBondingCurve,
@@ -329,7 +329,9 @@ export async function refreshAlphaScanBuckets(opts?: {
     return { new: cachedNew, soon: cachedSoon, bonded: cachedBonded };
   }
 
-  const minGap = Math.max(50_000, Number(cfg.pollIntervalMs) || 55_000);
+  const minGap = adaptiveScannerIntervalMs(
+    Math.max(50_000, Number(cfg.pollIntervalMs) || 55_000)
+  );
   if (
     !opts?.force &&
     lastPollAt != null &&
@@ -475,7 +477,9 @@ export async function runAlphaScanFeedPass(): Promise<number> {
     return 0;
   }
 
-  const interval = Math.max(50_000, Number(cfg.pollIntervalMs) || 55_000);
+  const interval = adaptiveScannerIntervalMs(
+    Math.max(50_000, Number(cfg.pollIntervalMs) || 55_000)
+  );
   if (passInFlight) return 0;
   if (lastPassAt && Date.now() - lastPassAt < interval * 0.85) {
     return 0;
@@ -483,7 +487,7 @@ export async function runAlphaScanFeedPass(): Promise<number> {
 
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
-    logBackgroundDeferred('AlphaScan', defer.reason || 'Critical busy');
+    logBackgroundDeferred('AlphaScan', defer.reason || 'Scanners busy');
     return 0;
   }
   const adapt = shouldSkipScannerTick('alpha_scan');

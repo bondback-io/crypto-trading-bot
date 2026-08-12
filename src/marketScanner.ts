@@ -13,7 +13,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
+import { shouldSkipScannerTick, adaptiveScannerIntervalMs, shouldSkipScannerSideWork } from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
@@ -1451,7 +1451,7 @@ export async function runScannerPollOnce(): Promise<number> {
   }
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
-    logBackgroundDeferred('Market Scanner', defer.reason || 'Critical busy');
+    logBackgroundDeferred('Market Scanner', defer.reason || 'Scanners busy');
     lastSkipReason = `delayed — ${defer.reason}`;
     // Still stamp lastPollAt so the UI does not look "frozen" while deferred.
     lastPollAt = Date.now();
@@ -1512,6 +1512,15 @@ export async function runScannerPollOnce(): Promise<number> {
       `[marketScanner] poll ${universe.length} launches → ${picked.length} candidates ` +
         `(handed ${handed}) in ${lastPollMs}ms`
     );
+
+    const side = shouldSkipScannerSideWork();
+    if (side.skip) {
+      console.warn(
+        `[scanner_priority_kept] Market signal intake kept — skipped side work (${side.reason})`
+      );
+      return handed;
+    }
+
     // Curve-first graduation watches (no TA gate) — pump / Jupiter universe
     try {
       const grad = await offerGradWatchesCurveFirst(universe);

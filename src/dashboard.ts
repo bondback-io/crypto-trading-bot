@@ -10901,7 +10901,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
             <div class="mb-1"><strong style="color:#34d399">Critical → ALCHEMY_API_KEY_BACKUP (sticky)</strong> — entries, turbo, migration, live balance / marks</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → ALCHEMY_API_KEY (sticky)</strong> — Market / Alpha / Zion</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → ALCHEMY_API_KEY (sticky)</strong> — Market / Alpha / Zion; never borrows Critical or Helius; own-lane throttle only</div>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites soft-watch, import, activity (never paid backups)</div>
             <div class="mb-1"><strong style="color:#fca5a5">Emergency</strong> — HELIUS_API_KEY idle until Critical Alchemy hard-fails (429 / down ~30s); then BACKUP2 → Helius → Helius backup → QuickNode</div>
           </div>
@@ -26871,6 +26871,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         paintLaneCard('critical', 'set ALCHEMY_API_KEY_BACKUP');
         paintLaneCard('scanners', 'set ALCHEMY_RPC_URL or ALCHEMY_API_KEY');
         paintLaneCard('utility', 'public utility');
+        const scanMeta = document.getElementById('rpc-lane-scanners-meta');
+        if (scanMeta && lanes.scanners) {
+          const lc = (rpcObj && rpcObj.loadControl) || {};
+          const gSec = ((rpcObj && rpcObj.gate && rpcObj.gate.lanes) || {}).secondary || {};
+          const bits = [];
+          if (lc.throttledByOwnLaneOnly) bits.push('own-lane throttle');
+          else if ((lc.scannerSlowFactor || 1) > 1) bits.push('scanner×' + lc.scannerSlowFactor);
+          if (gSec.inFlight != null) bits.push('conc ' + gSec.inFlight + '/' + (gSec.maxConcurrent != null ? gSec.maxConcurrent : '—'));
+          if (gSec.deduped) bits.push('dedupe ' + gSec.deduped);
+          if (lc.secondarySkipsRecent) bits.push('skips60s ' + lc.secondarySkipsRecent);
+          if (bits.length) {
+            scanMeta.textContent =
+              (scanMeta.textContent || '') + (scanMeta.textContent ? ' · ' : '') + bits.join(' · ');
+          }
+        }
         const emerg = Array.isArray(lanes.emergency) ? lanes.emergency : [];
         const emergPill = document.getElementById('rpc-lane-emergency-pill');
         const emergMeta = document.getElementById('rpc-lane-emergency-meta');
@@ -27009,10 +27024,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const L = g.lanes || {};
         const fmt = (role) => {
           const row = L[role] || {};
-          return role.charAt(0).toUpperCase() + role.slice(1) +
+          const base =
+            role.charAt(0).toUpperCase() + role.slice(1) +
             ' ' + (row.inFlight != null ? row.inFlight : '—') + '/' + (row.maxConcurrent != null ? row.maxConcurrent : '—') +
             ' q' + (row.queued != null ? row.queued : 0) +
             ' skip' + (row.skipped != null ? row.skipped : 0);
+          if (role === 'secondary' && row.deduped != null) {
+            return base + ' dedupe' + row.deduped;
+          }
+          return base;
         };
         gateEl.textContent = g.lanes
           ? ('Lane gate: ' + fmt('primary') + ' · ' + fmt('secondary') + ' · ' + fmt('utility') +
@@ -27029,8 +27049,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           parts.push(
             'Adaptive: scanner×' + (lc.scannerSlowFactor || 1) +
             ' utility×' + (lc.utilitySlowFactor || 1) +
-            (lc.shedBackground ? ' shedON' : '')
+            (lc.shedBackground ? ' shedON' : '') +
+            (lc.throttledByOwnLaneOnly ? ' scanners=ownLaneOnly' : '')
           );
+        }
+        if (lc.secondarySkipsRecent != null && lc.secondarySkipsRecent > 0) {
+          parts.push('Scanners skips60s=' + lc.secondarySkipsRecent);
         }
         if (rpc.utilityWeakPublic) parts.push('Utility=weak public (Favourites slowed)');
         if (q.length) {
@@ -27041,10 +27065,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           );
         }
         if (lc.reasons && lc.reasons.length) {
-          parts.push(lc.reasons[0]);
+          parts.push(lc.reasons.slice(0, 2).join('; '));
         }
         loadEl.textContent = parts.length ? parts.join(' · ') : 'Load control: normal';
-        loadEl.style.color = (lc.shedBackground || q.length || rpc.utilityWeakPublic) ? '#fbbf24' : '#94a3b8';
+        loadEl.style.color = (lc.shedBackground || q.length || rpc.utilityWeakPublic || (lc.scannerSlowFactor || 1) > 1) ? '#fbbf24' : '#94a3b8';
       }
       const rpcBanner = document.getElementById('rpc-banner');
       if (rpcBanner) {

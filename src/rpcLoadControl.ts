@@ -1,6 +1,9 @@
 /**
  * Adaptive RPC load control — shed scanner/utility work when lanes stress,
  * without touching Critical trade-entry paths.
+ *
+ * Scanner slowdown is own-lane only (secondary skips / Scanners latency).
+ * Critical stress still sheds Favourites/utility, never raises scanner×.
  */
 import type { RpcGateRole } from './rpcGate';
 
@@ -15,6 +18,11 @@ export type RpcLoadControlSnapshot = {
    * False when Critical is itself weak public — Favourites must not hard-stop.
    */
   shedProtectsPaidCritical: boolean;
+  /**
+   * True when scanner× > 1 and only secondary skips/latency drove it
+   * (Critical/utility stress did not raise scanner×).
+   */
+  throttledByOwnLaneOnly: boolean;
   reasons: string[];
   secondarySkipsRecent: number;
   updatedAt: number;
@@ -33,12 +41,14 @@ let lastSnapshot: RpcLoadControlSnapshot = {
   utilitySlowFactor: 1,
   shedBackground: false,
   shedProtectsPaidCritical: false,
+  throttledByOwnLaneOnly: false,
   reasons: [],
   secondarySkipsRecent: 0,
   updatedAt: Date.now(),
 };
 
 let lastLogAt = 0;
+let lastOwnLaneLogAt = 0;
 
 /** Record a non-critical skip so adaptive backoff can react. */
 export function noteBackgroundRpcSkip(role: RpcGateRole, feature?: string): void {
@@ -89,6 +99,7 @@ function recompute(external?: {
   let utilitySlowFactor = 1;
   let shedBackground = false;
   const reasons: string[] = [];
+  const scannerReasons: string[] = [];
   // When Critical is itself public, latency/failover must not kill Favourites —
   // there is no paid lane to protect.
   const paidCritical = external?.primaryWeakPublic !== true;
@@ -101,13 +112,13 @@ function recompute(external?: {
   // Secondary is already empty.
   if (!laneIdle && secondarySkipsHot >= 6) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 3);
-    reasons.push(`secondary skips ${secondarySkipsHot}/15s → scanner×3`);
+    scannerReasons.push(`secondary skips ${secondarySkipsHot}/15s → scanner×3`);
   } else if (!laneIdle && secSkip >= 10) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 3);
-    reasons.push(`secondary skips ${secSkip}/60s → scanner×3`);
+    scannerReasons.push(`secondary skips ${secSkip}/60s → scanner×3`);
   } else if (secSkip >= 4) {
     scannerSlowFactor = Math.max(scannerSlowFactor, laneIdle ? 1.5 : 2);
-    reasons.push(
+    scannerReasons.push(
       laneIdle
         ? `secondary idle — soft ×${scannerSlowFactor} (${secSkip}/60s)`
         : `secondary skips ${secSkip}/60s → scanner×2`
@@ -124,38 +135,34 @@ function recompute(external?: {
         `Critical (public) latency ${Math.round(pLat)}ms → soft slow only`
       );
     }
-    scannerSlowFactor = Math.max(scannerSlowFactor, paidCritical ? 3 : 2);
+    // Own-lane only: Critical latency must not raise scanner×.
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
   } else if (pLat != null && pLat >= 450) {
     if (paidCritical) {
       shedBackground = true;
-      reasons.push(`Critical latency ${Math.round(pLat)}ms → reduce scanners`);
+      reasons.push(`Critical latency ${Math.round(pLat)}ms → shed Favourites/utility`);
     } else {
       reasons.push(
         `Critical (public) latency ${Math.round(pLat)}ms → soft slow only`
       );
     }
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
     if (!paidCritical) {
       utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
     }
   }
 
-  // Queue backlog always protects trade entry (even on public Critical).
+  // Queue backlog protects trade entry via Favourites/utility shed — not scanner×.
   if ((external?.primaryQueued ?? 0) > 0) {
     shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push('Critical queue > 0 → shed scanners/utility');
+    reasons.push('Critical queue > 0 → shed Favourites/utility');
   }
 
   if (external?.primaryFailover) {
     if (paidCritical) {
       shedBackground = true;
-      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
       utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-      reasons.push('Critical emergency failover → shed background');
+      reasons.push('Critical emergency failover → shed Favourites/utility');
     } else {
-      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
       utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
       reasons.push('Critical public failover → soft slow only');
     }
@@ -181,16 +188,21 @@ function recompute(external?: {
   const sLat = external?.secondaryLatencyMs;
   if (sLat != null && sLat >= 600) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
+    scannerReasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
   }
 
+  reasons.push(...scannerReasons);
+
   const shedProtectsPaidCritical = shedBackground && paidCritical;
+  const throttledByOwnLaneOnly =
+    scannerSlowFactor > 1 && scannerReasons.length > 0;
 
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
     utilitySlowFactor: Math.min(4, utilitySlowFactor),
     shedBackground,
     shedProtectsPaidCritical,
+    throttledByOwnLaneOnly,
     reasons,
     secondarySkipsRecent: secSkip,
     updatedAt: now,
@@ -203,7 +215,15 @@ function recompute(external?: {
         `utility×${lastSnapshot.utilitySlowFactor}` +
         (shedBackground ? ' shedBackground=ON' : '') +
         (shedProtectsPaidCritical ? ' paidCritical' : '') +
+        (throttledByOwnLaneOnly ? ' ownLaneOnly' : '') +
         ` — ${reasons.join('; ')}`
+    );
+  }
+  if (throttledByOwnLaneOnly && now - lastOwnLaneLogAt > 20_000) {
+    lastOwnLaneLogAt = now;
+    console.warn(
+      `[scanner_throttled_own_lane_only] scanner×${lastSnapshot.scannerSlowFactor} ` +
+        `— ${scannerReasons.join('; ')}`
     );
   }
 }
@@ -257,8 +277,8 @@ export function shouldSkipScannerTick(subsystem: string): {
   if (snap.scannerSlowFactor >= 3) {
     return {
       skip: true,
-      reason: snap.shedBackground
-        ? `adaptive shed for Critical (${snap.reasons[0] || 'load'})`
+      reason: snap.throttledByOwnLaneOnly
+        ? `own-lane scanner×${snap.scannerSlowFactor} (${subsystem})`
         : `adaptive scanner×${snap.scannerSlowFactor} (${subsystem})`,
     };
   }
@@ -272,6 +292,37 @@ export function shouldSkipScannerTick(subsystem: string): {
         reason: `adaptive scanner×${snap.scannerSlowFactor} (${subsystem})`,
       };
     }
+  }
+  return { skip: false, reason: null };
+}
+
+/**
+ * Under own-lane load, keep signal intake but drop nested Market side work
+ * (Alpha / specialty / majors / watch ticks).
+ */
+export function shouldSkipScannerSideWork(): {
+  skip: boolean;
+  reason: string | null;
+} {
+  const snap = getRpcLoadControlSnapshot();
+  if (snap.scannerSlowFactor >= 2) {
+    return {
+      skip: true,
+      reason: `scanner×${snap.scannerSlowFactor} — keep signal intake`,
+    };
+  }
+  try {
+    const { getRpcGateSnapshot } =
+      require('./rpcGate') as typeof import('./rpcGate');
+    const g = getRpcGateSnapshot().lanes.secondary;
+    if (g.inFlight >= Math.max(1, g.maxConcurrent - 1) || g.queued >= 2) {
+      return {
+        skip: true,
+        reason: `Scanners saturated inFlight ${g.inFlight}/${g.maxConcurrent} q${g.queued}`,
+      };
+    }
+  } catch {
+    /* */
   }
   return { skip: false, reason: null };
 }

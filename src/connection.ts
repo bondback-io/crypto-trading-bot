@@ -1070,35 +1070,15 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
   if (shareLoad && role === 'secondary') {
-    // Soft: other Alchemy only. Hard: Alchemy Critical → BACKUP2 → Helius last.
-    const scanSoft = [
-      preferredPrimary,
-      preferredAlchemyBackup2,
-    ];
-    const scanHard = [
-      preferredPrimary,
-      preferredAlchemyBackup2,
-      preferredHelius !== preferredPrimary ? preferredHelius : -1,
-      preferredHeliusBackup,
-      preferredQuicknode,
-    ];
+    // Scanners isolation: never borrow Critical Alchemy or Helius.
+    // Soft: optional BACKUP2 only. Hard: BACKUP2 → QuickNode (public via later walks).
+    const scanSoft = [preferredAlchemyBackup2];
+    const scanHard = [preferredAlchemyBackup2, preferredQuicknode];
     const scanOrder = latencySoft && !rateLimited ? scanSoft : scanHard;
     for (const alt of scanOrder) {
-      if (alt === preferred) continue;
-      // Soft path: never Helius for scanners.
-      if (latencySoft && !rateLimited && isHeliusEndpoint(endpoints[alt])) {
-        continue;
-      }
-      // Hard path: allow Helius only after both Alchemy paths are down.
-      if (
-        !latencySoft &&
-        isHeliusEndpoint(endpoints[alt]) &&
-        endpoints[preferredPrimary]?.healthy &&
-        !isEndpointRateLimited(endpoints[preferredPrimary]) &&
-        endpoints[preferred]?.healthy === false
-      ) {
-        // preferred scanners down but Critical Alchemy still healthy — use Critical Alchemy first (already in order)
-      }
+      if (alt < 0 || alt === preferred) continue;
+      if (alt === preferredPrimary) continue;
+      if (isHeliusEndpoint(endpoints[alt])) continue;
       if (
         acceptFailoverTarget(
           role,
@@ -1108,11 +1088,15 @@ function resolveIndexForRole(role: RpcRole): number {
           latencySoft,
           rateLimited,
           downMs,
-          avoidPublicForCritical
+          false
         )
       ) {
         return alt;
       }
+    }
+    if (latencySoft && !rateLimited) {
+      setActiveForRole(role, preferred);
+      return preferred;
     }
   }
 

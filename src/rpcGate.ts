@@ -141,6 +141,23 @@ function logGate(
   console.warn(`[rpc-gate] ${role}: ${message}`, data);
 }
 
+let lastScannerCappedAt = 0;
+function logScannerCapped(
+  kind: 'rate' | 'busy',
+  feature: string | undefined,
+  lane: LaneState,
+  limits: ReturnType<typeof laneLimits>
+): void {
+  const now = Date.now();
+  if (now - lastScannerCappedAt < 12_000) return;
+  lastScannerCappedAt = now;
+  console.warn(
+    `[scanner_rpc_capped] ${kind} feature=${feature || 'ungated'} ` +
+      `inFlight=${lane.inFlight}/${limits.maxConcurrent} q=${lane.waiters.length} ` +
+      `rps=${limits.maxRps}`
+  );
+}
+
 /**
  * Acquire a lane slot (concurrency + rate). Critical work waits; non-critical
  * may skip when the lane is saturated so background polls cannot pile up.
@@ -175,6 +192,9 @@ export async function acquireRpcLane(
         maxRps: limits.maxRps,
         lifetimeSkipped: lane.skipped,
       });
+      if (role === 'secondary') {
+        logScannerCapped('rate', feature, lane, limits);
+      }
       throw new RpcGateSkipError('rate', role, feature);
     }
     const waitForTokenMs = Math.min(1_500, limits.maxWaitMs);
@@ -207,6 +227,9 @@ export async function acquireRpcLane(
         queued: lane.waiters.length,
         maxConcurrent: limits.maxConcurrent,
       });
+      if (role === 'secondary') {
+        logScannerCapped('busy', feature, lane, limits);
+      }
       throw new RpcGateSkipError('busy', role, feature);
     }
     if (!critical && limits.maxQueue <= 0) {
@@ -312,7 +335,9 @@ export async function runDedupedRpcJob<T>(
     }
     if (Date.now() - lastDedupLogAt > 15_000) {
       lastDedupLogAt = Date.now();
-      console.warn(`[duplicate_rpc_suppressed] ${String(key).slice(0, 96)}`);
+      const tag =
+        roleHint === 'secondary' ? 'scanner_deduped' : 'duplicate_rpc_suppressed';
+      console.warn(`[${tag}] ${String(key).slice(0, 96)}`);
     }
     if (opts?.join === false) return undefined;
     return (await existing) as T;
@@ -361,8 +386,8 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
 }
 
 /**
- * True when Critical (primary) is busy — scanners / Favourites should yield
- * so trade entry keeps RPC headroom.
+ * Scanners defer only on own-lane saturation / own-lane ×3.
+ * Utility still yields when Critical is busy (Favourites protection).
  */
 export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = 'scanner'): {
   defer: boolean;
@@ -377,26 +402,31 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
     const { getRpcLoadControlSnapshot } =
       require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     const load = getRpcLoadControlSnapshot();
-    // Only full shed (Critical latency / queue) hard-skips. Mild scanner×2
-  // uses probabilistic skip in shouldSkipScannerTick — do not hard-block here
-  // or scanners go quiet for the whole process once factor hits 3 once.
-  if (load.shedBackground && kind === 'scanner' && load.scannerSlowFactor >= 3) {
-    return {
-      defer: true,
-      reason: load.reasons[0] || 'adaptive shed for Critical',
-    };
-  }
-  if (kind === 'utility' && load.utilitySlowFactor >= 3) {
-    return {
-      defer: true,
-      reason: `utility adaptive×${load.utilitySlowFactor}`,
-    };
-  }
+    // Own-lane ×3: hard-defer scanners (not Critical shed).
+    if (kind === 'scanner' && load.scannerSlowFactor >= 3) {
+      return {
+        defer: true,
+        reason: load.throttledByOwnLaneOnly
+          ? load.reasons.find((r) => /secondary|Scanners/i.test(r)) ||
+            `own-lane scanner×${load.scannerSlowFactor}`
+          : `scanner×${load.scannerSlowFactor}`,
+      };
+    }
+    if (kind === 'utility' && load.utilitySlowFactor >= 3) {
+      return {
+        defer: true,
+        reason: `utility adaptive×${load.utilitySlowFactor}`,
+      };
+    }
   } catch {
     /* */
   }
 
-  if (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1)) {
+  // Utility yields to Critical busy; scanners do not (isolation / freer Scanners).
+  if (
+    kind === 'utility' &&
+    (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1))
+  ) {
     return {
       defer: true,
       reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,

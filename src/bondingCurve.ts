@@ -11,6 +11,7 @@ import {
   runWithRpcRole,
   isRpcGateSkipError,
 } from './connection';
+import { runDedupedRpcJob } from './rpcGate';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta, loggedFetch } from './logger';
 import {
@@ -443,55 +444,58 @@ export async function fetchBondingCurve(
     if (pending) return pending;
   }
 
+  const role = getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad));
+  const dedupeKey = `${role}:bonding_curve:${mint}${options.force ? ':force' : ''}`;
+
   const job = (async () => {
-    const body = async (): Promise<BondingCurveState> => {
-      try {
-        let state = await fetchBondingCurveOnChain(mint);
-        if (state.source === 'none' || state.error) {
-          if (
-            !mintUnavailable.isQuarantined(mint) &&
-            !isPumpApiInCooldown()
-          ) {
-            const api = await fetchBondingCurveFromApi(mint).catch(() => null);
-            if (api) state = api;
+    const run = async (): Promise<BondingCurveState> => {
+      const body = async (): Promise<BondingCurveState> => {
+        try {
+          let state = await fetchBondingCurveOnChain(mint);
+          if (state.source === 'none' || state.error) {
+            if (
+              !mintUnavailable.isQuarantined(mint) &&
+              !isPumpApiInCooldown()
+            ) {
+              const api = await fetchBondingCurveFromApi(mint).catch(() => null);
+              if (api) state = api;
+            }
           }
+          cache.set(mint, {
+            state,
+            expiresAt: Date.now() + cacheTtlMs(),
+          });
+          return state;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const fail = emptyState(mint, message);
+          cache.set(mint, {
+            state: fail,
+            expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
+          });
+          return fail;
+        } finally {
+          inflight.delete(mint);
         }
-        cache.set(mint, {
-          state,
-          expiresAt: Date.now() + cacheTtlMs(),
-        });
-        return state;
+      };
+      if (hasRpcRoleContext()) return body();
+      try {
+        return await runWithRpcRole(role, body, 'bonding_curve');
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const fail = emptyState(mint, message);
-        cache.set(mint, {
-          state: fail,
-          expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
-        });
-        return fail;
-      } finally {
-        inflight.delete(mint);
+        if (isRpcGateSkipError(err)) {
+          const fail = emptyState(mint, 'rpc lane busy');
+          cache.set(mint, {
+            state: fail,
+            expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
+          });
+          inflight.delete(mint);
+          return fail;
+        }
+        throw err;
       }
     };
-    if (hasRpcRoleContext()) return body();
-    try {
-      return await runWithRpcRole(
-        getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
-        body,
-        'bonding_curve'
-      );
-    } catch (err) {
-      if (isRpcGateSkipError(err)) {
-        const fail = emptyState(mint, 'rpc lane busy');
-        cache.set(mint, {
-          state: fail,
-          expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
-        });
-        inflight.delete(mint);
-        return fail;
-      }
-      throw err;
-    }
+    const out = await runDedupedRpcJob(dedupeKey, run);
+    return out ?? emptyState(mint, 'rpc dedupe miss');
   })();
 
   inflight.set(mint, job);

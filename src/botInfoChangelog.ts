@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.310',
+    title: 'Scanners-only decongest — Critical untouched',
+    sections: ['execution', 'overview'],
+    items: [
+      'Scanners stay on ALCHEMY_API_KEY and never soft/hard-hop onto Critical Alchemy or Helius; side failover is BACKUP2 → QuickNode only.',
+      'scanner× rises only from Scanners lane skips/latency (not Critical stress). Market keeps signal intake and drops nested side work under load; Alpha/Zion use adaptive intervals; scanner RPC is deduped/capped.',
+    ],
+  },
+  {
     version: '1.2.309',
     title: 'Alchemy dual-key sticky + Helius emergency-only honesty',
     sections: ['execution', 'overview'],

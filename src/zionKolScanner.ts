@@ -10,8 +10,9 @@ import { getConnection, lanesShareEndpoint, runWithRpcRole, isRpcGateSkipError }
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
+  runDedupedRpcJob,
 } from './rpcGate';
-import { shouldSkipScannerTick } from './rpcLoadControl';
+import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta } from './logger';
 import {
@@ -369,11 +370,17 @@ async function parseBuysFromSig(
   wallet: UniverseWallet,
   signature: string
 ): Promise<number> {
-  const conn = getConnection();
-  const tx = await conn.getParsedTransaction(signature, {
-    maxSupportedTransactionVersion: 0,
-    commitment: 'confirmed',
-  });
+  const role = getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad));
+  const tx = await runDedupedRpcJob(
+    `${role}:getParsedTransaction:${signature}`,
+    async () => {
+      const conn = getConnection();
+      return conn.getParsedTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: 'confirmed',
+      });
+    }
+  );
   if (!tx?.meta) return 0;
 
   const pre = tx.meta.preTokenBalances ?? [];
@@ -433,7 +440,11 @@ async function pollUniverseBatch(): Promise<number> {
     if (wi > 0) await sleep(throttleBatchAfter429 ? 400 : 180);
     try {
       const pubkey = new PublicKey(wallet.address);
-      const sigs = await conn.getSignaturesForAddress(pubkey, { limit: 5 });
+      const sigs =
+        (await runDedupedRpcJob(
+          `${role}:getSignaturesForAddress:${wallet.address}`,
+          () => conn.getSignaturesForAddress(pubkey, { limit: 5 })
+        )) || [];
       if (!sigs.length) continue;
       const lastSeen = lastSignature.get(wallet.address);
       if (lastSeen == null) {
@@ -728,9 +739,19 @@ export async function runZionScannerPollOnce(): Promise<void> {
     lastError = `RPC cooldown until ${new Date(rpcCooldownUntil).toISOString()}`;
     return;
   }
+  const share = lanesShareEndpoint();
+  const configured = Math.max(
+    75_000,
+    Number(zionCfg().scanner.pollIntervalMs) || 75_000
+  );
+  const baseInterval = share ? Math.max(90_000, configured) : configured;
+  const interval = adaptiveScannerIntervalMs(baseInterval);
+  if (lastPollAt != null && Date.now() - lastPollAt < interval * 0.85) {
+    return;
+  }
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
-    logBackgroundDeferred('Zion KOL Scanner', defer.reason || 'Critical busy');
+    logBackgroundDeferred('Zion KOL Scanner', defer.reason || 'Scanners busy');
     lastError = `delayed — ${defer.reason}`;
     return;
   }
