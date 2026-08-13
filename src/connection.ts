@@ -3,6 +3,7 @@
  * health monitoring, cross-lane failover, priority fees, and stats.
  */
 
+import fs from 'fs';
 import { AsyncLocalStorage } from 'async_hooks';
 import {
   Connection,
@@ -317,6 +318,46 @@ export function getRpcCallerInventory(limit = 10): {
   };
 }
 
+const BOTTLENECK_DEBUG_SESSION = '06c3b9';
+const bottleneckDebugRing: Array<Record<string, unknown>> = [];
+
+function noteBottleneckDebug(entry: Record<string, unknown>): void {
+  bottleneckDebugRing.push(entry);
+  while (bottleneckDebugRing.length > 24) bottleneckDebugRing.shift();
+  try {
+    const { dataFile, ensureDataDir } =
+      require('./dataDir') as typeof import('./dataDir');
+    ensureDataDir();
+    fs.appendFileSync(
+      dataFile('rpc-bottleneck-debug.ndjson'),
+      JSON.stringify(entry) + '\n',
+      'utf8'
+    );
+  } catch {
+    /* */
+  }
+  try {
+    console.warn(
+      `[rpc-debug] ${String(entry.message || 'snap')} ` +
+        JSON.stringify(entry.data || {}).slice(0, 400)
+    );
+  } catch {
+    /* */
+  }
+  fetch('http://127.0.0.1:7710/ingest/4a93e060-3c93-430c-865a-86d3cc897ce8', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': BOTTLENECK_DEBUG_SESSION,
+    },
+    body: JSON.stringify(entry),
+  }).catch(() => {});
+}
+
+export function getBottleneckDebugRing(limit = 12): Array<Record<string, unknown>> {
+  return bottleneckDebugRing.slice(-Math.max(1, limit));
+}
+
 export function getProcessHealthSnapshot(): {
   queueDepth: number;
   backlog: number;
@@ -354,6 +395,81 @@ export function getProcessHealthSnapshot(): {
     scannersEwmaMs,
   };
 }
+
+// #region agent log helper used by getRpcStats
+function emitRpcBottleneckSnapshot(payload: {
+  summary: string;
+  degradedBy: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  lanes: any;
+  gate: ReturnType<typeof getRpcGateSnapshot>;
+  loadControl: ReturnType<
+    typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
+  > | null;
+}): void {
+  const nowDbg = Date.now();
+  if (!(globalThis as { __dbgRpcSnapAt?: number }).__dbgRpcSnapAt) {
+    (globalThis as { __dbgRpcSnapAt?: number }).__dbgRpcSnapAt = 0;
+  }
+  if (
+    nowDbg - ((globalThis as { __dbgRpcSnapAt?: number }).__dbgRpcSnapAt || 0) >
+    8_000
+  ) {
+    (globalThis as { __dbgRpcSnapAt?: number }).__dbgRpcSnapAt = nowDbg;
+    const inv = getRpcCallerInventory(8);
+    const ph = getProcessHealthSnapshot();
+    const lanes = payload.lanes;
+    const gate = payload.gate;
+    const loadControl = payload.loadControl;
+    noteBottleneckDebug({
+      sessionId: BOTTLENECK_DEBUG_SESSION,
+      runId: process.env.RENDER ? 'render-live' : 'post-fix',
+      hypothesisId: 'H1-H5',
+      location: 'connection.ts:getRpcStats',
+      message: 'rpc_bottleneck_snapshot',
+      data: {
+        summary: payload.summary,
+        degradedBy: payload.degradedBy,
+        onRender: Boolean(process.env.RENDER),
+        crit: {
+          label: lanes.critical.activeLabel,
+          pref: lanes.critical.preferredLabel,
+          lat: lanes.critical.latencyMs,
+          prefLat: lanes.critical.preferredLatencyMs,
+          fo: lanes.critical.failover,
+          configured: lanes.critical.configured,
+        },
+        scan: {
+          label: lanes.scanners.activeLabel,
+          lat: lanes.scanners.latencyMs,
+          prefLat: lanes.scanners.preferredLatencyMs,
+          configured: lanes.scanners.configured,
+        },
+        util: {
+          label: lanes.utility.activeLabel,
+          pref: lanes.utility.preferredLabel,
+          lat: lanes.utility.latencyMs,
+          prefLat: lanes.utility.preferredLatencyMs,
+          fo: lanes.utility.failover,
+        },
+        gate: {
+          p: `${gate.lanes.primary.inFlight}/${gate.lanes.primary.maxConcurrent}q${gate.lanes.primary.queued}sk${gate.lanes.primary.skipped}`,
+          s: `${gate.lanes.secondary.inFlight}/${gate.lanes.secondary.maxConcurrent}q${gate.lanes.secondary.queued}sk${gate.lanes.secondary.skipped}rate${gate.lanes.secondary.hitRateLimit}`,
+          u: `${gate.lanes.utility.inFlight}/${gate.lanes.utility.maxConcurrent}q${gate.lanes.utility.queued}`,
+          secReasons: gate.lanes.secondary.skippedByReason,
+        },
+        top: inv.top.slice(0, 6),
+        process: ph,
+        signalsHealthy: loadControl?.signalsRpcHealthy ?? null,
+        scannerX: loadControl?.scannerSlowFactor ?? null,
+        utilityX: loadControl?.utilitySlowFactor ?? null,
+      },
+      timestamp: nowDbg,
+    });
+  }
+}
+// #endregion
+
 
 export function getRpcCallTraffic(limit = 40): {
   sinceMs: number;
@@ -1700,14 +1816,63 @@ function recordSuccess(index: number, latencyMs: number): void {
   state.successCount += 1;
   const sample = Math.max(0, latencyMs);
   state.lastCallLatencyMs = sample;
-  // EWMA so a single slow getTransaction does not paint the whole endpoint as 800ms+.
-  state.latencyMs =
-    state.latencyMs == null
-      ? sample
-      : Math.round(
-          LATENCY_EWMA_ALPHA * sample + (1 - LATENCY_EWMA_ALPHA) * state.latencyMs
-        );
-  updateLatencyStress(state);
+  const feature = rpcFeatureAls.getStore() || 'ungated';
+  const isProbe = feature === 'health_probe';
+  // Health probes must not dominate lane EWMA / soft-failover — they inflate
+  // Critical/Scanners when the preferred endpoint is idle or on a weak public URL.
+  if (!isProbe) {
+    state.latencyMs =
+      state.latencyMs == null
+        ? sample
+        : Math.round(
+            LATENCY_EWMA_ALPHA * sample +
+              (1 - LATENCY_EWMA_ALPHA) * state.latencyMs
+          );
+    updateLatencyStress(state);
+  }
+  // #region agent log
+  if (
+    sample >= 80 &&
+    (index === preferredPrimary || index === preferredSecondary)
+  ) {
+    const nowS = Date.now();
+    if (!(globalThis as { __dbgSlowAt?: number }).__dbgSlowAt) {
+      (globalThis as { __dbgSlowAt?: number }).__dbgSlowAt = 0;
+    }
+    if (nowS - ((globalThis as { __dbgSlowAt?: number }).__dbgSlowAt || 0) > 4_000) {
+      (globalThis as { __dbgSlowAt?: number }).__dbgSlowAt = nowS;
+      fetch('http://127.0.0.1:7710/ingest/4a93e060-3c93-430c-865a-86d3cc897ce8', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '06c3b9',
+        },
+        body: JSON.stringify({
+          sessionId: '06c3b9',
+          runId: 'post-fix',
+          hypothesisId: 'H4',
+          location: 'connection.ts:recordSuccess',
+          message: 'slow_lane_sample',
+          data: {
+            label: state.endpoint.label,
+            lane:
+              index === preferredPrimary
+                ? 'critical'
+                : index === preferredSecondary
+                  ? 'scanners'
+                  : 'other',
+            sampleMs: sample,
+            ewmaMs: state.latencyMs,
+            feature,
+            role: rpcRoleAls.getStore() ?? 'unknown',
+            probeExcludedFromEwma: isProbe,
+          },
+          timestamp: nowS,
+        }),
+      }).catch(() => {});
+    }
+  }
+  // #endregion
   state.healthy = true;
   state.consecutiveFailures = 0;
   state.unhealthySince = null;
@@ -2091,6 +2256,11 @@ export function getRpcStats(): {
   callerInventory: ReturnType<typeof getRpcCallerInventory>;
   /** Queue / event-loop health proxy for congestion diagnosis. */
   processHealth: ReturnType<typeof getProcessHealthSnapshot>;
+  /** Rolling bottleneck snapshots for Render/local debug (no secrets). */
+  bottleneckDebug: {
+    sessionId: string;
+    recent: Array<Record<string, unknown>>;
+  };
   /** Per-lane concurrency / rate-limit backlog (overload vs provider). */
   gate: ReturnType<typeof getRpcGateSnapshot>;
   /** Quarantined (hard-failed) endpoints — not probed until cooldown ends. */
@@ -2456,6 +2626,16 @@ export function getRpcStats(): {
       : 'backups idle',
   ].join(' · ');
 
+  // #region agent log
+  emitRpcBottleneckSnapshot({
+    summary,
+    degradedBy,
+    lanes,
+    gate,
+    loadControl,
+  });
+  // #endregion
+
   return {
     active: pActive?.endpoint.label || 'unknown',
     activeUrl: maskUrl(pActive?.endpoint.url || ''),
@@ -2536,6 +2716,10 @@ export function getRpcStats(): {
     callTraffic: getRpcCallTraffic(40),
     callerInventory: getRpcCallerInventory(10),
     processHealth: getProcessHealthSnapshot(),
+    bottleneckDebug: {
+      sessionId: BOTTLENECK_DEBUG_SESSION,
+      recent: getBottleneckDebugRing(12),
+    },
     gate,
     quarantine,
     loadControl,

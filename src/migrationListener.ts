@@ -89,8 +89,9 @@ let onPriorityHandler: MigrationHandler | null = null;
 
 const MIGRATION_TTL_MS = 30 * 60 * 1000;
 const POLL_MS = 12_000;
-/** When Helius is hot or the gate is stressed, back off polls (still Critical lane). */
-const POLL_MS_STRESSED = 20_000;
+/** When Critical is warm/hot or the gate is stressed, back off polls (still Critical lane). */
+const POLL_MS_WARM = 30_000;
+const POLL_MS_STRESSED = 45_000;
 const MAX_PROCESSED_SIGS = 800;
 const WS_STALE_MS = 4 * 60 * 1000;
 const HEALTH_CHECK_MS = 45_000;
@@ -492,12 +493,54 @@ async function pollMigrations(): Promise<void> {
     gateStressed = false;
   }
   const primaryMs = peekRpcLatencyMs('primary');
-  const heliusHot = primaryMs != null && primaryMs >= 500;
-  const minGap = gateStressed || heliusHot ? POLL_MS_STRESSED : POLL_MS;
+  const primaryWarm = primaryMs != null && primaryMs >= 200;
+  const primaryHot = primaryMs != null && primaryMs >= 500;
+  const minGap =
+    gateStressed || primaryHot
+      ? POLL_MS_STRESSED
+      : primaryWarm
+        ? POLL_MS_WARM
+        : POLL_MS;
   if (lastMigrationPollAt && Date.now() - lastMigrationPollAt < minGap) return;
   lastMigrationPollAt = Date.now();
 
   const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
+  // #region agent log
+  {
+    const nowM = Date.now();
+    if (!(globalThis as { __dbgMigAt?: number }).__dbgMigAt) {
+      (globalThis as { __dbgMigAt?: number }).__dbgMigAt = 0;
+    }
+    if (nowM - ((globalThis as { __dbgMigAt?: number }).__dbgMigAt || 0) > 12_000) {
+      (globalThis as { __dbgMigAt?: number }).__dbgMigAt = nowM;
+      fetch('http://127.0.0.1:7710/ingest/4a93e060-3c93-430c-865a-86d3cc897ce8', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '06c3b9',
+        },
+        body: JSON.stringify({
+          sessionId: '06c3b9',
+          runId: 'post-fix',
+          hypothesisId: 'H1',
+          location: 'migrationListener.ts:pollMigrations',
+          message: 'migration_poll_start',
+          data: {
+            role,
+            minGap,
+            gateStressed,
+            primaryWarm,
+            primaryHot,
+            primaryMs,
+            wsMode,
+            parseInFlight: migrationParseInFlight,
+          },
+          timestamp: nowM,
+        }),
+      }).catch(() => {});
+    }
+  }
+  // #endregion
   return runWithRpcRole(role, async () => {
   try {
     const conn = getConnection();

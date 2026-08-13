@@ -439,6 +439,46 @@ export async function acquireRpcLane(
       });
       if (role === 'secondary') {
         logScannerCapped('rate', feature, lane, limits);
+        // #region agent log
+        {
+          const nowR = Date.now();
+          if (!(globalThis as { __dbgRateAt?: number }).__dbgRateAt) {
+            (globalThis as { __dbgRateAt?: number }).__dbgRateAt = 0;
+          }
+          if (
+            nowR - ((globalThis as { __dbgRateAt?: number }).__dbgRateAt || 0) >
+            5_000
+          ) {
+            (globalThis as { __dbgRateAt?: number }).__dbgRateAt = nowR;
+            fetch(
+              'http://127.0.0.1:7710/ingest/4a93e060-3c93-430c-865a-86d3cc897ce8',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Debug-Session-Id': '06c3b9',
+                },
+                body: JSON.stringify({
+                  sessionId: '06c3b9',
+                  runId: 'pre-fix',
+                  hypothesisId: 'H2',
+                  location: 'rpcGate.ts:acquireRpcLane:rate',
+                  message: 'secondary_rate_skip',
+                  data: {
+                    feature: feature || 'ungated',
+                    inFlight: lane.inFlight,
+                    tokens: Number(lane.tokens.toFixed(2)),
+                    maxRps: limits.maxRps,
+                    hitRateLimit: lane.hitRateLimit,
+                    skipped: lane.skipped,
+                  },
+                  timestamp: nowR,
+                }),
+              }
+            ).catch(() => {});
+          }
+        }
+        // #endregion
       }
       throw new RpcGateSkipError('rate', role, feature);
     }

@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.315',
+    title: 'RPC bottleneck relief + Render-readable diagnostics',
+    sections: ['execution', 'overview'],
+    items: [
+      'Health probes no longer inflate Critical/Scanners EWMA; migration backs off when Critical is warm/hot; token_metrics holder fanout sheds under Scanners pressure.',
+      'signalsRpcHealthy threshold widened slightly; /api/status exposes bottleneckDebug ring + DATA_DIR rpc-bottleneck-debug.ndjson for Render live diagnosis (lanes unchanged).',
+    ],
+  },
+  {
     version: '1.2.314',
     title: 'Cut RPC congestion at the source (lanes frozen)',
     sections: ['execution', 'overview'],

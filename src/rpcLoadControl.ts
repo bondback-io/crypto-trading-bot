@@ -59,7 +59,7 @@ const lastSkipNoteAt: Partial<Record<RpcGateRole, number>> = {};
 const lastLowPriSkipNoteAt: Partial<Record<RpcGateRole, number>> = {};
 
 /** Scanners EWMA below this = protect core signal intake from enrich shed. */
-export const SIGNALS_RPC_HEALTHY_MS = 150;
+export const SIGNALS_RPC_HEALTHY_MS = 280;
 
 const LOW_PRI_FEATURES = new Set(['bonding_curve', 'token_metrics']);
 
@@ -117,7 +117,46 @@ export function isSignalsRpcHealthy(
   if (secondaryLatencyMs == null || !Number.isFinite(secondaryLatencyMs)) {
     return false;
   }
-  if (secondaryLatencyMs >= SIGNALS_RPC_HEALTHY_MS) return false;
+  if (secondaryLatencyMs >= SIGNALS_RPC_HEALTHY_MS) {
+    // #region agent log
+    {
+      const nowH = Date.now();
+      if (!(globalThis as { __dbgSigHAt?: number }).__dbgSigHAt) {
+        (globalThis as { __dbgSigHAt?: number }).__dbgSigHAt = 0;
+      }
+      if (
+        nowH - ((globalThis as { __dbgSigHAt?: number }).__dbgSigHAt || 0) >
+        8_000
+      ) {
+        (globalThis as { __dbgSigHAt?: number }).__dbgSigHAt = nowH;
+        fetch(
+          'http://127.0.0.1:7710/ingest/4a93e060-3c93-430c-865a-86d3cc897ce8',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Debug-Session-Id': '06c3b9',
+            },
+            body: JSON.stringify({
+              sessionId: '06c3b9',
+              runId: 'post-fix',
+              hypothesisId: 'H3',
+              location: 'rpcLoadControl.ts:isSignalsRpcHealthy',
+              message: 'signals_rpc_unhealthy_latency',
+              data: {
+                secondaryLatencyMs,
+                threshold: SIGNALS_RPC_HEALTHY_MS,
+                laneOk: secondaryLaneNotSaturated(),
+              },
+              timestamp: nowH,
+            }),
+          }
+        ).catch(() => {});
+      }
+    }
+    // #endregion
+    return false;
+  }
   return secondaryLaneNotSaturated() || lastSecondaryIdle;
 }
 
