@@ -18,6 +18,7 @@ import {
 import { config } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import {
+  getActiveEndpointLabel,
   getConnection,
   getRpcGateSnapshot,
   getRpcStats,
@@ -158,11 +159,43 @@ export function onMigrationPriority(handler: MigrationHandler): void {
   onPriorityHandler = handler;
 }
 
+/** True after boot requested migration — used to resume after idle isolation. */
+let bootRequested = false;
+
 export function startMigrationListener(): void {
+  bootRequested = true;
+  try {
+    const {
+      isRpcWorkloadEnabled,
+      allFeatureWorkloadsOff,
+    } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('migration') || allFeatureWorkloadsOff()) {
+      console.warn(
+        '[migration] start skipped — migration workload OFF or idle isolation (all features OFF)'
+      );
+      try {
+        const { markMigrationResumeWanted } =
+          require('./connection') as typeof import('./connection');
+        markMigrationResumeWanted(true);
+      } catch {
+        /* */
+      }
+      return;
+    }
+  } catch {
+    /* */
+  }
   if (running) return;
   running = true;
   reconnectAttempts = 0;
   seededPollPrograms.clear();
+  try {
+    const { markMigrationResumeWanted } =
+      require('./connection') as typeof import('./connection');
+    markMigrationResumeWanted(true);
+  } catch {
+    /* */
+  }
 
   console.log('[migration] ═══════════════════════════════════════');
   console.log('[migration] Starting real-time migration listener');
@@ -224,6 +257,56 @@ export function stopMigrationListener(): void {
 
   unsubscribeAll();
   console.log('[migration] Listener stopped');
+}
+
+/**
+ * Tear down WS/timers when migration OFF or all feature workloads OFF;
+ * restart when migration ON again and boot previously requested it.
+ */
+export function syncMigrationWorkloadGate(): void {
+  let migrationOn = true;
+  let featuresOff = false;
+  try {
+    const {
+      isRpcWorkloadEnabled,
+      allFeatureWorkloadsOff,
+    } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    migrationOn = isRpcWorkloadEnabled('migration');
+    featuresOff = allFeatureWorkloadsOff();
+  } catch {
+    return;
+  }
+  if (!migrationOn || featuresOff) {
+    if (running) {
+      console.warn(
+        '[migration] quiescing — ' +
+          (!migrationOn ? 'migration workload OFF' : 'idle isolation')
+      );
+      stopMigrationListener();
+      // Keep resume intent after quiesce from isolation / toggle.
+      bootRequested = true;
+      try {
+        const { markMigrationResumeWanted } =
+          require('./connection') as typeof import('./connection');
+        markMigrationResumeWanted(true);
+      } catch {
+        /* */
+      }
+    } else {
+      // Even if not "running", drop any stray WS/reconnect.
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      unsubscribeAll();
+      wsMode = false;
+    }
+    return;
+  }
+  if (bootRequested && !running) {
+    console.log('[migration] resuming after workload/isolation gate');
+    startMigrationListener();
+  }
 }
 
 export function isMigrationListenerRunning(): boolean {
@@ -289,10 +372,35 @@ function unsubscribeAll(): void {
 
 function subscribeWebSocket(): boolean {
   try {
+    try {
+      const {
+        isRpcWorkloadEnabled,
+        allFeatureWorkloadsOff,
+      } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+      if (!isRpcWorkloadEnabled('migration') || allFeatureWorkloadsOff()) {
+        return false;
+      }
+    } catch {
+      /* */
+    }
     unsubscribeAll();
     const conn = getConnection();
     subscribedRpcUrl = conn.rpcEndpoint;
     lastSubscribeAt = Date.now();
+    try {
+      const { noteIdleRpcCall } =
+        require('./rpcIdleTrace') as typeof import('./rpcIdleTrace');
+      const { allFeatureWorkloadsOff } =
+        require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+      noteIdleRpcCall({
+        label: 'migration_ws_subscribe',
+        endpoint: getActiveEndpointLabel('primary'),
+        method: 'onLogs',
+        featuresOff: allFeatureWorkloadsOff(),
+      });
+    } catch {
+      /* */
+    }
 
     const programs: { id: string; label: MigrationEvent['program'] }[] = [
       { id: config.pumpFunProgramId, label: 'pumpfun' },
@@ -330,6 +438,15 @@ function subscribeWebSocket(): boolean {
 
 function scheduleReconnect(reason: string): void {
   if (!running) return;
+  try {
+    const {
+      isRpcWorkloadEnabled,
+      allFeatureWorkloadsOff,
+    } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('migration') || allFeatureWorkloadsOff()) return;
+  } catch {
+    /* */
+  }
   if (reconnectTimer) return;
   // Never reconnect WS against public RPC — it crash-loops the host.
   try {
@@ -365,6 +482,15 @@ function scheduleReconnect(reason: string): void {
 
 function checkSubscriptionHealth(): void {
   if (!running) return;
+  try {
+    const {
+      isRpcWorkloadEnabled,
+      allFeatureWorkloadsOff,
+    } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('migration') || allFeatureWorkloadsOff()) return;
+  } catch {
+    /* */
+  }
 
   // Stay poll-only on public RPCs — never try to (re)open program log websockets.
   try {
@@ -487,9 +613,22 @@ async function pollMigrations(): Promise<void> {
   if (!running) return;
   if (Date.now() < rateLimitedUntil) return;
   try {
-    const { isRpcWorkloadEnabled } =
-      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
-    if (!isRpcWorkloadEnabled('migration')) return;
+    const {
+      isRpcWorkloadEnabled,
+      allFeatureWorkloadsOff,
+    } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('migration') || allFeatureWorkloadsOff()) {
+      // Tear down residual WS while poll is gated OFF.
+      if (wsMode || subIds.length) {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        unsubscribeAll();
+        wsMode = false;
+      }
+      return;
+    }
   } catch {
     /* */
   }

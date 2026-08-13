@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.327',
+    title: 'Emergency RPC idle isolation + residual caller tracer',
+    sections: ['execution', 'overview'],
+    items: [
+      'When all feature workloads are OFF: hard-pause health probes, tear down migration onLogs/WS, no failover warm-up — network RPC should go near zero.',
+      'Idle tracer logs residual callers (label/endpoint/method) and exposes rpc_calls_last_60s + top_callers_when_workloads_off on Stats → RPC.',
+      'Migration start respects migration kill-switch; sendRawTransaction/sendLegacy mapped to trade_entry.',
+    ],
+  },
+  {
     version: '1.2.326',
     title: 'A/B kill-switches for Dip/Steady + Trend Rider watchers',
     sections: ['execution', 'overview'],

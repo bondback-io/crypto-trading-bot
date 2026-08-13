@@ -229,6 +229,8 @@ const FEATURE_TO_WORKLOAD: Record<string, RpcWorkloadId> = {
   mev_sandwich: 'mev',
   priority_fee: 'priority_fee',
   zion_place_trade: 'zion_place_trade',
+  sendRawTransaction: 'trade_entry',
+  sendLegacy: 'trade_entry',
   market_scanner: 'market_scanner',
   dip_setup_watch: 'dip_setup_watch',
   trend_setup_watch: 'trend_setup_watch',
@@ -302,13 +304,21 @@ export function assertRpcWorkloadEnabled(featureOrId: string): void {
   }
 }
 
-function notifyHotPoolRefresh(): void {
+function notifyRpcControlPlane(): void {
   try {
-    const { refreshRpcHotPool } =
+    const { refreshRpcHotPool, syncRpcIdleIsolation } =
       require('./connection') as typeof import('./connection');
     refreshRpcHotPool();
+    syncRpcIdleIsolation();
   } catch {
     /* boot order / circular */
+  }
+  try {
+    const { syncMigrationWorkloadGate } =
+      require('./migrationListener') as typeof import('./migrationListener');
+    syncMigrationWorkloadGate();
+  } catch {
+    /* */
   }
 }
 
@@ -323,7 +333,7 @@ export function setRpcWorkloadEnabled(
   console.log(
     `[rpc-workload] ${id} → ${on ? 'ON' : 'OFF'} (test kill-switch)`
   );
-  notifyHotPoolRefresh();
+  notifyRpcControlPlane();
   return isRpcWorkloadEnabled(id);
 }
 
@@ -335,7 +345,7 @@ export function setRpcWorkloads(
       enabled.set(k as RpcWorkloadId, v);
     }
   }
-  notifyHotPoolRefresh();
+  notifyRpcControlPlane();
   return getRpcWorkloadEnabledMap();
 }
 
@@ -356,7 +366,7 @@ export function applyRpcWorkloadSaved(
       enabled.set(w.id, saved[w.id] as boolean);
     }
   }
-  notifyHotPoolRefresh();
+  notifyRpcControlPlane();
 }
 
 export function getRpcWorkloadSnapshot(): Array<

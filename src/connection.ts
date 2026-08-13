@@ -43,6 +43,10 @@ import {
   anyBackgroundFeatureWorkloadEnabled,
   allFeatureWorkloadsOff,
 } from './rpcWorkloadControl';
+import {
+  noteIdleRpcCall,
+  getIdleRpcTraceSnapshot,
+} from './rpcIdleTrace';
 
 dotenv.config();
 
@@ -138,6 +142,10 @@ let backgroundIdx = 0;
 let tradingHardFailStreak = 0;
 let tradingRecoverAt = 0;
 let lastHealthProbeAt = 0;
+/** Hard pause of non-essential RPC when all feature workloads are OFF. */
+let idleIsolationActive = false;
+/** Migration was started this process and should resume when isolation ends. */
+let migrationResumeWanted = false;
 
 const TRADING_HARD_FAIL_NEED = 3;
 const TRADING_RECOVER_MS = 45_000;
@@ -173,6 +181,76 @@ function wantBackgroundHot(): boolean {
   } catch {
     return true;
   }
+}
+
+function featuresOffNow(): boolean {
+  try {
+    return allFeatureWorkloadsOff();
+  } catch {
+    return false;
+  }
+}
+
+export function isRpcIdleIsolationActive(): boolean {
+  return idleIsolationActive;
+}
+
+export function markMigrationResumeWanted(wanted = true): void {
+  migrationResumeWanted = wanted;
+}
+
+/** Pause probes + tear down migration WS when all feature workloads are OFF. */
+export function enterRpcIdleIsolation(reason = 'all feature workloads OFF'): void {
+  if (idleIsolationActive) {
+    try {
+      const { syncMigrationWorkloadGate } =
+        require('./migrationListener') as typeof import('./migrationListener');
+      syncMigrationWorkloadGate();
+    } catch {
+      /* */
+    }
+    return;
+  }
+  idleIsolationActive = true;
+  console.warn(`[rpc] IDLE ISOLATION ON — ${reason}`);
+  try {
+    const { syncMigrationWorkloadGate } =
+      require('./migrationListener') as typeof import('./migrationListener');
+    syncMigrationWorkloadGate();
+  } catch {
+    /* */
+  }
+}
+
+/** Resume probes; restart migration only if workload ON and previously wanted. */
+export function exitRpcIdleIsolation(): void {
+  if (!idleIsolationActive) {
+    try {
+      const { syncMigrationWorkloadGate } =
+        require('./migrationListener') as typeof import('./migrationListener');
+      syncMigrationWorkloadGate();
+    } catch {
+      /* */
+    }
+    return;
+  }
+  idleIsolationActive = false;
+  lastHealthProbeAt = 0;
+  console.log('[rpc] IDLE ISOLATION OFF — resuming control-plane');
+  startRpcHealthMonitor();
+  try {
+    const { syncMigrationWorkloadGate } =
+      require('./migrationListener') as typeof import('./migrationListener');
+    syncMigrationWorkloadGate();
+  } catch {
+    /* */
+  }
+}
+
+/** Call after workload toggles / settings apply. */
+export function syncRpcIdleIsolation(): void {
+  if (featuresOffNow()) enterRpcIdleIsolation();
+  else exitRpcIdleIsolation();
 }
 
 export type RpcCallTrafficRow = {
@@ -677,6 +755,13 @@ async function probeState(
   st: EndpointState,
   timeoutMs = 8_000
 ): Promise<boolean> {
+  const off = featuresOffNow() || idleIsolationActive;
+  noteIdleRpcCall({
+    label: 'health_probe',
+    endpoint: st.endpoint.label,
+    method: 'getSlot',
+    featuresOff: off,
+  });
   notePerMin(probeCallAts);
   if (isRateLimited(st) || isHardFailed(st)) {
     st.lastCheckedAt = Date.now();
@@ -740,6 +825,12 @@ async function withRpcInner<T>(
     const start = Date.now();
     try {
       noteCallTraffic(st.endpoint.label, label, r);
+      noteIdleRpcCall({
+        label,
+        endpoint: st.endpoint.label,
+        method: 'withRpc',
+        featuresOff: featuresOffNow() || idleIsolationActive,
+      });
       const result = await fn(st.connection);
       recordSuccess(st, Date.now() - start);
       if (r === 'primary') noteTradingOutcome(true);
@@ -911,8 +1002,18 @@ export function getRpcStats() {
     }
   })();
   let controlPlaneThrash: string | null = null;
-  if (featuresOff && probeCallsPerMin >= 2) {
+  if (featuresOff && !idleIsolationActive && probeCallsPerMin >= 2) {
     controlPlaneThrash = 'probes_while_features_off';
+  }
+  if (idleIsolationActive) {
+    try {
+      const trace = getIdleRpcTraceSnapshot();
+      if (trace.rpc_calls_last_60s > 0) {
+        controlPlaneThrash = 'residual_rpc_while_idle_isolation';
+      }
+    } catch {
+      /* */
+    }
   }
 
   const downFor = (st: EndpointState | null) =>
@@ -1115,6 +1216,26 @@ export function getRpcStats() {
     majors_watcher_polls_per_min: watcherPolls.majors,
     active_endpoints_count: activeEndpointsCount,
     background_idle_when_workloads_off: backgroundIdleWhenWorkloadsOff,
+    idleIsolationActive,
+    ...(() => {
+      try {
+        const t = getIdleRpcTraceSnapshot();
+        return {
+          rpc_calls_last_60s: t.rpc_calls_last_60s,
+          top_callers_when_workloads_off: t.top_callers_when_workloads_off,
+        };
+      } catch {
+        return {
+          rpc_calls_last_60s: 0,
+          top_callers_when_workloads_off: [] as Array<{
+            label: string;
+            count: number;
+            method: string;
+            lastAt: number;
+          }>,
+        };
+      }
+    })(),
     controlPlaneThrash,
     lanes: {
       trading: {
@@ -1425,6 +1546,18 @@ export async function getTradingWalletsStatus(): Promise<{
 export async function testConnection(): Promise<boolean> {
   ensureEndpoints();
   startRpcHealthMonitor();
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('health_probe') || featuresOffNow() || idleIsolationActive) {
+      console.warn(
+        '[connection] testConnection skipped — health_probe OFF or idle isolation'
+      );
+      return true;
+    }
+  } catch {
+    /* */
+  }
   const pref = tradingPref;
   if (!pref) {
     console.error('[connection] No Trading RPC configured');
@@ -1457,8 +1590,14 @@ export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>
   try {
     const { isRpcWorkloadEnabled } =
       require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
-    if (!isRpcWorkloadEnabled('health_probe')) {
-      console.warn('[rpc] probeRpcRecovery skipped — health_probe OFF');
+    if (
+      !isRpcWorkloadEnabled('health_probe') ||
+      featuresOffNow() ||
+      idleIsolationActive
+    ) {
+      console.warn(
+        '[rpc] probeRpcRecovery skipped — health_probe OFF or idle isolation'
+      );
       return getRpcStats();
     }
   } catch {
@@ -1500,6 +1639,8 @@ export function startRpcHealthMonitor(): void {
 
   const tick = async () => {
     try {
+      // Hard pause: all feature workloads OFF → zero probe traffic (even if health_probe ON).
+      if (featuresOffNow() || idleIsolationActive) return;
       try {
         const { isRpcWorkloadEnabled } =
           require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
@@ -1531,7 +1672,7 @@ export function startRpcHealthMonitor(): void {
         if (Date.now() >= tradingRecoverAt) {
           tradingHop = 0;
           tradingRecoverAt = 0;
-        console.log('[rpc] Trading healthy again → Alchemy');
+          console.log('[rpc] Trading healthy again → Alchemy');
         }
       }
     } catch (err) {
