@@ -4,7 +4,12 @@
  */
 
 /** Mirrors connection.RpcRole — kept local to avoid circular imports. */
-export type RpcGateRole = 'primary' | 'secondary' | 'utility';
+export type RpcGateRole =
+  | 'primary'
+  | 'secondary'
+  | 'utility'
+  | 'scannersB'
+  | 'metrics';
 
 export type RpcGateDecision = 'run' | 'queued' | 'skipped_rate' | 'skipped_busy' | 'deduped';
 
@@ -87,6 +92,22 @@ function laneLimits(role: RpcGateRole): {
       maxWaitMs: 3_000,
     };
   }
+  if (role === 'scannersB') {
+    return {
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SCANNERS_B', 3, 1, 24),
+      maxRps: envInt('RPC_LANE_RPS_SCANNERS_B', 5, 1, 80),
+      maxQueue: envInt('RPC_LANE_QUEUE_SCANNERS_B', 6, 0, 100),
+      maxWaitMs: 3_000,
+    };
+  }
+  if (role === 'metrics') {
+    return {
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_METRICS', 2, 1, 16),
+      maxRps: envInt('RPC_LANE_RPS_METRICS', 4, 1, 60),
+      maxQueue: envInt('RPC_LANE_QUEUE_METRICS', 4, 0, 80),
+      maxWaitMs: 2_500,
+    };
+  }
   return {
     maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
     maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
@@ -99,6 +120,8 @@ const lanes: Record<RpcGateRole, LaneState> = {
   primary: emptyLane(),
   secondary: emptyLane(),
   utility: emptyLane(),
+  scannersB: emptyLane(),
+  metrics: emptyLane(),
 };
 
 function emptyLane(): LaneState {
@@ -304,7 +327,13 @@ export async function runDedupedRpcJob<T>(
   const existing = inflightJobs.get(key);
   if (existing) {
     const roleHint = key.split(':')[0];
-    if (roleHint === 'primary' || roleHint === 'secondary' || roleHint === 'utility') {
+    if (
+      roleHint === 'primary' ||
+      roleHint === 'secondary' ||
+      roleHint === 'utility' ||
+      roleHint === 'scannersB' ||
+      roleHint === 'metrics'
+    ) {
       lanes[roleHint].deduped += 1;
     } else {
       lanes.utility.deduped += 1;
@@ -324,7 +353,13 @@ export async function runDedupedRpcJob<T>(
 }
 
 export function getRpcGateSnapshot(): RpcGateSnapshot {
-  const roles: RpcGateRole[] = ['primary', 'secondary', 'utility'];
+  const roles: RpcGateRole[] = [
+    'primary',
+    'secondary',
+    'scannersB',
+    'metrics',
+    'utility',
+  ];
   const out = {} as Record<RpcGateRole, RpcLaneGateStats>;
   let backlog = 0;
   for (const role of roles) {
@@ -350,6 +385,7 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
     out.utility.queued > 0 ||
     out.utility.skipped > 0 ||
     out.secondary.queued > 2 ||
+    out.scannersB.queued > 2 ||
     out.primary.hitConcurrency > 0 ||
     out.primary.queued > 0;
   return { lanes: out, backlog, stressed };

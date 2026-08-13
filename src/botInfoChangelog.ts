@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.319',
+    title: 'Opt-in Multi-lane RPC pool (typed sticky)',
+    sections: ['execution', 'overview'],
+    items: [
+      'New RPC mode Multi-lane (default remains Classic Share): auto-discovers Render RPC env incl. BACKUP keys, ranks paid hosts, pins Critical / Scanners A / Scanners B / Metrics / Utility sticky lanes, holds 1–2 emergency-only.',
+      'Trades never round-robin; scanners cannot soft-hop onto Critical; emergency unused until hard-fail/429. Fewer than 3 paid endpoints auto-falls back to classic assignment.',
+      'Stats → RPC mode selector + POST /api/rpc/mode; Share toggle still controls classic three-lane split.',
+    ],
+  },
+  {
     version: '1.2.318',
     title: 'Restore classic RPC stack to 1.2.262',
     sections: ['execution', 'overview'],

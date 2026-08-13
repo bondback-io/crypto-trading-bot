@@ -10888,6 +10888,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
           <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-sm" title="classic = Share three-lane (default). multiLane = auto-discover Render RPCs, pin typed sticky lanes, hold 1–2 emergency.">
+              <span>RPC mode</span>
+              <select id="rpc-mode" onchange="setRpcOperatingMode(this.value)">
+                <option value="classic">Classic Share</option>
+                <option value="multiLane">Multi-lane pool</option>
+              </select>
+            </label>
+            <span class="mint text-xs" id="rpc-mode-status">—</span>
+          </div>
+          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
               <span>Soft watch cap</span>
               <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
@@ -10900,13 +10910,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
+          <div id="rpc-multilane-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
+            <div class="mb-1"><strong style="color:#34d399">Critical</strong> — trades / migration / MEV (sticky best paid)</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners A</strong> — Market Scanner + bonding curves</div>
+            <div class="mb-1"><strong style="color:#7dd3fc">Scanners B</strong> — AlphaScan + Zion</div>
+            <div class="mb-1"><strong style="color:#a5b4fc">Metrics</strong> — token metrics / anti-rug (merges into B if few hosts)</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility</strong> — Favourites / import / activity</div>
+            <div class="mb-1"><strong style="color:#fca5a5">Emergency</strong> — hard-fail / 429 only (never soft background)</div>
+          </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Classic three-lane RPC (Share ON)</strong> — Restored to 1.2.262-era stack: Helius Critical (<code>HELIUS_RPC_URL</code> / <code>HELIUS_API_KEY</code>) · Alchemy Scanners (<code>ALCHEMY_RPC_URL</code> / <code>ALCHEMY_API_KEY</code>) · Utility public Solana (<code>RPC_URL</code>). Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Classic Share (default)</strong> — Helius Critical · Alchemy Scanners · Utility public. Opt-in Multi-lane discovers all Render RPC keys (incl. BACKUP), ranks by stability, pins 4–5 typed sticky lanes, holds 1–2 emergency.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Multi-lane</strong> — trades never round-robin; scanners split across sticky hosts; Favourites stay on Utility; emergency unused until hard-fail.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON. (RPC runtime restored from Release 1.2.262.)</div>
+            <div class="mint">Failover: preferred must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Soft hops never burn emergency or dump scanners onto Critical.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -26964,7 +26980,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const shareToggle = document.getElementById('rpc-share-load');
       if (shareToggle) shareToggle.checked = rpc.shareLoad === true;
       const shareAlloc = document.getElementById('rpc-share-alloc');
-      if (shareAlloc) shareAlloc.style.display = rpc.shareLoad ? 'block' : 'none';
+      const mlAlloc = document.getElementById('rpc-multilane-alloc');
+      const modeEl = document.getElementById('rpc-mode');
+      const modeSt = document.getElementById('rpc-mode-status');
+      const isMulti = rpc.mode === 'multiLane' || rpc.multiLaneActive;
+      if (modeEl) modeEl.value = isMulti ? 'multiLane' : 'classic';
+      if (modeSt) {
+        modeSt.textContent = isMulti
+          ? (rpc.multiLaneActive ? 'Multi-lane active' : 'Multi-lane (classic fallback — need ≥3 paid)')
+          : 'Classic Share';
+      }
+      if (shareAlloc) shareAlloc.style.display = rpc.shareLoad && !isMulti ? 'block' : 'none';
+      if (mlAlloc) mlAlloc.style.display = isMulti ? 'block' : 'none';
       const softCapEl = document.getElementById('rpc-soft-watch-cap');
       if (softCapEl && rpc.softWatch && rpc.softWatch.softWatchCap != null) {
         softCapEl.value = rpc.softWatch.softWatchCap;
@@ -26991,17 +27018,37 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const p = rpc.primary || {};
         const s = rpc.secondary || {};
         const u = rpc.utility || {};
-        laneSt.textContent =
-          'Critical: ' + (p.label || '—') +
-          (p.failover ? ' (FAILOVER)' : '') +
-          (p.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Scanners: ' + (s.label || '—') +
-          (s.failover ? ' (FAILOVER)' : '') +
-          (s.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Utility: ' + (u.label || '—') +
-          (u.failover ? ' (FAILOVER)' : '') +
-          (u.healthy === false ? ' · preferred DOWN' : '') +
-          (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
+        const sb = rpc.scannersB || {};
+        const m = rpc.metrics || {};
+        const emerg = Array.isArray(rpc.emergency) ? rpc.emergency : [];
+        if (rpc.mode === 'multiLane' || rpc.multiLaneActive) {
+          laneSt.textContent =
+            'Critical: ' + (p.label || '—') +
+            (p.failover ? ' (FAILOVER)' : '') +
+            ' · ScannersA: ' + (s.label || '—') +
+            (s.failover ? ' (FAILOVER)' : '') +
+            ' · ScannersB: ' + (sb.label || '—') +
+            (sb.failover ? ' (FAILOVER)' : '') +
+            ' · Metrics: ' + (m.label || '—') +
+            (m.failover ? ' (FAILOVER)' : '') +
+            ' · Utility: ' + (u.label || '—') +
+            (u.failover ? ' (FAILOVER)' : '') +
+            (emerg.length
+              ? ' · Emergency: ' + emerg.map(function (e) { return e.label || '?'; }).join(',')
+              : '');
+        } else {
+          laneSt.textContent =
+            'Critical: ' + (p.label || '—') +
+            (p.failover ? ' (FAILOVER)' : '') +
+            (p.healthy === false ? ' · preferred DOWN' : '') +
+            ' · Scanners: ' + (s.label || '—') +
+            (s.failover ? ' (FAILOVER)' : '') +
+            (s.healthy === false ? ' · preferred DOWN' : '') +
+            ' · Utility: ' + (u.label || '—') +
+            (u.failover ? ' (FAILOVER)' : '') +
+            (u.healthy === false ? ' · preferred DOWN' : '') +
+            (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
+        }
       }
       const gateEl = document.getElementById('rpc-gate-status');
       if (gateEl) {
@@ -27012,6 +27059,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const title =
             role === 'primary' ? 'Critical' :
             role === 'secondary' ? 'Scanners' :
+            role === 'scannersB' ? 'ScannersB' :
+            role === 'metrics' ? 'Metrics' :
             role === 'utility' ? 'Utility' :
             role.charAt(0).toUpperCase() + role.slice(1);
           const base =
@@ -27041,7 +27090,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           stressBits.push('since ' + Math.round((Date.now() - Number(g.stressedSince)) / 1000) + 's');
         }
         gateEl.textContent = g.lanes
-          ? ('Lane gate: ' + fmt('primary') + ' · ' + fmt('secondary') + ' · ' + fmt('utility') +
+          ? ('Lane gate: ' + fmt('primary') + ' · ' + fmt('secondary') +
+            (g.lanes.scannersB ? ' · ' + fmt('scannersB') : '') +
+            (g.lanes.metrics ? ' · ' + fmt('metrics') : '') +
+            ' · ' + fmt('utility') +
             (stressBits.length ? ' · ' + stressBits.join(' · ') : '') +
             (g.backlog != null ? ' · backlog ' + g.backlog : ''))
           : 'Lane gate: —';
@@ -36094,11 +36146,36 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             : 'Share RPC load OFF — legacy primary/secondary routing';
         }
         const shareAlloc = document.getElementById('rpc-share-alloc');
-        if (shareAlloc) shareAlloc.style.display = data.shareLoad ? 'block' : 'none';
+        if (shareAlloc) shareAlloc.style.display = data.shareLoad && data.mode !== 'multiLane' ? 'block' : 'none';
         if (typeof refresh === 'function') refresh();
       } catch (err) {
         const t = document.getElementById('rpc-share-load');
         if (t) t.checked = !enabled;
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
+    async function setRpcOperatingMode(mode) {
+      const st = document.getElementById('rpc-mode-status');
+      if (st) st.textContent = 'Saving mode…';
+      try {
+        const data = await fetchJSON('/api/rpc/mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: mode === 'multiLane' ? 'multiLane' : 'classic' }),
+        });
+        if (st) {
+          st.textContent =
+            data.mode === 'multiLane'
+              ? (data.multiLaneActive
+                  ? 'Multi-lane active — typed sticky pool'
+                  : 'Multi-lane saved (classic fallback until ≥3 paid RPCs)')
+              : 'Classic Share';
+        }
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        const sel = document.getElementById('rpc-mode');
+        if (sel) sel.value = mode === 'multiLane' ? 'classic' : 'multiLane';
         if (st) st.textContent = err.message || String(err);
       }
     }

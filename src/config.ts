@@ -1851,6 +1851,12 @@ export interface BotConfig {
      */
     shareLoad: boolean;
     /**
+     * RPC operating mode.
+     * - classic: 1.2.318 Share three-lane (default)
+     * - multiLane: typed sticky pool across discovered endpoints
+     */
+    mode: 'classic' | 'multiLane';
+    /**
      * Favourites soft-watch wallet cap (Utility lane when Share ON).
      * 0 = pause Favourites RPC watch (utility relief).
      * unset = default 12 (Share ON) / 20 (Share OFF). Env RPC_SOFT_WATCH_CAP wins if set.
@@ -2703,6 +2709,12 @@ export const config: BotConfig = {
               (process.env.ALCHEMY_API_KEY?.trim() ||
                 process.env.ALCHEMY_RPC_URL?.trim())
           ),
+    mode:
+      process.env.RPC_MODE === 'multiLane' ||
+      process.env.RPC_MODE === 'multilane' ||
+      process.env.RPC_MODE === 'pool'
+        ? 'multiLane'
+        : 'classic',
     softWatchCap:
       process.env.RPC_SOFT_WATCH_CAP != null &&
       process.env.RPC_SOFT_WATCH_CAP !== '' &&
@@ -3119,6 +3131,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
     rpcShareLoad: Boolean(config.rpc.shareLoad),
+    rpcMode: config.rpc.mode === 'multiLane' ? 'multiLane' : 'classic',
     rpcSoftWatchCap:
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
         ? config.rpc.softWatchCap
@@ -3874,6 +3887,9 @@ function applySettingsSnapshot(
   }
   if (typeof saved.rpcShareLoad === 'boolean') {
     config.rpc.shareLoad = saved.rpcShareLoad;
+  }
+  if (saved.rpcMode === 'multiLane' || saved.rpcMode === 'classic') {
+    config.rpc.mode = saved.rpcMode;
   }
   if (
     saved.rpcSoftWatchCap === null ||
@@ -5870,6 +5886,34 @@ export function setRpcShareLoad(enabled: boolean): boolean {
         : 'legacy primary/secondary routing')
   );
   return config.rpc.shareLoad;
+}
+
+export type RpcOperatingMode = 'classic' | 'multiLane';
+
+/** Switch classic Share vs Multi-lane typed sticky pool (opt-in). */
+export function setRpcMode(mode: RpcOperatingMode): RpcOperatingMode {
+  const next: RpcOperatingMode =
+    mode === 'multiLane' ? 'multiLane' : 'classic';
+  config.rpc.mode = next;
+  persistUserSettings();
+  try {
+    const { resetRpcEndpointPool } =
+      require('./connection') as typeof import('./connection');
+    resetRpcEndpointPool();
+  } catch {
+    /* connection may not be loaded yet at boot */
+  }
+  console.log(
+    `[rpc] Mode → ${next}` +
+      (next === 'multiLane'
+        ? ' (typed sticky pool; classic Share remains available)'
+        : ' (classic Share three-lane)')
+  );
+  return config.rpc.mode;
+}
+
+export function getRpcMode(): RpcOperatingMode {
+  return config.rpc.mode === 'multiLane' ? 'multiLane' : 'classic';
 }
 
 /**

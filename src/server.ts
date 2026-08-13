@@ -973,6 +973,32 @@ export function createServer(): express.Application {
     }
   });
 
+  app.post('/api/rpc/mode', (req: Request, res: Response) => {
+    try {
+      const { setRpcMode, getRpcMode } =
+        require('./config') as typeof import('./config');
+      const raw = String(req.body?.mode || '').trim();
+      const mode =
+        raw === 'multiLane' || raw === 'multilane' || raw === 'pool'
+          ? 'multiLane'
+          : 'classic';
+      const saved = setRpcMode(mode);
+      res.json({
+        ...getRpcStats(),
+        jito: getJitoStatus(),
+        mev: getMevStatus(),
+        ok: true,
+        mode: saved,
+        current: getRpcMode(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/rpc/soft-watch-cap', (req: Request, res: Response) => {
     try {
       const { setRpcSoftWatchCap } =

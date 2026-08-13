@@ -278,6 +278,194 @@ export function normalizeRpcEndpoints(
 }
 
 /**
+ * Dedup key: host + pathname with API keys stripped so KEY vs URL forms collide.
+ */
+export function rpcEndpointIdentity(url: string): string {
+  try {
+    const u = new URL(url.trim());
+    u.searchParams.delete('api-key');
+    u.searchParams.delete('api_key');
+    u.hash = '';
+    let path = u.pathname.replace(/\/+$/, '');
+    // Alchemy /v2/<key> → /v2
+    if (/\/v2\/[^/]+$/i.test(path)) path = path.replace(/\/v2\/[^/]+$/i, '/v2');
+    return `${u.hostname.toLowerCase()}${path.toLowerCase()}`;
+  } catch {
+    return url.trim().toLowerCase();
+  }
+}
+
+export type DiscoveredRpcEndpoint = NormalizedRpcEndpoint & {
+  /** True for free/public hosts (cannot win Critical/Scanners sticky seats). */
+  isPublic: boolean;
+  /** True for QuickNode mid-tier. */
+  isQuicknode: boolean;
+  /** Source env / synthetic tag for UI. */
+  source: string;
+};
+
+function pushDiscovered(
+  out: DiscoveredRpcEndpoint[],
+  seen: Set<string>,
+  url: string | null | undefined,
+  label: string,
+  source: string,
+  wsUrl?: string
+): void {
+  const trimmed = (url || '').trim();
+  if (!trimmed || !isUsableRpcUrl(trimmed)) return;
+  const id = rpcEndpointIdentity(trimmed);
+  if (seen.has(id)) return;
+  seen.add(id);
+  out.push({
+    url: trimmed,
+    label,
+    wsUrl,
+    role: 'fallback',
+    isPublic: isPublicRpcUrl(trimmed),
+    isQuicknode: isQuicknodeRpcUrl(trimmed),
+    source,
+  });
+}
+
+/**
+ * Auto-discover every usable Solana RPC from Render/env for Multi-lane mode.
+ * Includes classic keys plus HELIUS/ALCHEMY *_RPC_URL and *_BACKUP variants.
+ * Classic `rpcEndpointsFromEnv()` is unchanged.
+ */
+export function discoverAllRpcEndpoints(): DiscoveredRpcEndpoint[] {
+  const seen = new Set<string>();
+  const out: DiscoveredRpcEndpoint[] = [];
+
+  const heliusKey = buildHeliusRpcUrl();
+  pushDiscovered(out, seen, heliusKey, 'helius', 'HELIUS_API_KEY');
+
+  const heliusUrl = (process.env.HELIUS_RPC_URL || '').trim();
+  pushDiscovered(out, seen, heliusUrl, 'helius-url', 'HELIUS_RPC_URL');
+
+  const heliusBakKey = buildHeliusRpcUrl(process.env.HELIUS_API_KEY_BACKUP);
+  pushDiscovered(
+    out,
+    seen,
+    heliusBakKey,
+    'helius-backup',
+    'HELIUS_API_KEY_BACKUP'
+  );
+  pushDiscovered(
+    out,
+    seen,
+    process.env.HELIUS_RPC_URL_BACKUP,
+    'helius-backup-url',
+    'HELIUS_RPC_URL_BACKUP'
+  );
+
+  const alchemyKey = buildAlchemyRpcUrl();
+  pushDiscovered(out, seen, alchemyKey, 'alchemy', 'ALCHEMY_API_KEY');
+
+  pushDiscovered(
+    out,
+    seen,
+    process.env.ALCHEMY_RPC_URL,
+    'alchemy-url',
+    'ALCHEMY_RPC_URL'
+  );
+
+  const alchemyBak = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP);
+  pushDiscovered(
+    out,
+    seen,
+    alchemyBak,
+    'alchemy-backup',
+    'ALCHEMY_API_KEY_BACKUP'
+  );
+  pushDiscovered(
+    out,
+    seen,
+    process.env.ALCHEMY_RPC_URL_BACKUP,
+    'alchemy-backup-url',
+    'ALCHEMY_RPC_URL_BACKUP'
+  );
+
+  const alchemyBak2 = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP2);
+  pushDiscovered(
+    out,
+    seen,
+    alchemyBak2,
+    'alchemy-backup2',
+    'ALCHEMY_API_KEY_BACKUP2'
+  );
+  pushDiscovered(
+    out,
+    seen,
+    process.env.ALCHEMY_RPC_URL_BACKUP2,
+    'alchemy-backup2-url',
+    'ALCHEMY_RPC_URL_BACKUP2'
+  );
+
+  const quicknode = buildQuicknodeRpcUrl();
+  const qnWs = process.env.QUICKNODE_WSS_URL?.trim();
+  pushDiscovered(
+    out,
+    seen,
+    quicknode,
+    'quicknode',
+    'QUICKNODE_RPC_URL',
+    qnWs && isUsableRpcUrl(qnWs) ? qnWs : undefined
+  );
+
+  const rpcUrl = (
+    process.env.RPC_PRIMARY ??
+    process.env.RPC_URL ??
+    ''
+  ).trim();
+  pushDiscovered(out, seen, rpcUrl, 'rpc-url', 'RPC_URL');
+
+  const rpcSecondary = (
+    process.env.RPC_SECONDARY ??
+    process.env.SECONDARY_RPC ??
+    ''
+  ).trim();
+  pushDiscovered(out, seen, rpcSecondary, 'rpc-secondary', 'RPC_SECONDARY');
+
+  const fallbacks = (process.env.RPC_FALLBACKS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (let i = 0; i < fallbacks.length; i++) {
+    pushDiscovered(
+      out,
+      seen,
+      fallbacks[i],
+      `fallback-${i + 1}`,
+      'RPC_FALLBACKS'
+    );
+  }
+
+  pushDiscovered(out, seen, PUBLIC_SOLANA_RPC, 'publicnode', 'builtin-publicnode');
+  pushDiscovered(
+    out,
+    seen,
+    PUBLIC_SOLANA_RPC_OFFICIAL,
+    'mainnet-beta',
+    'builtin-mainnet-beta'
+  );
+
+  console.log(
+    `[rpc] Multi-lane discovery: ${out.length} endpoint(s) — ` +
+      out.map((e) => e.label).join(', ')
+  );
+  return out;
+}
+
+/** Count paid (non-public) discovered endpoints. */
+export function countPaidDiscoveredEndpoints(
+  list?: DiscoveredRpcEndpoint[]
+): number {
+  const rows = list ?? discoverAllRpcEndpoints();
+  return rows.filter((e) => !e.isPublic).length;
+}
+
+/**
  * Resolve dual-lane + free-tier multi-RPC list from env.
  *
  * Preferred primary:  Helius → else RPC_URL → else Alchemy → else public

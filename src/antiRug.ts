@@ -7,6 +7,7 @@
 import { PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { config, effectiveMinMarketCapUsd, hardFilterFloorsActive } from './config';
 import { getConnection, runWithRpcRole } from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import {
   fetchTokenMetrics,
   getCachedTokenMetrics,
@@ -1706,8 +1707,8 @@ async function detectRecentDevSells(
   mint: string,
   devWallet: string
 ): Promise<{ sold: boolean; count: number }> {
-  // Share load: holder/dev tx scans must not land on Utility public lane.
-  const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+  // Share / Multi-lane: holder/dev tx scans must not land on Utility public lane.
+  const role = getRpcRoleFor('anti_rug', Boolean(config.rpc?.shareLoad));
   return runWithRpcRole(
     role,
     () => detectRecentDevSellsInner(mint, devWallet),

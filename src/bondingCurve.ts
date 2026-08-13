@@ -444,7 +444,7 @@ export async function fetchBondingCurve(
     if (pending) return pending;
   }
 
-  const role = getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad));
+  const role = getRpcRoleFor('bonding_curve', Boolean(config.rpc?.shareLoad));
   const dedupeKey = `${role}:bonding_curve:${mint}${options.force ? ':force' : ''}`;
 
   const job = (async () => {

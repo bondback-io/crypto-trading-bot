@@ -21,6 +21,8 @@ import {
   PUBLIC_SOLANA_RPC,
   normalizeRpcEndpoints,
   rpcEndpointsFromEnv,
+  discoverAllRpcEndpoints,
+  countPaidDiscoveredEndpoints,
   RPC_LANE_SUPPORTS,
   RPC_SHARE_LOAD_SUPPORTS,
   isPublicRpcUrl,
@@ -38,8 +40,13 @@ dotenv.config();
 
 const DEFAULT_RPC = PUBLIC_SOLANA_RPC;
 
-/** Workload lane — primary=critical; secondary=scanners/Zion; utility=import/activity */
-export type RpcRole = 'primary' | 'secondary' | 'utility';
+/** Workload lane — classic: primary/secondary/utility; multiLane adds scannersB/metrics */
+export type RpcRole =
+  | 'primary'
+  | 'secondary'
+  | 'utility'
+  | 'scannersB'
+  | 'metrics';
 
 export interface RpcEndpoint {
   url: string;
@@ -107,12 +114,22 @@ let endpoints: EndpointState[] = [];
 let preferredPrimary = 0;
 let preferredSecondary = 0;
 let preferredUtility = 0;
+let preferredScannersB = 0;
+let preferredMetrics = 0;
 /** Mid-tier paid failover (QuickNode); -1 when unset */
 let preferredQuicknode = -1;
+/** Emergency-only indices (hard-fail / 429); never soft-picked for background. */
+let emergencyIndices: number[] = [];
+/** True when multi-lane assignment is active (vs classic Share). */
+let multiLaneActive = false;
+let lastMultiLaneAssignAt = 0;
+const MULTI_LANE_RERANK_MS = 3 * 60_000;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
 let activeUtility = 0;
+let activeScannersB = 0;
+let activeMetrics = 0;
 /** Legacy single active pointer — mirrors primary lane for older callers */
 let activeIndex = 0;
 
@@ -489,6 +506,24 @@ function formatFailoverGrace(ms: number): string {
 }
 
 function parseRpcList(): RpcEndpoint[] {
+  if (config.rpc?.mode === 'multiLane') {
+    const discovered = discoverAllRpcEndpoints();
+    const paid = countPaidDiscoveredEndpoints(discovered);
+    if (paid >= 3) {
+      return normalizeRpcEndpoints(
+        discovered.map((e) => ({
+          url: e.url,
+          label: e.label,
+          wsUrl: e.wsUrl,
+          role: 'fallback' as RpcLaneRole,
+        }))
+      );
+    }
+    // Fewer than 3 paid → classic Share assignment (auto-fallback).
+    console.warn(
+      `[rpc] Multi-lane needs ≥3 paid endpoints (found ${paid}) — using classic Share assignment`
+    );
+  }
   const fromConfig = config.rpc?.endpoints ?? [];
   if (fromConfig.length > 0) {
     return normalizeRpcEndpoints(
@@ -507,8 +542,209 @@ function toWsUrl(httpUrl: string): string {
   return httpUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 }
 
+/** Prefer Helius, then Alchemy, then QuickNode, then other paid. */
+function paidSeatScore(label: string, url: string): number {
+  const l = (label || '').toLowerCase();
+  if (l.includes('helius') && !l.includes('backup')) return 0;
+  if (l.includes('helius')) return 1;
+  if (l.includes('alchemy') && !l.includes('backup')) return 2;
+  if (l.includes('alchemy')) return 3;
+  if (isQuicknodeRpcUrl(url) || l.includes('quicknode')) return 4;
+  if (isPublicRpcUrl(url)) return 100;
+  return 10;
+}
+
+function assignClassicLanePrefs(): void {
+  multiLaneActive = false;
+  emergencyIndices = [];
+  preferredPrimary = Math.max(
+    0,
+    endpoints.findIndex((e) => e.role === 'primary')
+  );
+  const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
+  preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
+  preferredScannersB = preferredSecondary;
+  preferredMetrics = preferredSecondary;
+  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
+  preferredUtility = pickPreferredUtilityIndex();
+  if (utilIdx >= 0 && preferredUtility !== utilIdx) {
+    console.log(
+      `[rpc] Utility preferred ${endpoints[preferredUtility]?.endpoint.label} ` +
+        `(stronger than role-utility ${endpoints[utilIdx]?.endpoint.label})`
+    );
+  }
+  preferredQuicknode = endpoints.findIndex(
+    (e) =>
+      e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
+  );
+  activePrimary = preferredPrimary;
+  activeSecondary = preferredSecondary;
+  activeUtility = preferredUtility;
+  activeScannersB = preferredScannersB;
+  activeMetrics = preferredMetrics;
+  activeIndex = activePrimary;
+}
+
+/**
+ * Rank paid hosts and pin typed sticky lanes; hold 1–2 as emergency-only.
+ */
+function assignMultiLanePrefs(): void {
+  const paidIdx: number[] = [];
+  const publicIdx: number[] = [];
+  for (let i = 0; i < endpoints.length; i++) {
+    const e = endpoints[i];
+    if (!e) continue;
+    if (isPublicRpcUrl(e.endpoint.url)) publicIdx.push(i);
+    else paidIdx.push(i);
+  }
+  paidIdx.sort((a, b) => {
+    const sa = paidSeatScore(
+      endpoints[a]!.endpoint.label,
+      endpoints[a]!.endpoint.url
+    );
+    const sb = paidSeatScore(
+      endpoints[b]!.endpoint.label,
+      endpoints[b]!.endpoint.url
+    );
+    if (sa !== sb) return sa - sb;
+    const la = endpoints[a]!.latencyMs;
+    const lb = endpoints[b]!.latencyMs;
+    if (la != null && lb != null && la !== lb) return la - lb;
+    return a - b;
+  });
+
+  if (paidIdx.length < 3) {
+    assignClassicLanePrefs();
+    console.warn(
+      '[rpc] Multi-lane assignment fell back to classic (insufficient paid hosts)'
+    );
+    return;
+  }
+
+  multiLaneActive = true;
+  lastMultiLaneAssignAt = Date.now();
+
+  // Sticky seats: Critical, ScannersA, ScannersB, Metrics (merge if short), Utility=public
+  const stickyPaid: number[] = [];
+  const emergPaid: number[] = [];
+  // Hold QuickNode / last paid as emergency when we have extras
+  for (let i = 0; i < paidIdx.length; i++) {
+    const idx = paidIdx[i]!;
+    const label = (endpoints[idx]!.endpoint.label || '').toLowerCase();
+    const isQn =
+      isQuicknodeRpcUrl(endpoints[idx]!.endpoint.url) ||
+      label.includes('quicknode');
+    // Prefer keeping QuickNode + last spare as emergency once we have 4 sticky paid candidates
+    if (
+      stickyPaid.length >= 4 &&
+      (isQn || emergPaid.length < 2)
+    ) {
+      emergPaid.push(idx);
+      continue;
+    }
+    if (stickyPaid.length < 4) {
+      stickyPaid.push(idx);
+    } else if (emergPaid.length < 2) {
+      emergPaid.push(idx);
+    } else {
+      stickyPaid.push(idx);
+    }
+  }
+  // Ensure at least one emergency: QuickNode or last paid moved out
+  if (emergPaid.length === 0 && stickyPaid.length > 3) {
+    const last = stickyPaid.pop()!;
+    emergPaid.push(last);
+  }
+
+  preferredPrimary = stickyPaid[0] ?? paidIdx[0]!;
+  preferredSecondary = stickyPaid[1] ?? preferredPrimary;
+  preferredScannersB = stickyPaid[2] ?? preferredSecondary;
+  preferredMetrics =
+    stickyPaid.length >= 4 ? stickyPaid[3]! : preferredScannersB;
+
+  // Utility: publicnode preferred over mainnet-beta
+  let util = publicIdx.find((i) =>
+    (endpoints[i]!.endpoint.label || '').includes('publicnode')
+  );
+  if (util == null) util = publicIdx[0];
+  if (util == null) {
+    util = pickPreferredUtilityIndex();
+  }
+  preferredUtility = util;
+
+  // Emergency: reserved paid + one public spare (not utility preferred)
+  emergencyIndices = [...emergPaid];
+  for (const i of publicIdx) {
+    if (i === preferredUtility) continue;
+    if (emergencyIndices.length >= 2) break;
+    emergencyIndices.push(i);
+  }
+  if (emergencyIndices.length === 0 && publicIdx.length > 0) {
+    const spare = publicIdx.find((i) => i !== preferredUtility);
+    if (spare != null) emergencyIndices.push(spare);
+  }
+
+  preferredQuicknode = endpoints.findIndex(
+    (e) =>
+      e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
+  );
+
+  // Tag roles for stats/UI
+  for (const e of endpoints) {
+    e.role = 'fallback';
+    e.endpoint.role = 'fallback';
+  }
+  const tag = (idx: number, role: RpcLaneRole) => {
+    if (idx < 0 || !endpoints[idx]) return;
+    endpoints[idx]!.role = role;
+    endpoints[idx]!.endpoint.role = role;
+  };
+  tag(preferredPrimary, 'primary');
+  tag(preferredSecondary, 'secondary');
+  tag(preferredUtility, 'utility');
+
+  activePrimary = preferredPrimary;
+  activeSecondary = preferredSecondary;
+  activeScannersB = preferredScannersB;
+  activeMetrics = preferredMetrics;
+  activeUtility = preferredUtility;
+  activeIndex = activePrimary;
+
+  console.log(
+    `[rpc] Multi-lane sticky — Critical→${endpoints[preferredPrimary]?.endpoint.label} · ` +
+      `ScannersA→${endpoints[preferredSecondary]?.endpoint.label} · ` +
+      `ScannersB→${endpoints[preferredScannersB]?.endpoint.label} · ` +
+      `Metrics→${endpoints[preferredMetrics]?.endpoint.label} · ` +
+      `Utility→${endpoints[preferredUtility]?.endpoint.label} · ` +
+      `Emergency→[${emergencyIndices
+        .map((i) => endpoints[i]?.endpoint.label)
+        .join(', ')}]`
+  );
+}
+
+/** Tear down pool so mode switches / rediscovery re-init cleanly. */
+export function resetRpcEndpointPool(): void {
+  stopRpcHealthMonitor();
+  endpoints = [];
+  multiLaneActive = false;
+  emergencyIndices = [];
+  lastMultiLaneAssignAt = 0;
+  ensureEndpoints();
+  startRpcHealthMonitor();
+}
+
 function ensureEndpoints(): void {
-  if (endpoints.length > 0) return;
+  if (endpoints.length > 0) {
+    // Slow re-rank for multi-lane without flapping on every call
+    if (
+      multiLaneActive &&
+      config.rpc?.mode === 'multiLane' &&
+      Date.now() - lastMultiLaneAssignAt > MULTI_LANE_RERANK_MS
+    ) {
+      assignMultiLanePrefs();
+    }
+    return;
+  }
 
   const list = parseRpcList();
   endpoints = list.map((endpoint) => {
@@ -548,28 +784,15 @@ function ensureEndpoints(): void {
     };
   });
 
-  preferredPrimary = Math.max(
-    0,
-    endpoints.findIndex((e) => e.role === 'primary')
-  );
-  const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
-  preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
-  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
-  preferredUtility = pickPreferredUtilityIndex();
-  if (utilIdx >= 0 && preferredUtility !== utilIdx) {
-    console.log(
-      `[rpc] Utility preferred ${endpoints[preferredUtility]?.endpoint.label} ` +
-        `(stronger than role-utility ${endpoints[utilIdx]?.endpoint.label})`
-    );
+  const wantMulti =
+    config.rpc?.mode === 'multiLane' &&
+    countPaidDiscoveredEndpoints() >= 3;
+
+  if (wantMulti) {
+    assignMultiLanePrefs();
+  } else {
+    assignClassicLanePrefs();
   }
-  preferredQuicknode = endpoints.findIndex(
-    (e) =>
-      e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
-  );
-  activePrimary = preferredPrimary;
-  activeSecondary = preferredSecondary;
-  activeUtility = preferredUtility;
-  activeIndex = activePrimary;
 
   console.log(
     `[rpc] Initialized ${endpoints.length} endpoint(s): ` +
@@ -577,24 +800,26 @@ function ensureEndpoints(): void {
         .map((e) => `${e.endpoint.label}[${e.role}]`)
         .join(', ')
   );
-  console.log(
-    `[rpc] Lanes — primary→${endpoints[preferredPrimary]?.endpoint.label} ` +
-      `(${maskUrlForLog(endpoints[preferredPrimary]?.endpoint.url)}) · ` +
-      `secondary→${endpoints[preferredSecondary]?.endpoint.label} ` +
-      `(${maskUrlForLog(endpoints[preferredSecondary]?.endpoint.url)}) · ` +
-      `utility→${endpoints[preferredUtility]?.endpoint.label} ` +
-      `(${maskUrlForLog(endpoints[preferredUtility]?.endpoint.url)})` +
-      (preferredQuicknode >= 0
-        ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
-        : '') +
-      ` · cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
-      (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
-  );
-  if (preferredPrimary === preferredSecondary) {
-    console.warn(
-      '[rpc] Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. ' +
-        'Set a distinct RPC_SECONDARY (must differ from RPC_URL).'
+  if (!multiLaneActive) {
+    console.log(
+      `[rpc] Lanes — primary→${endpoints[preferredPrimary]?.endpoint.label} ` +
+        `(${maskUrlForLog(endpoints[preferredPrimary]?.endpoint.url)}) · ` +
+        `secondary→${endpoints[preferredSecondary]?.endpoint.label} ` +
+        `(${maskUrlForLog(endpoints[preferredSecondary]?.endpoint.url)}) · ` +
+        `utility→${endpoints[preferredUtility]?.endpoint.label} ` +
+        `(${maskUrlForLog(endpoints[preferredUtility]?.endpoint.url)})` +
+        (preferredQuicknode >= 0
+          ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
+          : '') +
+        ` · cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
+        (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
     );
+    if (preferredPrimary === preferredSecondary) {
+      console.warn(
+        '[rpc] Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. ' +
+          'Set a distinct RPC_SECONDARY (must differ from RPC_URL).'
+      );
+    }
   }
 }
 
@@ -685,6 +910,8 @@ function preferredIndexFor(role: RpcRole): number {
   ensureEndpoints();
   if (role === 'secondary') return preferredSecondary;
   if (role === 'utility') return preferredUtility;
+  if (role === 'scannersB') return preferredScannersB;
+  if (role === 'metrics') return preferredMetrics;
   return preferredPrimary;
 }
 
@@ -699,19 +926,34 @@ function setActiveForRole(role: RpcRole, index: number): void {
     activeIndex = index;
   } else if (role === 'secondary') {
     activeSecondary = index;
+  } else if (role === 'scannersB') {
+    activeScannersB = index;
+  } else if (role === 'metrics') {
+    activeMetrics = index;
   } else {
     activeUtility = index;
   }
 }
 
 function piggybackOrder(role: RpcRole): RpcRole[] {
-  // Critical: Helius → Alchemy → (QuickNode mid-tier) → public.
-  // Scanners: Alchemy → Helius → (QuickNode) → public.
-  // Utility: public → (QN only if ~1000ms stressed and not busy) → Alchemy → Helius.
-  // Paid cross-lane only here; QuickNode + utility are inserted after in resolve/withRpc.
-  if (role === 'primary') return ['secondary'];
-  if (role === 'secondary') return ['primary'];
-  return ['secondary', 'primary'];
+  // Multi-lane / classic: never soft-hop scanners onto Critical.
+  if (role === 'primary') {
+    return multiLaneActive
+      ? ['secondary', 'scannersB', 'metrics']
+      : ['secondary'];
+  }
+  if (role === 'secondary') {
+    return multiLaneActive ? ['scannersB', 'metrics'] : ['primary'];
+  }
+  if (role === 'scannersB') return ['secondary', 'metrics'];
+  if (role === 'metrics') return ['scannersB', 'secondary'];
+  return multiLaneActive
+    ? ['secondary', 'scannersB']
+    : ['secondary', 'primary'];
+}
+
+function isEmergencyIndex(idx: number): boolean {
+  return emergencyIndices.includes(idx);
 }
 
 /** True when Critical or Scanners are already piggybacking on QuickNode. */
@@ -752,13 +994,28 @@ function acceptFailoverTarget(
   if (!other?.healthy || isEndpointRateLimited(other) || isEndpointHardFailed(other))
     return false;
   if (avoidPublicForCritical && isPublicRpcUrl(other.endpoint.url)) return false;
+  // Multi-lane: emergency hosts are hard-fail / 429 only — never soft latency hops.
+  if (multiLaneActive && latencySoft && isEmergencyIndex(altIdx)) return false;
+  // Scanners must not soft-hop onto Critical preferred.
+  if (
+    multiLaneActive &&
+    latencySoft &&
+    (role === 'secondary' || role === 'scannersB' || role === 'metrics') &&
+    altIdx === preferredPrimary
+  ) {
+    return false;
+  }
   if (latencySoft && pref && !isFasterAlternate(pref, other)) return false;
   const active =
     role === 'primary'
       ? activePrimary
       : role === 'secondary'
         ? activeSecondary
-        : activeUtility;
+        : role === 'scannersB'
+          ? activeScannersB
+          : role === 'metrics'
+            ? activeMetrics
+            : activeUtility;
   if (active !== altIdx) {
     const reason = rateLimited
       ? 'rate-limited'
@@ -794,9 +1051,12 @@ function resolveIndexForRole(role: RpcRole): number {
   const latencySoft = latencyFailoverReady(pref);
 
   // Utility: if preferred is weak public but a stronger non-public/rpc-url is healthy, prefer it.
+  // Multi-lane: do not soft-steal emergency or Critical seats for Favourites.
   if (role === 'utility' && pref && isWeakPublicUtilityUrl(pref.endpoint.url)) {
     for (let i = 0; i < endpoints.length; i++) {
       if (i === preferred) continue;
+      if (multiLaneActive && isEmergencyIndex(i)) continue;
+      if (multiLaneActive && i === preferredPrimary) continue;
       const e = endpoints[i];
       if (!e?.healthy || !isStrongUtilityEndpoint(e)) continue;
       setActiveForRole(role, i);
@@ -936,8 +1196,13 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
-  // 2) QuickNode mid-tier (Critical + Scanners only; skip if unset/unhealthy)
-  if (role === 'primary' || role === 'secondary') {
+  // 2) QuickNode mid-tier (Critical + Scanners lanes; skip if unset/unhealthy)
+  if (
+    role === 'primary' ||
+    role === 'secondary' ||
+    role === 'scannersB' ||
+    role === 'metrics'
+  ) {
     if (
       acceptFailoverTarget(
         role,
@@ -952,7 +1217,7 @@ function resolveIndexForRole(role: RpcRole): number {
     ) {
       return preferredQuicknode;
     }
-    // 3) Utility / public before remaining fallbacks
+    // 3) Utility / public before remaining fallbacks (Critical hard-fail only path)
     if (
       acceptFailoverTarget(
         role,
@@ -974,6 +1239,16 @@ function resolveIndexForRole(role: RpcRole): number {
     if (avoidPublicForCritical && isPublicRpcUrl(endpoints[i].endpoint.url)) {
       continue;
     }
+    // Multi-lane: emergency only on hard-fail / 429, never soft latency.
+    if (multiLaneActive && latencySoft && isEmergencyIndex(i)) continue;
+    if (
+      multiLaneActive &&
+      latencySoft &&
+      (role === 'secondary' || role === 'scannersB' || role === 'metrics') &&
+      i === preferredPrimary
+    ) {
+      continue;
+    }
     // Share+Utility: only public/fallback/utility (or QN if severe) — never Helius/Alchemy.
     if (shareLoad && role === 'utility') {
       const e = endpoints[i]!;
@@ -986,6 +1261,7 @@ function resolveIndexForRole(role: RpcRole): number {
       if (!isAltPublic && !(isQn && pref && utilityMayUseQuicknodeSoft(pref))) {
         continue;
       }
+      if (multiLaneActive && isEmergencyIndex(i) && latencySoft) continue;
     }
     // Utility soft-failover: skip QuickNode unless severe stress and QN is free
     if (
@@ -1377,6 +1653,8 @@ async function withRpcInner<T>(
 export function getRpcStats(): {
   active: string;
   activeUrl: string;
+  mode: 'classic' | 'multiLane';
+  multiLaneActive: boolean;
   primary: {
     label: string;
     url: string;
@@ -1391,6 +1669,20 @@ export function getRpcStats(): {
     failover: boolean;
     downForMs: number;
   };
+  scannersB: {
+    label: string;
+    url: string;
+    healthy: boolean;
+    failover: boolean;
+    downForMs: number;
+  };
+  metrics: {
+    label: string;
+    url: string;
+    healthy: boolean;
+    failover: boolean;
+    downForMs: number;
+  };
   utility: {
     label: string;
     url: string;
@@ -1398,13 +1690,16 @@ export function getRpcStats(): {
     failover: boolean;
     downForMs: number;
   };
+  emergency: Array<{ label: string; url: string; healthy: boolean }>;
   shareLoad: boolean;
   shareSupports: typeof RPC_SHARE_LOAD_SUPPORTS;
   failoverDownMs: number;
   /** True when primary and secondary prefer the same endpoint (Zion shares CU with copy). */
   lanesShareEndpoint: boolean;
   supports: typeof RPC_LANE_SUPPORTS;
-  endpoints: RpcEndpointStats[];
+  endpoints: Array<
+    RpcEndpointStats & { emergencyOnly?: boolean }
+  >;
   jitoEnabled: boolean;
   priorityFeeLamports: number | null;
   /** True when at least one endpoint is currently healthy */
@@ -1435,6 +1730,12 @@ export function getRpcStats(): {
   const pPref = endpoints[preferredPrimary];
   const sPref = endpoints[preferredSecondary];
   const uPref = endpoints[preferredUtility];
+  const sbIdx = resolveIndexForRole('scannersB');
+  const mIdx = resolveIndexForRole('metrics');
+  const sbPref = endpoints[preferredScannersB];
+  const mPref = endpoints[preferredMetrics];
+  const sbActive = endpoints[sbIdx];
+  const mActive = endpoints[mIdx];
   const pActive = endpoints[pIdx];
   const sActive = endpoints[sIdx];
   const uActive = endpoints[uIdx];
@@ -1536,6 +1837,8 @@ export function getRpcStats(): {
   return {
     active: getActiveEndpointLabel('primary'),
     activeUrl: maskUrl(getRpcUrl('primary')),
+    mode: config.rpc?.mode === 'multiLane' ? 'multiLane' : 'classic',
+    multiLaneActive,
     primary: {
       label: pActive?.endpoint.label || 'primary',
       url: maskUrl(pActive?.endpoint.url || ''),
@@ -1550,6 +1853,20 @@ export function getRpcStats(): {
       failover: sIdx !== preferredSecondary,
       downForMs: downForMs(sPref),
     },
+    scannersB: {
+      label: sbActive?.endpoint.label || 'scannersB',
+      url: maskUrl(sbActive?.endpoint.url || ''),
+      healthy: Boolean(sbPref?.healthy),
+      failover: sbIdx !== preferredScannersB,
+      downForMs: downForMs(sbPref),
+    },
+    metrics: {
+      label: mActive?.endpoint.label || 'metrics',
+      url: maskUrl(mActive?.endpoint.url || ''),
+      healthy: Boolean(mPref?.healthy),
+      failover: mIdx !== preferredMetrics,
+      downForMs: downForMs(mPref),
+    },
     utility: {
       label: uActive?.endpoint.label || 'utility',
       url: maskUrl(uActive?.endpoint.url || ''),
@@ -1557,6 +1874,11 @@ export function getRpcStats(): {
       failover: uIdx !== preferredUtility,
       downForMs: downForMs(uPref),
     },
+    emergency: emergencyIndices.map((i) => ({
+      label: endpoints[i]?.endpoint.label || `emergency-${i}`,
+      url: maskUrl(endpoints[i]?.endpoint.url || ''),
+      healthy: Boolean(endpoints[i]?.healthy),
+    })),
     shareLoad,
     shareSupports: RPC_SHARE_LOAD_SUPPORTS,
     failoverDownMs: failoverDownMs(),
@@ -1571,6 +1893,21 @@ export function getRpcStats(): {
         preferredSecondary !== preferredPrimary
       )
         lane = 'secondary';
+      else if (
+        multiLaneActive &&
+        i === preferredScannersB &&
+        preferredScannersB !== preferredPrimary &&
+        preferredScannersB !== preferredSecondary
+      )
+        lane = 'scannersB';
+      else if (
+        multiLaneActive &&
+        i === preferredMetrics &&
+        preferredMetrics !== preferredPrimary &&
+        preferredMetrics !== preferredSecondary &&
+        preferredMetrics !== preferredScannersB
+      )
+        lane = 'metrics';
       else if (
         i === preferredUtility &&
         preferredUtility !== preferredPrimary &&
@@ -1590,8 +1927,14 @@ export function getRpcStats(): {
         lastError: s.lastError,
         lastCheckedAt: s.lastCheckedAt,
         unhealthySince: s.unhealthySince,
-        isActive: i === pIdx || i === sIdx || i === uIdx,
+        isActive:
+          i === pIdx ||
+          i === sIdx ||
+          i === uIdx ||
+          i === sbIdx ||
+          i === mIdx,
         lane,
+        emergencyOnly: isEmergencyIndex(i),
       };
     }),
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
