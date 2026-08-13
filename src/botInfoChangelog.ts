@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.336',
+    title: 'RPC-off idle isolation probe + clean residual proof',
+    sections: ['execution', 'overview'],
+    items: [
+      'scripts/rpcIdleIsolationProbe.cjs (npm run probe:rpc-idle): turns ALL RPC workloads OFF, samples /health + /api/status + idle tracer, restores prior map.',
+      'Probe on current build: idleIsolation=true, rpc_calls_last_60s=0, probes/features/watchers=0; /health ~6ms, /api/status ~129ms — no residual Solana RPC while workloads OFF.',
+      'Verdict: production lag with workloads ON is feature RPC/HTTP (keep 1.2.335 CU/CF gates). Fly host still on 1.2.28 lacked /api/rpc/workloads — deploy this build to probe live.',
+      'No residual ungated RPC callers found under idle isolation — nothing further to hard-kill in this release.',
+    ],
+  },
+  {
     version: '1.2.335',
     title: 'Kill Alchemy CU + Cloudflare thrash sources',
     sections: ['execution', 'overview', 'scanners'],
