@@ -36093,7 +36093,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '</div>' +
             '<label class="switch" title="' + (on ? 'ON — calling RPC' : 'OFF — skipped for testing') + '">' +
               '<input type="checkbox" data-rpc-workload="' + id + '" ' + (on ? 'checked' : '') +
-              ' onchange="toggleRpcWorkload(\'' + id + '\', this.checked)" />' +
+              ' onchange="toggleRpcWorkload(\\'' + id + '\\', this.checked)" />' +
               '<span class="slider"></span>' +
             '</label>' +
           '</div>'

@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.323',
+    title: 'Fix dashboard stall from RPC workload toggle JS',
+    sections: ['overview', 'execution'],
+    items: [
+      'Fixed a template-escape bug in Stats → RPC workload onchange handlers that broke the main dashboard script parse and froze the UI.',
+    ],
+  },
+  {
     version: '1.2.322',
     title: 'RPC workload kill-switches + Alchemy Trading failover',
     sections: ['execution', 'overview'],
