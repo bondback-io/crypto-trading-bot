@@ -75,6 +75,23 @@ const CRITICAL_FEATURES = new Set([
 /** Low-priority secondary enrich — drop these first under queue pressure. */
 const LOW_PRI_SECONDARY = new Set(['bonding_curve', 'token_metrics']);
 
+/** Per-feature concurrent caps (same lane — no remapping). Critical uncapped here. */
+const FEATURE_CONCURRENCY_CAPS: Record<string, number> = {
+  market_scanner: 2,
+  bonding_curve: 1,
+  token_metrics: 1,
+  zion: 1,
+  alpha_scan: 1,
+  wallet_poll: 1,
+  activity: 1,
+};
+
+const featureInFlight = new Map<string, number>();
+const ROLLING_WINDOW_MS = 60_000;
+type RateSample = { at: number; feature: string };
+const skipRateSamples: RateSample[] = [];
+const dedupeRateSamples: RateSample[] = [];
+
 function envInt(name: string, fallback: number, min: number, max: number): number {
   const raw = process.env[name];
   if (raw == null || raw === '') return fallback;
@@ -156,6 +173,11 @@ function featureBucket(feature?: string): string {
   if (f.includes('market_scanner') || f === 'market_scanner') return 'market_scanner';
   if (f.includes('zion') || f === 'zion') return 'zion';
   if (f.includes('alpha')) return 'alpha_scan';
+  if (f.includes('wallet_poll') || f === 'wallet_poll') return 'wallet_poll';
+  if (f.includes('activity') || f === 'activity') return 'activity';
+  if (f.includes('live_balance')) return 'live_balance';
+  if (f.includes('open_mark')) return 'open_mark';
+  if (f.includes('health_probe')) return 'health_probe';
   return 'other';
 }
 
@@ -164,7 +186,72 @@ function isLowPriSecondary(feature?: string): boolean {
 }
 
 function enrichStaleMs(feature?: string): number {
-  return isLowPriSecondary(feature) ? 1_500 : 3_000;
+  // Tighter low-pri TTL so enrich waiters expire instead of queueing forever.
+  return isLowPriSecondary(feature) ? 1_200 : 3_000;
+}
+
+function featureCapFor(feature?: string): number | null {
+  if (isCritical(feature)) return null;
+  const bucket = featureBucket(feature);
+  const cap = FEATURE_CONCURRENCY_CAPS[bucket];
+  return cap != null ? cap : null;
+}
+
+function bumpFeatureInFlight(feature: string | undefined, delta: number): void {
+  const key = featureBucket(feature);
+  const next = Math.max(0, (featureInFlight.get(key) || 0) + delta);
+  if (next === 0) featureInFlight.delete(key);
+  else featureInFlight.set(key, next);
+}
+
+function pruneRateSamples(arr: RateSample[], now: number): void {
+  const cutoff = now - ROLLING_WINDOW_MS;
+  let w = 0;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i]!.at >= cutoff) arr[w++] = arr[i]!;
+  }
+  arr.length = w;
+}
+
+function noteRateSample(arr: RateSample[], feature?: string): void {
+  const now = Date.now();
+  arr.push({ at: now, feature: featureBucket(feature) });
+  if (arr.length > 4_000) pruneRateSamples(arr, now);
+}
+
+export function getFeatureInFlightCounts(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of featureInFlight) out[k] = v;
+  return out;
+}
+
+export function getFeatureSkipDedupeRates60s(): {
+  skips: Record<string, number>;
+  dedupes: Record<string, number>;
+  bgSkips60s: number;
+} {
+  const now = Date.now();
+  pruneRateSamples(skipRateSamples, now);
+  pruneRateSamples(dedupeRateSamples, now);
+  const skips: Record<string, number> = {};
+  const dedupes: Record<string, number> = {};
+  for (const s of skipRateSamples) {
+    skips[s.feature] = (skips[s.feature] || 0) + 1;
+  }
+  for (const s of dedupeRateSamples) {
+    dedupes[s.feature] = (dedupes[s.feature] || 0) + 1;
+  }
+  return { skips, dedupes, bgSkips60s: skipRateSamples.length };
+}
+
+/** True when Critical has fewer than 2 free slots (reserved budget). */
+export function isCriticalLaneBudgetTight(): boolean {
+  const p = lanes.primary;
+  const limits = laneLimits('primary');
+  return (
+    p.waiters.length > 0 ||
+    p.inFlight >= Math.max(1, limits.maxConcurrent - 2)
+  );
 }
 
 let lastSkipReasonLogAt = 0;
@@ -183,6 +270,7 @@ function bumpSkip(
   const bucket = featureBucket(feature);
   lane.skippedByReason[`feature:${bucket}`] =
     (lane.skippedByReason[`feature:${bucket}`] || 0) + 1;
+  noteRateSample(skipRateSamples, feature);
   if (role === 'secondary') {
     const now = Date.now();
     if (now - lastSkipReasonLogAt > 12_000) {
@@ -304,6 +392,36 @@ export async function acquireRpcLane(
 
   refill(lane, role);
   if (role === 'secondary') pruneStaleWaiters(role);
+
+  // Per-feature concurrent cap (source-level — same lane, no remapping).
+  const featCap = featureCapFor(feature);
+  if (featCap != null) {
+    const bucket = featureBucket(feature);
+    const cur = featureInFlight.get(bucket) || 0;
+    if (cur >= featCap) {
+      bumpSkip(role, 'busy', feature);
+      noteSkipSample(role, feature);
+      logGate(role, 'background delayed (feature concurrency cap)', {
+        feature: feature || 'ungated',
+        bucket,
+        inFlightFeature: cur,
+        featureCap: featCap,
+      });
+      throw new RpcGateSkipError('busy', role, feature);
+    }
+  }
+
+  // Low-pri secondary yields when Critical reserved budget is tight.
+  if (
+    role === 'secondary' &&
+    !critical &&
+    isLowPriSecondary(feature) &&
+    isCriticalLaneBudgetTight()
+  ) {
+    bumpSkip(role, 'busy', feature);
+    noteSkipSample(role, feature);
+    throw new RpcGateSkipError('busy', role, feature);
+  }
 
   // Rate limit: critical waits briefly for a token; non-critical may skip.
   if (lane.tokens < 1) {
@@ -434,12 +552,14 @@ export async function acquireRpcLane(
 
   lane.tokens -= 1;
   lane.inFlight += 1;
+  bumpFeatureInFlight(feature, 1);
 
   let released = false;
   const release = () => {
     if (released) return;
     released = true;
     lane.inFlight = Math.max(0, lane.inFlight - 1);
+    bumpFeatureInFlight(feature, -1);
     if (role === 'secondary') pruneStaleWaiters(role);
     const next = lane.waiters.shift();
     if (next) next.resolve();
@@ -483,6 +603,8 @@ export async function runDedupedRpcJob<T>(
     } else {
       lanes.utility.deduped += 1;
     }
+    const featHint = key.split(':')[1] || 'other';
+    noteRateSample(dedupeRateSamples, featHint);
     if (Date.now() - lastDedupLogAt > 15_000) {
       lastDedupLogAt = Date.now();
       const tag =
@@ -600,14 +722,14 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
     /* */
   }
 
-  // Utility yields to Critical busy; scanners do not (isolation / freer Scanners).
+  // Utility yields when Critical reserved budget is tight (keep ≥2 free slots).
   if (
     kind === 'utility' &&
-    (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1))
+    (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 2))
   ) {
     return {
       defer: true,
-      reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
+      reason: `Critical lane budget tight (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
     };
   }
   // Use in-flight/queue only — lane.skipped is a lifetime counter and must NOT

@@ -13,7 +13,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick, adaptiveScannerIntervalMs, shouldSkipScannerSideWork, isSignalsRpcHealthy } from './rpcLoadControl';
+import { shouldSkipScannerTick, adaptiveScannerIntervalMs, shouldSkipScannerSideWork, isSignalsRpcHealthy, scannersUnderPressure } from './rpcLoadControl';
 import { noteSignalBlockedByGate } from './signalIntakeStats';
 import { getRpcRoleFor } from './rpcRouting';
 import {
@@ -977,9 +977,14 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
   if (cfg.jupiterTrendingEnabled !== false) {
     try {
       const solUsd = await fetchSolUsdPrice();
+      const pressure = scannersUnderPressure();
+      const jupLimitRaw = cfg.jupiterLimit ?? 50;
+      const jupLimit = pressure
+        ? Math.min(50, Math.max(10, Math.floor(jupLimitRaw / 2) || 50))
+        : jupLimitRaw;
       const jup = await fetchJupiterPumpTrending({
         category: cfg.jupiterCategory ?? 'toptraded',
-        limit: cfg.jupiterLimit ?? 50,
+        limit: jupLimit,
         pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
         mergeIntervals: cfg.jupiterMergeIntervals !== false,
         preferOrganicVolume: cfg.preferOrganicVolume !== false,
@@ -1040,8 +1045,12 @@ export async function selectScannerCandidates(
   const cfg = scannerCfg();
   const now = Date.now();
   const maxOut = Math.max(1, cfg.maxCandidatesPerPoll);
-  // Enrich budget: keep Secondary (Alchemy ~6 RPS) breathing room
-  const enrichBudget = Math.min(16, Math.max(maxOut * 2, maxOut));
+  const pressure = scannersUnderPressure();
+  // Enrich budget: cut fanout when Scanners look congested (~200ms+ / unhealthy).
+  const enrichBudget = pressure
+    ? Math.min(8, Math.max(maxOut, Math.min(maxOut * 2, 8)))
+    : Math.min(16, Math.max(maxOut * 2, maxOut));
+  const enrichConcurrency = pressure ? 1 : 2;
 
   // Prefetch regime (cached)
   try {
@@ -1078,7 +1087,7 @@ export async function selectScannerCandidates(
     .slice(0, enrichBudget);
 
   type Enriched = ScannerCandidate & { launch: LaunchEvent };
-  const enriched = await mapPool(prefiltered, 2, async (raw) => {
+  const enriched = await mapPool(prefiltered, enrichConcurrency, async (raw) => {
     // Re-check queue mid-enrich so wallet path stays priority under real backlog
     if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return null;
 
@@ -1336,13 +1345,16 @@ async function offerGradWatchesCurveFirst(
   });
 
   // Broader than TA enrich budget; still capped for RPC health
-  const budget = Math.min(16, Math.max(8, Math.min(pumpish.length, 16)));
+  const pressure = scannersUnderPressure();
+  const budget = pressure
+    ? Math.min(8, Math.max(4, Math.min(pumpish.length, 8)))
+    : Math.min(16, Math.max(8, Math.min(pumpish.length, 16)));
   const sample = [...pumpish]
     .sort((a, b) => crudeLiqVolScore(b) - crudeLiqVolScore(a))
     .slice(0, budget);
 
   let offered = 0;
-  await mapPool(sample, 2, async (event) => {
+  await mapPool(sample, pressure ? 1 : 2, async (event) => {
     if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return;
     const curve = await enrichCurve(event);
     const progress = curve.progressPct;

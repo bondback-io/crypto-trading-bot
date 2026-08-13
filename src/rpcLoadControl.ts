@@ -408,6 +408,10 @@ export function updateRpcLoadSignals(signals: {
   recompute(signals);
 }
 
+export function getLastSecondaryLatencyMs(): number | null {
+  return lastSecondaryLatencyMs;
+}
+
 export function getRpcLoadControlSnapshot(): RpcLoadControlSnapshot {
   return {
     ...lastSnapshot,
@@ -486,20 +490,30 @@ export function shouldSkipScannerTick(subsystem: string): {
 /**
  * Under own-lane load, keep signal intake but drop nested Market side work
  * (Alpha / specialty / majors / watch ticks).
+ * Trips earlier when Scanners EWMA is elevated (~200ms+) or Critical budget tight.
  */
 export function shouldSkipScannerSideWork(): {
   skip: boolean;
   reason: string | null;
 } {
   const snap = getRpcLoadControlSnapshot();
-  if (snap.scannerSlowFactor >= 2) {
+  if (snap.scannerSlowFactor >= 1.5) {
     return {
       skip: true,
       reason: `scanner×${snap.scannerSlowFactor} — keep signal intake`,
     };
   }
+  if (
+    lastSecondaryLatencyMs != null &&
+    lastSecondaryLatencyMs >= 200
+  ) {
+    return {
+      skip: true,
+      reason: `Scanners EWMA ${Math.round(lastSecondaryLatencyMs)}ms — drop side work`,
+    };
+  }
   try {
-    const { getRpcGateSnapshot } =
+    const { getRpcGateSnapshot, isCriticalLaneBudgetTight } =
       require('./rpcGate') as typeof import('./rpcGate');
     const g = getRpcGateSnapshot().lanes.secondary;
     if (g.inFlight >= Math.max(1, g.maxConcurrent - 1) || g.queued >= 2) {
@@ -508,10 +522,26 @@ export function shouldSkipScannerSideWork(): {
         reason: `Scanners saturated inFlight ${g.inFlight}/${g.maxConcurrent} q${g.queued}`,
       };
     }
+    if (isCriticalLaneBudgetTight()) {
+      return {
+        skip: true,
+        reason: 'Critical budget tight — drop scanner side work',
+      };
+    }
   } catch {
     /* */
   }
   return { skip: false, reason: null };
+}
+
+/** True when Scanners look congested — cut enrich fanout at the source. */
+export function scannersUnderPressure(): boolean {
+  if (!isSignalsRpcHealthy()) return true;
+  if (lastSecondaryLatencyMs != null && lastSecondaryLatencyMs >= 200) {
+    return true;
+  }
+  const snap = getRpcLoadControlSnapshot();
+  return snap.scannerSlowFactor >= 1.5;
 }
 
 export function utilityPollScale(): {

@@ -10916,6 +10916,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
           <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
+          <div id="rpc-caller-inventory" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
+          <div id="rpc-process-health" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
           <div class="mt-3 flex flex-wrap gap-2 items-center">
             <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
@@ -27148,6 +27150,49 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         loadEl.style.color = (lc.shedBackground || (rpc.degradedParts && rpc.degradedParts.critical) || (lc.scannerSlowFactor || 1) > 1)
           ? '#fbbf24'
           : (rpc.utilityWeakPublic || lc.utilityShedHard ? '#94a3b8' : '#94a3b8');
+      }
+      const invEl = document.getElementById('rpc-caller-inventory');
+      if (invEl) {
+        const inv = rpc.callerInventory || {};
+        const top = Array.isArray(inv.top) ? inv.top.slice(0, 10) : [];
+        if (!top.length) {
+          invEl.textContent = 'Top RPC sources (60s): —';
+        } else {
+          invEl.textContent =
+            'Top RPC sources (60s): ' +
+            top
+              .map(function (r) {
+                return (
+                  (r.feature || '?') +
+                  ' ' +
+                  (r.callsPerMin != null ? r.callsPerMin : 0) +
+                  '/min inFlight=' +
+                  (r.inFlight != null ? r.inFlight : 0) +
+                  ' ' +
+                  (r.avgLatencyMs != null ? r.avgLatencyMs : 0) +
+                  'ms skip=' +
+                  (r.skipsPerMin != null ? r.skipsPerMin : 0) +
+                  ' dedupe=' +
+                  (r.dedupesPerMin != null ? r.dedupesPerMin : 0)
+                );
+              })
+              .join(' · ');
+        }
+      }
+      const phEl = document.getElementById('rpc-process-health');
+      if (phEl) {
+        const ph = rpc.processHealth || {};
+        phEl.textContent =
+          'Process: queue ' +
+          (ph.queueDepth != null ? ph.queueDepth : '—') +
+          ' · backlog ' +
+          (ph.backlog != null ? ph.backlog : '—') +
+          ' · bgSkips60s ' +
+          (ph.bgSkips60s != null ? ph.bgSkips60s : '—') +
+          ' · loopDelayMs ' +
+          (ph.loopDelayMs != null ? ph.loopDelayMs : '—') +
+          ' · scannersEwma ' +
+          (ph.scannersEwmaMs != null ? Math.round(ph.scannersEwmaMs) + 'ms' : '—');
       }
       const rpcBanner = document.getElementById('rpc-banner');
       if (rpcBanner) {

@@ -2746,7 +2746,7 @@ export const config: BotConfig = {
   },
 
   bondingCurve: {
-    cacheTtlMs: 12_000,
+    cacheTtlMs: 20_000,
     migrationThresholdSol: 85,
     initialRealTokenReserves: 793_100_000_000_000,
     requireHealthyCurve: false,

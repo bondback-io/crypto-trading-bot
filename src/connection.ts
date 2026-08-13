@@ -33,7 +33,10 @@ import {
   acquireRpcLane,
   getRpcGateSnapshot,
   isRpcGateSkipError,
+  getFeatureInFlightCounts,
+  getFeatureSkipDedupeRates60s,
 } from './rpcGate';
+import { monitorEventLoopDelay } from 'perf_hooks';
 
 dotenv.config();
 
@@ -160,6 +163,25 @@ const callMeter = new Map<
 >();
 let callMeterStartedAt = Date.now();
 
+const CALL_WINDOW_MS = 60_000;
+type RollingCallSample = {
+  at: number;
+  feature: string;
+  method: string;
+  role: string;
+  ms: number;
+  ok: boolean;
+};
+const rollingCallSamples: RollingCallSample[] = [];
+
+let eventLoopDelay: ReturnType<typeof monitorEventLoopDelay> | null = null;
+try {
+  eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  eventLoopDelay.enable();
+} catch {
+  eventLoopDelay = null;
+}
+
 function callMeterKey(
   endpoint: string,
   feature: string,
@@ -167,6 +189,17 @@ function callMeterKey(
   role: string
 ): CallMeterKey {
   return `${endpoint}|${feature}|${method}|${role}`;
+}
+
+function pruneRollingCalls(now: number): void {
+  const cutoff = now - CALL_WINDOW_MS;
+  let w = 0;
+  for (let i = 0; i < rollingCallSamples.length; i++) {
+    if (rollingCallSamples[i]!.at >= cutoff) {
+      rollingCallSamples[w++] = rollingCallSamples[i]!;
+    }
+  }
+  rollingCallSamples.length = w;
 }
 
 function recordHttpRpcCall(opts: {
@@ -194,6 +227,132 @@ function recordHttpRpcCall(opts: {
   row.calls += 1;
   if (!opts.ok) row.errors += 1;
   row.totalMs += Math.max(0, opts.latencyMs);
+
+  const now = Date.now();
+  rollingCallSamples.push({
+    at: now,
+    feature,
+    method: opts.method,
+    role: String(role),
+    ms: Math.max(0, opts.latencyMs),
+    ok: opts.ok,
+  });
+  if (rollingCallSamples.length > 6_000) pruneRollingCalls(now);
+}
+
+export type RpcCallerInventoryRow = {
+  feature: string;
+  callsPerMin: number;
+  inFlight: number;
+  avgLatencyMs: number;
+  skipsPerMin: number;
+  dedupesPerMin: number;
+};
+
+/** Top RPC sources by rolling 60s calls/min (inventory for congestion diagnosis). */
+export function getRpcCallerInventory(limit = 10): {
+  windowMs: number;
+  top: RpcCallerInventoryRow[];
+} {
+  const now = Date.now();
+  pruneRollingCalls(now);
+  const byFeat = new Map<
+    string,
+    { calls: number; totalMs: number }
+  >();
+  for (const s of rollingCallSamples) {
+    const row = byFeat.get(s.feature) || { calls: 0, totalMs: 0 };
+    row.calls += 1;
+    row.totalMs += s.ms;
+    byFeat.set(s.feature, row);
+  }
+  const inflight = getFeatureInFlightCounts();
+  const rates = getFeatureSkipDedupeRates60s();
+  const top: RpcCallerInventoryRow[] = [];
+  for (const [feature, row] of byFeat) {
+    top.push({
+      feature,
+      callsPerMin: Math.round((row.calls / (CALL_WINDOW_MS / 60_000)) * 10) / 10,
+      inFlight: inflight[feature] || 0,
+      avgLatencyMs: row.calls ? Math.round(row.totalMs / row.calls) : 0,
+      skipsPerMin:
+        Math.round(((rates.skips[feature] || 0) / (CALL_WINDOW_MS / 60_000)) * 10) /
+        10,
+      dedupesPerMin:
+        Math.round(
+          ((rates.dedupes[feature] || 0) / (CALL_WINDOW_MS / 60_000)) * 10
+        ) / 10,
+    });
+  }
+  // Include features that only appear as skips/inflight with zero calls.
+  for (const feature of new Set([
+    ...Object.keys(inflight),
+    ...Object.keys(rates.skips),
+    ...Object.keys(rates.dedupes),
+  ])) {
+    if (byFeat.has(feature)) continue;
+    top.push({
+      feature,
+      callsPerMin: 0,
+      inFlight: inflight[feature] || 0,
+      avgLatencyMs: 0,
+      skipsPerMin:
+        Math.round(((rates.skips[feature] || 0) / (CALL_WINDOW_MS / 60_000)) * 10) /
+        10,
+      dedupesPerMin:
+        Math.round(
+          ((rates.dedupes[feature] || 0) / (CALL_WINDOW_MS / 60_000)) * 10
+        ) / 10,
+    });
+  }
+  top.sort(
+    (a, b) =>
+      b.callsPerMin - a.callsPerMin ||
+      b.inFlight - a.inFlight ||
+      b.skipsPerMin - a.skipsPerMin
+  );
+  return {
+    windowMs: CALL_WINDOW_MS,
+    top: top.slice(0, Math.max(1, limit)),
+  };
+}
+
+export function getProcessHealthSnapshot(): {
+  queueDepth: number;
+  backlog: number;
+  bgSkips60s: number;
+  loopDelayMs: number | null;
+  scannersEwmaMs: number | null;
+} {
+  const gate = getRpcGateSnapshot();
+  const rates = getFeatureSkipDedupeRates60s();
+  let scannersEwmaMs: number | null = null;
+  try {
+    const { getLastSecondaryLatencyMs } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    scannersEwmaMs = getLastSecondaryLatencyMs();
+  } catch {
+    /* */
+  }
+  let loopDelayMs: number | null = null;
+  if (eventLoopDelay) {
+    try {
+      loopDelayMs = Math.round(eventLoopDelay.mean / 1e6);
+      eventLoopDelay.reset();
+    } catch {
+      loopDelayMs = null;
+    }
+  }
+  return {
+    queueDepth:
+      gate.lanes.primary.queued +
+      gate.lanes.secondary.queued +
+      gate.lanes.utility.queued,
+    backlog: gate.backlog,
+    bgSkips60s: rates.bgSkips60s,
+    loopDelayMs,
+    scannersEwmaMs,
+  };
 }
 
 export function getRpcCallTraffic(limit = 40): {
@@ -1928,6 +2087,10 @@ export function getRpcStats(): {
   warning: string | null;
   /** Real HTTP JSON-RPC call traffic (includes getConnection path). */
   callTraffic: ReturnType<typeof getRpcCallTraffic>;
+  /** Rolling 60s top RPC sources (calls/min, in-flight, latency, skip/dedupe). */
+  callerInventory: ReturnType<typeof getRpcCallerInventory>;
+  /** Queue / event-loop health proxy for congestion diagnosis. */
+  processHealth: ReturnType<typeof getProcessHealthSnapshot>;
   /** Per-lane concurrency / rate-limit backlog (overload vs provider). */
   gate: ReturnType<typeof getRpcGateSnapshot>;
   /** Quarantined (hard-failed) endpoints — not probed until cooldown ends. */
@@ -2371,6 +2534,8 @@ export function getRpcStats(): {
     ok: anyHealthy,
     warning,
     callTraffic: getRpcCallTraffic(40),
+    callerInventory: getRpcCallerInventory(10),
+    processHealth: getProcessHealthSnapshot(),
     gate,
     quarantine,
     loadControl,
@@ -2816,13 +2981,13 @@ export function startRpcHealthMonitor(): void {
     if (isPublic) {
       return cycle % 5 === 0;
     }
-    // Preferred Critical (Alchemy): recovering → every cycle; healthy → every 3rd (~135s)
+    // Preferred Critical (Alchemy): recovering → every cycle; healthy → every 4th (~180s)
     if (isPrimary) {
       if (activePrimary !== preferredPrimary && index !== activePrimary) {
         return cycle % 8 === 0;
       }
       if (!state.healthy || state.unhealthySince != null) return true;
-      return cycle % 3 === 0;
+      return cycle % 4 === 0;
     }
     // Alchemy Scanners: recovering → every cycle; healthy → every 2nd (~90s)
     if (isSecondary) {

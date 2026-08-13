@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.314',
+    title: 'Cut RPC congestion at the source (lanes frozen)',
+    sections: ['execution', 'overview'],
+    items: [
+      'Top RPC sources (60s calls/min, in-flight, latency, skip/dedupe) plus process queue/loop-delay so healthy Alchemy looking slow can be diagnosed as internal congestion.',
+      'Per-feature concurrency caps, tighter low-pri stale TTL, earlier scanner side-work shed, and pressure-cut Market/Alpha enrich fanout — Critical/Scanners/Utility/Helius lane assignments unchanged.',
+    ],
+  },
+  {
     version: '1.2.313',
     title: 'Restore scanner signals when Scanners RPC is healthy',
     sections: ['execution', 'overview'],

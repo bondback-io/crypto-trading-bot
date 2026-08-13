@@ -108,7 +108,7 @@ function clearPumpApiCooldownOnSuccess(): void {
 }
 
 function cacheTtlMs(): number {
-  return config.bondingCurve?.cacheTtlMs ?? 12_000;
+  return config.bondingCurve?.cacheTtlMs ?? 20_000;
 }
 
 function migrationThresholdSol(): number {
