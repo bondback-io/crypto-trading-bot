@@ -2412,7 +2412,7 @@ export const config: BotConfig = {
     },
   },
 
-  admissionBaseline: 'governed',
+  admissionBaseline: 'v235',
 
   entrySkillArmedTargetPct: 80,
 
@@ -2930,6 +2930,8 @@ const SMART_BOT_DEFAULT_ON_V1 = 'smartBotDefaultOn_v1';
 const ENTRY_SKILL_DEFAULT_V242 = 'entrySkillDefaultV242';
 /** Operator explicitly chose Admission Baseline via UI/API — never auto-migrate again. */
 const ADMISSION_BASELINE_OPERATOR_SET = 'admissionBaselineOperatorSet';
+/** One-shot: restore freer signal admit path (Baseline v235) after Entry Skill default On. */
+const SIGNAL_FLOW_RESTORE_V330 = 'signalFlowRestore_v330';
 /** One-shot: Zion micro-bot ON by default (KOL scanner + offers). */
 const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 /** One-shot: Zion safeguards MC band + quality/poll defaults. */
@@ -4198,8 +4200,8 @@ function applySettingsSnapshot(
   if (saved.admissionBaseline === 'governed' || saved.admissionBaseline === 'v235') {
     config.admissionBaseline = saved.admissionBaseline;
   } else if (saved.admissionBaseline == null) {
-    // Ship default: Entry Skill On (governed)
-    config.admissionBaseline = 'governed';
+    // Ship default: freer admit path (Baseline v235)
+    config.admissionBaseline = 'v235';
   }
   if (saved.entrySkillArmedTargetPct != null) {
     const n = Number(saved.entrySkillArmedTargetPct);
@@ -4734,16 +4736,19 @@ export function applyPersistedSettings(opts?: {
   }
 
   if (!settingsMigrations[ENTRY_SKILL_DEFAULT_V242]) {
-    if (
-      config.admissionBaseline === 'v235' &&
-      settingsMigrations[ADMISSION_BASELINE_OPERATOR_SET] !== true
-    ) {
-      config.admissionBaseline = 'governed';
+    // Mark complete without forcing governed — freer signal flow is default again.
+    settingsMigrations[ENTRY_SKILL_DEFAULT_V242] = true;
+    persistUserSettings();
+  }
+
+  if (!settingsMigrations[SIGNAL_FLOW_RESTORE_V330]) {
+    if (settingsMigrations[ADMISSION_BASELINE_OPERATOR_SET] !== true) {
+      config.admissionBaseline = 'v235';
       console.log(
-        '[settings] Applied entrySkillDefaultV242 — Entry Skill On (governed); v235 remains kill-switch'
+        '[settings] Signal flow restore — admissionBaseline → v235 (unrestricted admit; Entry Skill remains kill-switch via UI)'
       );
     }
-    settingsMigrations[ENTRY_SKILL_DEFAULT_V242] = true;
+    settingsMigrations[SIGNAL_FLOW_RESTORE_V330] = true;
     persistUserSettings();
   }
 

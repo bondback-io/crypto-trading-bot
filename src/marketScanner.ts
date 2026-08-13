@@ -13,7 +13,11 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
+import {
+  shouldSkipScannerTick,
+  adaptiveScannerIntervalMs,
+  isSignalsRpcHealthy,
+} from './rpcLoadControl';
 import { noteSignalBlockedByGate } from './signalIntakeStats';
 import { getRpcRoleFor } from './rpcRouting';
 import {
@@ -1483,7 +1487,9 @@ export async function runScannerPollOnce(): Promise<number> {
     return 0;
   }
   const qDepth = pendingBuyQueueDepth();
-  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH) {
+  // When Data RPC is healthy, do not skip the whole poll for Favourites
+  // buy-queue depth — mid-enrich still yields; core intake must keep flowing.
+  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH && !isSignalsRpcHealthy()) {
     skippedForBuyQueue += 1;
     lastSkipReason = `skip poll — ${qDepth} wallet buy(s) pending (threshold ${SCANNER_YIELD_QUEUE_DEPTH})`;
     noteSignalBlockedByGate(
@@ -1494,6 +1500,11 @@ export async function runScannerPollOnce(): Promise<number> {
         `(threshold ${SCANNER_YIELD_QUEUE_DEPTH})`
     );
     return 0;
+  }
+  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH && isSignalsRpcHealthy()) {
+    console.log(
+      `[marketScanner] Buy queue ${qDepth} — continuing poll (signals_rpc_healthy); mid-enrich still yields`
+    );
   }
   pollInFlight = true;
   const t0 = Date.now();

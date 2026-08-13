@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.330',
+    title: 'Restore unrestricted Market signal intake + Baseline v235',
+    sections: ['execution', 'overview', 'scanners'],
+    items: [
+      'Scanners no longer shed when Trading is busy — Trading latency/queue only defers Favourites; Market/Alpha intake stays free (1.2.310/313 behaviour).',
+      'Healthy Data RPC bypasses whole-tick skips and buy-queue poll skips; signalsRpcHealthy restored for Overview intake diagnostics.',
+      'Admission Baseline default back to v235 (freer admits); Entry Skill/governed remains available via UI. One-shot migrate unless operator already chose.',
+    ],
+  },
+  {
     version: '1.2.329',
     title: 'Stop logsSubscribe -32601 retry storm (migration WS)',
     sections: ['execution', 'overview'],

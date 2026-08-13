@@ -275,13 +275,22 @@ export function shouldDeferBackgroundForCritical(
   const b = snap.lanes.background;
 
   try {
-    const { getRpcLoadControlSnapshot } =
+    const { getRpcLoadControlSnapshot, isSignalsRpcHealthy } =
       require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     const load = getRpcLoadControlSnapshot();
-    if (load.shedBackground && kind === 'scanner' && load.scannerSlowFactor >= 3) {
+    // Own-lane ×3 only — Trading shed must not silence Market/Alpha intake.
+    if (
+      kind === 'scanner' &&
+      load.scannerSlowFactor >= 3 &&
+      !load.signalsRpcHealthy &&
+      !isSignalsRpcHealthy()
+    ) {
       return {
         defer: true,
-        reason: load.reasons[0] || 'adaptive shed for Trading',
+        reason: load.throttledByOwnLaneOnly
+          ? load.reasons.find((r) => /data|Scanners|secondary/i.test(r)) ||
+            `own-lane scanner×${load.scannerSlowFactor}`
+          : `scanner×${load.scannerSlowFactor}`,
       };
     }
     if (kind === 'utility' && load.utilitySlowFactor >= 3) {
@@ -294,7 +303,11 @@ export function shouldDeferBackgroundForCritical(
     /* */
   }
 
-  if (p.queued > 0 || p.inFlight >= Math.max(1, p.max - 1)) {
+  // Favourites/utility yield to Trading busy; scanners stay free (signal intake).
+  if (
+    kind === 'utility' &&
+    (p.queued > 0 || p.inFlight >= Math.max(1, p.max - 1))
+  ) {
     return {
       defer: true,
       reason: `Trading lane busy (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`,

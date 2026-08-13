@@ -9072,9 +9072,14 @@ export function getMonitorStatus(): {
     const { getSignalIntakeStats } =
       require('./signalIntakeStats') as typeof import('./signalIntakeStats');
     const snap = getRpcLoadControlSnapshot();
-    // Classic proxy: scanners not in hard shed / ×3 backoff.
-    signalsRpcHealthy =
-      !snap.shedBackground && snap.scannerSlowFactor < 3;
+    try {
+      const { isSignalsRpcHealthy } =
+        require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+      signalsRpcHealthy =
+        snap.signalsRpcHealthy === true || isSignalsRpcHealthy();
+    } catch {
+      signalsRpcHealthy = snap.scannerSlowFactor < 3;
+    }
     intake = getSignalIntakeStats();
   } catch {
     /* */

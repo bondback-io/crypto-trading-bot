@@ -1,14 +1,23 @@
 /**
  * Adaptive load control for Data + Background pressure.
- * Never marks global STRESSED from public emergency alone.
+ *
+ * Signal intake (Market/Alpha/Zion scanners) is isolated from Trading shed:
+ * Trading latency/queue may defer Favourites, but must not starve scanners.
+ * When Data RPC looks healthy, never whole-tick-skip scanners (1.2.313 restore).
  */
 
 import { getRpcGateSnapshot, type RpcGateRole } from './rpcGate';
+
+/** Data-lane EWMA below this → treat scanners as healthy for intake protect. */
+export const SIGNALS_RPC_HEALTHY_MS = 180;
 
 export type RpcLoadControlSnapshot = {
   scannerSlowFactor: number;
   utilitySlowFactor: number;
   shedBackground: boolean;
+  /** True when scanner× is driven only by Data-lane pressure (not Trading). */
+  throttledByOwnLaneOnly: boolean;
+  signalsRpcHealthy: boolean;
   reasons: string[];
   secondarySkipsRecent: number;
   backgroundSkipsRecent: number;
@@ -29,12 +38,15 @@ let lastSignals = {
   dataHealthy: true,
   backgroundHealthy: true,
   primaryQueued: 0,
+  secondaryIdle: false,
 };
 
 let lastSnapshot: RpcLoadControlSnapshot = {
   scannerSlowFactor: 1,
   utilitySlowFactor: 1,
   shedBackground: false,
+  throttledByOwnLaneOnly: false,
+  signalsRpcHealthy: false,
   reasons: [],
   secondarySkipsRecent: 0,
   backgroundSkipsRecent: 0,
@@ -48,9 +60,22 @@ let lastSnapshot: RpcLoadControlSnapshot = {
 };
 
 let lastLogAt = 0;
+let lastTickBypassLogAt = 0;
 
 export function noteBackgroundRpcSkip(_role: RpcGateRole, _feature?: string): void {
   /* skips counted via gate snapshot */
+}
+
+/** True when Data/Scanners preferred looks fast enough to keep intake flowing. */
+export function isSignalsRpcHealthy(
+  secondaryLatencyMs: number | null = lastSignals.dataLatencyMs
+): boolean {
+  if (!lastSignals.dataHealthy) return false;
+  if (secondaryLatencyMs == null || !Number.isFinite(secondaryLatencyMs)) {
+    // Unknown latency but healthy flag → allow intake (do not starve on missing EWMA).
+    return true;
+  }
+  return secondaryLatencyMs < SIGNALS_RPC_HEALTHY_MS;
 }
 
 function recompute(): void {
@@ -64,6 +89,7 @@ function recompute(): void {
   const tradeLat = lastSignals.tradingLatencyMs;
   const latSpike = dataLat != null && dataLat >= 2_500;
   const reasons: string[] = [];
+  const scannerReasons: string[] = [];
 
   let scannerSlowFactor = 1;
   let utilitySlowFactor = 1;
@@ -71,49 +97,60 @@ function recompute(): void {
   let level: 'ok' | 'busy' | 'shed' = 'ok';
   let cause: string | null = null;
 
+  // Trading pressure → Favourites/Background only (NOT scanner×).
   if (!lastSignals.tradingOnEmergency) {
     if (tradeLat != null && tradeLat >= 700) {
       shedBackground = true;
-      scannerSlowFactor = Math.max(scannerSlowFactor, 3);
       utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-      reasons.push(`Trading latency ${Math.round(tradeLat)}ms → shed background`);
+      reasons.push(
+        `Trading latency ${Math.round(tradeLat)}ms → shed Favourites (scanners free)`
+      );
     } else if (tradeLat != null && tradeLat >= 450) {
       shedBackground = true;
-      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-      reasons.push(`Trading latency ${Math.round(tradeLat)}ms → reduce scanners`);
+      reasons.push(
+        `Trading latency ${Math.round(tradeLat)}ms → defer Favourites (scanners free)`
+      );
     }
   }
   if (lastSignals.primaryQueued > 0) {
     shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push('Trading queue > 0 → shed scanners/Favourites');
+    reasons.push('Trading queue > 0 → shed Favourites (scanners free)');
   }
 
-  if (!lastSignals.dataHealthy || dataSkips > 30 || dataQ > 24 || latSpike) {
+  // Scanner slowdown only from Data-lane pressure (own lane).
+  if (!lastSignals.dataHealthy || dataSkips > 40 || dataQ > 32 || latSpike) {
     level = 'shed';
     cause = !lastSignals.dataHealthy
       ? 'data lane unhealthy'
       : latSpike
         ? `data latency ${Math.round(dataLat!)}ms`
-        : dataSkips > 30
+        : dataSkips > 40
           ? `data skips/min ${dataSkips}`
           : `data queue ${dataQ}`;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 4);
+    scannerSlowFactor = Math.max(scannerSlowFactor, 3);
+    scannerReasons.push(cause);
     reasons.push(cause);
   } else if (
-    dataQ > 8 ||
-    dataSkips > 10 ||
-    (dataLat != null && dataLat >= 1_200)
+    dataQ > 16 ||
+    dataSkips > 20 ||
+    (dataLat != null && dataLat >= 1_800)
   ) {
     level = 'busy';
     cause =
-      dataQ > 8
+      dataQ > 16
         ? `data queue ${dataQ}`
-        : dataSkips > 10
+        : dataSkips > 20
           ? `data skips/min ${dataSkips}`
           : `data latency ${Math.round(dataLat!)}ms`;
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+    scannerReasons.push(cause);
     reasons.push(cause);
+  } else if (dataLat != null && dataLat >= 900) {
+    scannerSlowFactor = Math.max(scannerSlowFactor, 1.5);
+    scannerReasons.push(
+      `Data latency ${Math.round(dataLat)}ms → soft slow scanners`
+    );
+    reasons.push(scannerReasons[scannerReasons.length - 1]!);
   }
 
   if (
@@ -144,19 +181,27 @@ function recompute(): void {
     );
   }
 
-  if (dataLat != null && dataLat >= 600) {
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push(`Data latency ${Math.round(dataLat)}ms → slow scanners`);
+  const scannersHealthy = isSignalsRpcHealthy(dataLat);
+  // Healthy Data: never hard-lock scanner×3 — keep intake flowing.
+  if (scannersHealthy && scannerSlowFactor >= 3) {
+    scannerSlowFactor = 1.5;
+    scannerReasons.push(
+      `healed ×3→×1.5 — Data healthy (${Math.round(dataLat ?? 0)}ms)`
+    );
   }
 
-  const favouritesDeferred = utilitySlowFactor >= 2.5 || level === 'shed';
+  const favouritesDeferred = utilitySlowFactor >= 2.5 || shedBackground;
   if (shedBackground && level === 'ok') level = 'busy';
-  if (shedBackground && scannerSlowFactor >= 3) level = 'shed';
+
+  const throttledByOwnLaneOnly =
+    scannerSlowFactor > 1 && scannerReasons.length > 0;
 
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
     utilitySlowFactor: Math.min(4, utilitySlowFactor),
     shedBackground,
+    throttledByOwnLaneOnly,
+    signalsRpcHealthy: scannersHealthy,
     reasons,
     secondarySkipsRecent: dataSkips,
     backgroundSkipsRecent: bgSkips,
@@ -174,7 +219,8 @@ function recompute(): void {
     console.warn(
       `[rpc-load] adaptive backoff: scanner×${lastSnapshot.scannerSlowFactor} ` +
         `favourites×${lastSnapshot.utilitySlowFactor}` +
-        (shedBackground ? ' shedBackground=ON' : '') +
+        (shedBackground ? ' shedFavourites=ON' : '') +
+        (scannersHealthy ? ' signalsRpcHealthy' : '') +
         ` — ${reasons.join('; ')}`
     );
   }
@@ -217,6 +263,9 @@ export function updateRpcLoadSignals(s: {
   if (s.primaryQueued !== undefined) {
     lastSignals.primaryQueued = s.primaryQueued;
   }
+  if (s.secondaryIdle !== undefined) {
+    lastSignals.secondaryIdle = s.secondaryIdle;
+  }
   recompute();
 }
 
@@ -227,7 +276,9 @@ export function getRpcLoadControlSnapshot(): RpcLoadControlSnapshot {
 
 export function adaptiveScannerIntervalMs(baseMs: number): number {
   const f = getRpcLoadControlSnapshot().scannerSlowFactor;
-  return Math.round(Math.max(baseMs, baseMs * f));
+  // Healthy Data: never stretch poll more than ×1.5.
+  const capped = isSignalsRpcHealthy() ? Math.min(f, 1.5) : f;
+  return Math.round(Math.max(baseMs, baseMs * capped));
 }
 
 export function shouldSkipScannerTick(subsystem: string): {
@@ -235,22 +286,56 @@ export function shouldSkipScannerTick(subsystem: string): {
   reason: string | null;
 } {
   const snap = getRpcLoadControlSnapshot();
+  // Healthy Data RPC: never whole-tick skip — keep signal intake flowing.
+  if (snap.signalsRpcHealthy || isSignalsRpcHealthy()) {
+    if (snap.scannerSlowFactor >= 2) {
+      const now = Date.now();
+      if (now - lastTickBypassLogAt > 20_000) {
+        lastTickBypassLogAt = now;
+        console.warn(
+          `[scanner_tick_skip_bypassed_healthy_rpc] ${subsystem} ` +
+            `scanner×${snap.scannerSlowFactor} dataEwma=${lastSignals.dataLatencyMs ?? '—'}ms`
+        );
+      }
+    }
+    return { skip: false, reason: null };
+  }
   if (snap.scannerSlowFactor >= 3) {
     return {
       skip: true,
-      reason: snap.shedBackground
-        ? `adaptive shed for Trading (${snap.reasons[0] || 'load'})`
+      reason: snap.throttledByOwnLaneOnly
+        ? `own-lane scanner×${snap.scannerSlowFactor} (${subsystem})`
         : `adaptive scanner×${snap.scannerSlowFactor} (${subsystem})`,
     };
   }
   if (snap.scannerSlowFactor >= 2) {
-    const skipChance = Math.min(0.35, 1 - 1 / snap.scannerSlowFactor);
+    const skipChance = Math.min(0.25, 1 - 1 / snap.scannerSlowFactor);
     if (Math.random() < skipChance) {
       return {
         skip: true,
         reason: `adaptive scanner×${snap.scannerSlowFactor} (${subsystem})`,
       };
     }
+  }
+  return { skip: false, reason: null };
+}
+
+/**
+ * Under Data-lane load, keep core handoffs but drop nested side work.
+ */
+export function shouldSkipScannerSideWork(): {
+  skip: boolean;
+  reason: string | null;
+} {
+  const snap = getRpcLoadControlSnapshot();
+  if (snap.signalsRpcHealthy || isSignalsRpcHealthy()) {
+    return { skip: false, reason: null };
+  }
+  if (snap.scannerSlowFactor >= 2) {
+    return {
+      skip: true,
+      reason: `scanner×${snap.scannerSlowFactor} — keep signal intake`,
+    };
   }
   return { skip: false, reason: null };
 }
