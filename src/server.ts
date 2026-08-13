@@ -940,6 +940,44 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/rpc/workloads', (_req: Request, res: Response) => {
+    try {
+      const { getRpcWorkloadSnapshot } =
+        require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+      res.json({ ok: true, workloads: getRpcWorkloadSnapshot() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/rpc/workloads', (req: Request, res: Response) => {
+    try {
+      const { setRpcWorkloadsEnabled } =
+        require('./config') as typeof import('./config');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const patch: Record<string, boolean> = {};
+      if (body.id != null && typeof body.enabled === 'boolean') {
+        patch[String(body.id)] = body.enabled;
+      } else if (body.workloads && typeof body.workloads === 'object') {
+        for (const [k, v] of Object.entries(
+          body.workloads as Record<string, unknown>
+        )) {
+          if (typeof v === 'boolean') patch[k] = v;
+        }
+      }
+      const workloads = setRpcWorkloadsEnabled(patch);
+      res.json({ ok: true, workloads, rpc: getRpcStats() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/rpc/share-load', (req: Request, res: Response) => {
     try {
       const { setRpcShareLoad } = require('./config') as typeof import('./config');

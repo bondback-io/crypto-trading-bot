@@ -1,34 +1,33 @@
 /**
- * Adaptive load control for Data-lane pressure (scanners / Favourites shed).
+ * Adaptive load control for Data + Background pressure.
  * Never marks global STRESSED from public emergency alone.
- * Snapshot fields keep classic names for monitor/dashboard compatibility.
  */
 
 import { getRpcGateSnapshot, type RpcGateRole } from './rpcGate';
 
 export type RpcLoadControlSnapshot = {
-  /** 1 = normal; higher = slower scanners. */
   scannerSlowFactor: number;
-  /** Favourites/activity slowdown (maps from Data pressure). */
   utilitySlowFactor: number;
-  /** True when background should yield for Trading. */
   shedBackground: boolean;
   reasons: string[];
   secondarySkipsRecent: number;
+  backgroundSkipsRecent: number;
   updatedAt: number;
-  /** Simple-model aliases */
   level: 'ok' | 'busy' | 'shed';
   cause: string | null;
   scannerMultiplier: number;
   favouritesDeferred: boolean;
   dataPressure: boolean;
+  backgroundPressure: boolean;
 };
 
 let lastSignals = {
   tradingLatencyMs: null as number | null,
   dataLatencyMs: null as number | null,
+  backgroundLatencyMs: null as number | null,
   tradingOnEmergency: false,
   dataHealthy: true,
+  backgroundHealthy: true,
   primaryQueued: 0,
 };
 
@@ -38,25 +37,30 @@ let lastSnapshot: RpcLoadControlSnapshot = {
   shedBackground: false,
   reasons: [],
   secondarySkipsRecent: 0,
+  backgroundSkipsRecent: 0,
   updatedAt: Date.now(),
   level: 'ok',
   cause: null,
   scannerMultiplier: 1,
   favouritesDeferred: false,
   dataPressure: false,
+  backgroundPressure: false,
 };
 
 let lastLogAt = 0;
 
 export function noteBackgroundRpcSkip(_role: RpcGateRole, _feature?: string): void {
-  /* skips are counted live via getRpcGateSnapshot */
+  /* skips counted via gate snapshot */
 }
 
 function recompute(): void {
   const gate = getRpcGateSnapshot();
   const dataQ = gate.lanes.secondary.queued;
   const dataSkips = gate.lanes.secondary.skipsPerMin;
+  const bgQ = gate.lanes.background.queued;
+  const bgSkips = gate.lanes.background.skipsPerMin;
   const dataLat = lastSignals.dataLatencyMs;
+  const bgLat = lastSignals.backgroundLatencyMs;
   const tradeLat = lastSignals.tradingLatencyMs;
   const latSpike = dataLat != null && dataLat >= 2_500;
   const reasons: string[] = [];
@@ -67,7 +71,6 @@ function recompute(): void {
   let level: 'ok' | 'busy' | 'shed' = 'ok';
   let cause: string | null = null;
 
-  // Trading pressure → shed background (not emergency-alone).
   if (!lastSignals.tradingOnEmergency) {
     if (tradeLat != null && tradeLat >= 700) {
       shedBackground = true;
@@ -96,7 +99,6 @@ function recompute(): void {
           ? `data skips/min ${dataSkips}`
           : `data queue ${dataQ}`;
     scannerSlowFactor = Math.max(scannerSlowFactor, 4);
-    utilitySlowFactor = Math.max(utilitySlowFactor, 3);
     reasons.push(cause);
   } else if (
     dataQ > 8 ||
@@ -111,8 +113,35 @@ function recompute(): void {
           ? `data skips/min ${dataSkips}`
           : `data latency ${Math.round(dataLat!)}ms`;
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
     reasons.push(cause);
+  }
+
+  if (
+    !lastSignals.backgroundHealthy ||
+    bgSkips > 25 ||
+    bgQ > 16 ||
+    (bgLat != null && bgLat >= 2_500)
+  ) {
+    utilitySlowFactor = Math.max(utilitySlowFactor, 3);
+    reasons.push(
+      !lastSignals.backgroundHealthy
+        ? 'background lane unhealthy'
+        : bgSkips > 25
+          ? `background skips/min ${bgSkips}`
+          : bgQ > 16
+            ? `background queue ${bgQ}`
+            : `background latency ${Math.round(bgLat!)}ms`
+    );
+    if (level === 'ok') level = 'busy';
+  } else if (bgQ > 6 || bgSkips > 10 || (bgLat != null && bgLat >= 1_200)) {
+    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
+    reasons.push(
+      bgQ > 6
+        ? `background queue ${bgQ}`
+        : bgSkips > 10
+          ? `background skips/min ${bgSkips}`
+          : `background latency ${Math.round(bgLat!)}ms`
+    );
   }
 
   if (dataLat != null && dataLat >= 600) {
@@ -130,12 +159,14 @@ function recompute(): void {
     shedBackground,
     reasons,
     secondarySkipsRecent: dataSkips,
+    backgroundSkipsRecent: bgSkips,
     updatedAt: Date.now(),
     level,
     cause: cause || reasons[0] || null,
     scannerMultiplier: Math.min(4, scannerSlowFactor),
     favouritesDeferred,
     dataPressure: level !== 'ok',
+    backgroundPressure: utilitySlowFactor >= 2,
   };
 
   if (reasons.length && Date.now() - lastLogAt > 20_000) {
@@ -153,10 +184,12 @@ export function updateRpcLoadSignals(s: {
   primaryLatencyMs?: number | null;
   secondaryLatencyMs?: number | null;
   utilityLatencyMs?: number | null;
+  backgroundLatencyMs?: number | null;
   utilityWeakPublic?: boolean;
   utilityFailover?: boolean;
   tradingOnEmergency?: boolean;
   dataHealthy?: boolean;
+  backgroundHealthy?: boolean;
   primaryQueued?: number;
   secondarySkipped?: number;
   secondaryIdle?: boolean;
@@ -167,17 +200,23 @@ export function updateRpcLoadSignals(s: {
   if (s.secondaryLatencyMs !== undefined) {
     lastSignals.dataLatencyMs = s.secondaryLatencyMs;
   }
+  if (s.backgroundLatencyMs !== undefined) {
+    lastSignals.backgroundLatencyMs = s.backgroundLatencyMs;
+  } else if (s.utilityLatencyMs !== undefined) {
+    lastSignals.backgroundLatencyMs = s.utilityLatencyMs;
+  }
   if (s.tradingOnEmergency !== undefined) {
     lastSignals.tradingOnEmergency = s.tradingOnEmergency;
   }
   if (s.dataHealthy !== undefined) {
     lastSignals.dataHealthy = s.dataHealthy;
   }
+  if (s.backgroundHealthy !== undefined) {
+    lastSignals.backgroundHealthy = s.backgroundHealthy;
+  }
   if (s.primaryQueued !== undefined) {
     lastSignals.primaryQueued = s.primaryQueued;
   }
-  // utilityWeakPublic / utilityFailover intentionally ignored — emergency
-  // alone must not drive global stress.
   recompute();
 }
 

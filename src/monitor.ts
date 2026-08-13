@@ -1881,7 +1881,7 @@ export function startMonitor(): void {
   const shareBoot = Boolean(config.rpc?.shareLoad);
   const softBoot =
     isSoftThrottleRpcUrl(getRpcUrl()) ||
-    (shareBoot && getRpcRoleFor('wallet_poll', true) === 'secondary');
+    (shareBoot && getRpcRoleFor('wallet_poll', true) === 'background');
   // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
   const firstPollDelayMs = softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000;
   if (softWatchBootTimer) clearTimeout(softWatchBootTimer);
@@ -1928,7 +1928,7 @@ export function startMonitor(): void {
     if (
       isSoftThrottleRpcUrl(getRpcUrl()) ||
       (Boolean(config.rpc?.shareLoad) &&
-        getRpcRoleFor('activity', true) === 'utility')
+        getRpcRoleFor('activity', true) === 'background')
     ) {
       return;
     }
@@ -2009,6 +2009,13 @@ async function pollAllWallets(): Promise<void> {
   if (pollInFlight) {
     console.log('[monitor] Skipping poll — previous cycle still running');
     return;
+  }
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('wallet_poll')) return;
+  } catch {
+    /* */
   }
 
   const deferCrit = shouldDeferBackgroundForCritical('utility');
@@ -2407,6 +2414,13 @@ export async function refreshWalletActivity(
 export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]> {
   console.log(`[monitor] Refreshing activity for ${config.smartWallets.length} wallet(s)…`);
   const reports: WalletActivityReport[] = [];
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('activity')) return reports;
+  } catch {
+    /* */
+  }
 
   const defer = shouldDeferBackgroundForCritical('utility');
   if (defer.defer) {

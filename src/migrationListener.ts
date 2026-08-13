@@ -486,6 +486,13 @@ function looksLikeMigrationLogs(
 async function pollMigrations(): Promise<void> {
   if (!running) return;
   if (Date.now() < rateLimitedUntil) return;
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('migration')) return;
+  } catch {
+    /* */
+  }
   let gateStressed = false;
   try {
     gateStressed = Boolean(getRpcGateSnapshot().stressed);

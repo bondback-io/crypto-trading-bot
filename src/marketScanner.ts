@@ -1447,6 +1447,16 @@ export function handOffScannerCandidate(
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('market_scanner')) {
+      lastSkipReason = 'RPC workload OFF (test)';
+      return 0;
+    }
+  } catch {
+    /* */
+  }
   const cfg = scannerCfg();
   const baseInterval = Math.max(22_000, Number(cfg.pollIntervalMs) || 22_000);
   const interval = adaptiveScannerIntervalMs(baseInterval);

@@ -3119,6 +3119,15 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
         ? config.rpc.softWatchCap
         : null,
+    rpcWorkloads: (() => {
+      try {
+        const { getRpcWorkloadEnabledMap } =
+          require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+        return getRpcWorkloadEnabledMap();
+      } catch {
+        return undefined;
+      }
+    })(),
     learningMode: config.learningMode
       ? (cloneJson(config.learningMode) as PersistedBotSettings['learningMode'])
       : {
@@ -3882,6 +3891,15 @@ function applySettingsSnapshot(
       saved.rpcSoftWatchCap == null
         ? null
         : Math.max(0, Math.min(200, Math.round(Number(saved.rpcSoftWatchCap))));
+  }
+  if (saved.rpcWorkloads && typeof saved.rpcWorkloads === 'object') {
+    try {
+      const { applyRpcWorkloadSaved } =
+        require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+      applyRpcWorkloadSaved(saved.rpcWorkloads);
+    } catch {
+      /* */
+    }
   }
 
   if (saved.strategyToggles && typeof saved.strategyToggles === 'object') {
@@ -5855,6 +5873,19 @@ export function persistWallets(options: { activeOnly?: boolean } = {}): void {
 export function updateConfig(partial: Partial<BotConfig>): void {
   Object.assign(config, partial);
   persistUserSettings();
+}
+
+/** Persist Stats → RPC workload kill-switches. */
+export function setRpcWorkloadsEnabled(
+  patch: Partial<Record<string, boolean>>
+): ReturnType<typeof import('./rpcWorkloadControl').getRpcWorkloadSnapshot> {
+  const {
+    setRpcWorkloads,
+    getRpcWorkloadSnapshot,
+  } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+  setRpcWorkloads(patch as Parameters<typeof setRpcWorkloads>[0]);
+  persistUserSettings();
+  return getRpcWorkloadSnapshot();
 }
 
 /** @deprecated No routing effect — simple Trading/Data is always on. */

@@ -1,6 +1,7 @@
 /**
- * Simple Alchemy Trading / Data / Emergency URL builders.
- * Helius is never registered for routing (env may still exist unused).
+ * 6 paid + 3 public Solana RPC builders.
+ * Trading=Helius, Data=Alchemy, Background=Alchemy BACKUP2→publics,
+ * Emergency=Helius BACKUP2→publics.
  */
 
 function stripTrailingSlash(url: string): string {
@@ -11,7 +12,6 @@ function looksLikeFullHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
 }
 
-/** True if URL already ends with a path segment that looks like an API key. */
 function urlAlreadyHasKeyPath(url: string): boolean {
   try {
     const u = new URL(url);
@@ -22,21 +22,25 @@ function urlAlreadyHasKeyPath(url: string): boolean {
   }
 }
 
-/**
- * Build a complete Alchemy Solana mainnet RPC URL from a bare API key,
- * or return a full URL unchanged (without double-appending the key).
- */
+export const PUBLICNODE_RPC_URL = 'https://solana-rpc.publicnode.com';
+export const MAINNET_BETA_RPC_URL = 'https://api.mainnet-beta.solana.com';
+
 export function buildAlchemyRpcUrl(apiKeyOrUrl: string): string {
   const raw = apiKeyOrUrl.trim();
   if (!raw) return '';
-  if (looksLikeFullHttpUrl(raw)) {
-    return stripTrailingSlash(raw);
-  }
+  if (looksLikeFullHttpUrl(raw)) return stripTrailingSlash(raw);
   return `https://solana-mainnet.g.alchemy.com/v2/${raw}`;
 }
 
-/** Resolve Alchemy URL from optional full URL env or API key env. */
-export function resolveAlchemyEndpoint(
+export function buildHeliusRpcUrl(apiKeyOrUrl: string): string {
+  const raw = apiKeyOrUrl.trim();
+  if (!raw) return '';
+  if (looksLikeFullHttpUrl(raw)) return stripTrailingSlash(raw);
+  return `https://mainnet.helius-rpc.com/?api-key=${raw}`;
+}
+
+export function resolveKeyedEndpoint(
+  builder: (key: string) => string,
   urlEnv: string | undefined,
   keyEnv: string | undefined,
   label: string
@@ -44,7 +48,15 @@ export function resolveAlchemyEndpoint(
   const urlRaw = (urlEnv || '').trim();
   const keyRaw = (keyEnv || '').trim();
   if (urlRaw && looksLikeFullHttpUrl(urlRaw)) {
-    if (keyRaw && !urlAlreadyHasKeyPath(urlRaw)) {
+    if (keyRaw && !urlAlreadyHasKeyPath(urlRaw) && !/[?&]api-key=/i.test(urlRaw)) {
+      const sep = urlRaw.includes('?') ? '&' : '?';
+      // Helius-style query key append only when URL looks like helius host
+      if (/helius/i.test(urlRaw)) {
+        return {
+          url: stripTrailingSlash(`${urlRaw}${sep}api-key=${keyRaw}`),
+          label,
+        };
+      }
       return {
         url: stripTrailingSlash(`${stripTrailingSlash(urlRaw)}/${keyRaw}`),
         label,
@@ -53,9 +65,25 @@ export function resolveAlchemyEndpoint(
     return { url: stripTrailingSlash(urlRaw), label };
   }
   if (keyRaw) {
-    return { url: buildAlchemyRpcUrl(keyRaw), label };
+    return { url: builder(keyRaw), label };
   }
   return null;
+}
+
+export function resolveAlchemyEndpoint(
+  urlEnv: string | undefined,
+  keyEnv: string | undefined,
+  label: string
+): { url: string; label: string } | null {
+  return resolveKeyedEndpoint(buildAlchemyRpcUrl, urlEnv, keyEnv, label);
+}
+
+export function resolveHeliusEndpoint(
+  urlEnv: string | undefined,
+  keyEnv: string | undefined,
+  label: string
+): { url: string; label: string } | null {
+  return resolveKeyedEndpoint(buildHeliusRpcUrl, urlEnv, keyEnv, label);
 }
 
 export function isPublicRpcUrl(url: string | null | undefined): boolean {
@@ -63,74 +91,128 @@ export function isPublicRpcUrl(url: string | null | undefined): boolean {
   return /mainnet-beta\.solana\.com|publicnode\.com|api\.mainnet/i.test(url);
 }
 
-/** Soft-throttle host check (Favourites / activity volume). */
 export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
   return isPublicRpcUrl(url);
 }
 
+export type RpcEndpointRef = { url: string; label: string };
+
 export type SimpleRpcEndpoints = {
-  trading: { url: string; label: string } | null;
-  data: { url: string; label: string } | null;
-  emergency: { url: string; label: string };
-  heliusDisabled: true;
+  trading: RpcEndpointRef | null;
+  /** First Trading failover — Alchemy BACKUP (not Helius-only). */
+  tradingAlchemyFailover: RpcEndpointRef | null;
+  /** Second Trading failover — Helius BACKUP. */
+  tradingFailover: RpcEndpointRef | null;
+  data: RpcEndpointRef | null;
+  dataFailover: RpcEndpointRef | null;
+  background: RpcEndpointRef | null;
+  emergencyPaid: RpcEndpointRef | null;
+  publics: RpcEndpointRef[];
+  heliusDisabled: false;
 };
 
+function resolvePublic(label: string, url: string): RpcEndpointRef {
+  return { url: stripTrailingSlash(url), label };
+}
+
 /**
- * Exactly three lanes for the simple router:
- * - Trading ← ALCHEMY_API_KEY_BACKUP (or ALCHEMY_RPC_URL_BACKUP)
- * - Data ← ALCHEMY_API_KEY (or ALCHEMY_RPC_URL)
- * - Emergency ← RPC_URL or publicnode
- * Helius is never included.
+ * Nine-slot pool:
+ * Trading ← HELIUS_API_KEY → ALCHEMY_API_KEY_BACKUP → HELIUS_API_KEY_BACKUP → Emergency
+ * Data ← ALCHEMY_API_KEY (+ ALCHEMY_API_KEY_BACKUP)
+ * Background ← ALCHEMY_API_KEY_BACKUP2 → publics
+ * Emergency ← HELIUS_API_KEY_BACKUP2 → publics
  */
 export function rpcEndpointsSimple(): SimpleRpcEndpoints {
-  const trading = resolveAlchemyEndpoint(
+  const trading = resolveHeliusEndpoint(
+    process.env.HELIUS_RPC_URL,
+    process.env.HELIUS_API_KEY,
+    'helius'
+  );
+  const tradingAlchemyFailover = resolveAlchemyEndpoint(
     process.env.ALCHEMY_RPC_URL_BACKUP,
     process.env.ALCHEMY_API_KEY_BACKUP,
     'alchemy-backup'
+  );
+  const tradingFailover = resolveHeliusEndpoint(
+    process.env.HELIUS_RPC_URL_BACKUP,
+    process.env.HELIUS_API_KEY_BACKUP,
+    'helius-backup'
   );
   const data = resolveAlchemyEndpoint(
     process.env.ALCHEMY_RPC_URL,
     process.env.ALCHEMY_API_KEY,
     'alchemy'
   );
+  // Data sticky failover prefers a distinct Alchemy key; may share BACKUP with Trading hop.
+  const dataFailover =
+    resolveAlchemyEndpoint(
+      process.env.ALCHEMY_RPC_URL_BACKUP,
+      process.env.ALCHEMY_API_KEY_BACKUP,
+      'alchemy-backup'
+    ) ||
+    resolveAlchemyEndpoint(
+      process.env.ALCHEMY_RPC_URL_BACKUP2,
+      process.env.ALCHEMY_API_KEY_BACKUP2,
+      'alchemy-backup2'
+    );
+  const background = resolveAlchemyEndpoint(
+    process.env.ALCHEMY_RPC_URL_BACKUP2,
+    process.env.ALCHEMY_API_KEY_BACKUP2,
+    'alchemy-backup2'
+  );
+  const emergencyPaid = resolveHeliusEndpoint(
+    process.env.HELIUS_RPC_URL_BACKUP2,
+    process.env.HELIUS_API_KEY_BACKUP2,
+    'helius-backup2'
+  );
 
-  const emergencyRaw = (process.env.RPC_URL || '').trim();
-  let emergency: { url: string; label: string };
-  if (
-    emergencyRaw &&
-    looksLikeFullHttpUrl(emergencyRaw) &&
-    isPublicRpcUrl(emergencyRaw)
-  ) {
-    emergency = { url: stripTrailingSlash(emergencyRaw), label: 'public' };
-  } else if (emergencyRaw && looksLikeFullHttpUrl(emergencyRaw) && !trading) {
-    // Non-public RPC_URL used only as last-resort emergency if no Alchemy backup.
-    emergency = { url: stripTrailingSlash(emergencyRaw), label: 'rpc-url' };
+  const publics: RpcEndpointRef[] = [];
+  const seen = new Set<string>();
+  const pushPublic = (e: RpcEndpointRef | null) => {
+    if (!e?.url) return;
+    const key = e.url.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    publics.push(e);
+  };
+
+  const publicnodeEnv = (process.env.PUBLICNODE || process.env.PUBLICNODE_RPC_URL || '').trim();
+  if (publicnodeEnv && looksLikeFullHttpUrl(publicnodeEnv)) {
+    pushPublic(resolvePublic('publicnode', publicnodeEnv));
   } else {
-    emergency = {
-      url: 'https://solana-rpc.publicnode.com',
-      label: 'publicnode',
-    };
+    pushPublic(resolvePublic('publicnode', PUBLICNODE_RPC_URL));
+  }
+
+  const rpcUrl = (process.env.RPC_URL || '').trim();
+  if (rpcUrl && looksLikeFullHttpUrl(rpcUrl)) {
+    pushPublic(resolvePublic('rpc-url', rpcUrl));
+  }
+
+  const beta = (process.env.RPC_BETA_URL || '').trim();
+  if (beta && looksLikeFullHttpUrl(beta)) {
+    pushPublic(resolvePublic('rpc-beta', beta));
+  } else {
+    pushPublic(resolvePublic('mainnet-beta', MAINNET_BETA_RPC_URL));
   }
 
   return {
     trading,
+    tradingAlchemyFailover,
+    tradingFailover,
     data,
-    emergency,
-    heliusDisabled: true,
+    dataFailover,
+    background,
+    emergencyPaid,
+    publics,
+    heliusDisabled: false,
   };
 }
 
-/**
- * Flat list for config.rpc.endpoints boot wiring:
- * [0] Trading (or Data if Trading missing, or Emergency)
- * [1] Data (distinct from Trading when possible)
- * [2+] Emergency
- */
 export function rpcEndpointsFromEnv(): Array<{ url: string; label: string }> {
   const s = rpcEndpointsSimple();
   const out: Array<{ url: string; label: string }> = [];
   const seen = new Set<string>();
-  const push = (e: { url: string; label: string } | null) => {
+  const push = (e: RpcEndpointRef | null | undefined) => {
     if (!e?.url) return;
     const key = e.url.toLowerCase();
     if (seen.has(key)) return;
@@ -138,18 +220,20 @@ export function rpcEndpointsFromEnv(): Array<{ url: string; label: string }> {
     out.push(e);
   };
   push(s.trading);
+  push(s.tradingAlchemyFailover);
+  push(s.tradingFailover);
   push(s.data);
-  push(s.emergency);
+  push(s.dataFailover);
+  push(s.background);
+  push(s.emergencyPaid);
+  for (const p of s.publics) push(p);
   if (out.length === 0) {
-    out.push({
-      url: 'https://solana-rpc.publicnode.com',
-      label: 'publicnode',
-    });
+    out.push({ url: PUBLICNODE_RPC_URL, label: 'publicnode' });
   }
   return out;
 }
 
-/** @deprecated — classic/multiLane discovery unused; kept for import compatibility. */
+/** @deprecated — kept for import compatibility. */
 export function discoverAllRpcEndpoints(): Array<{
   url: string;
   label: string;
@@ -163,12 +247,19 @@ export function discoverAllRpcEndpoints(): Array<{
     paid: boolean;
     emergencyOnly: boolean;
   }> = [];
-  if (s.trading) {
-    out.push({ ...s.trading, paid: true, emergencyOnly: false });
+  const push = (e: RpcEndpointRef | null, paid: boolean, emergencyOnly: boolean) => {
+    if (!e) return;
+    out.push({ ...e, paid, emergencyOnly });
+  };
+  push(s.trading, true, false);
+  push(s.tradingAlchemyFailover, true, false);
+  push(s.tradingFailover, true, false);
+  push(s.data, true, false);
+  push(s.dataFailover, true, false);
+  push(s.background, true, false);
+  push(s.emergencyPaid, true, true);
+  for (const p of s.publics) {
+    out.push({ ...p, paid: false, emergencyOnly: true });
   }
-  if (s.data) {
-    out.push({ ...s.data, paid: true, emergencyOnly: false });
-  }
-  out.push({ ...s.emergency, paid: false, emergencyOnly: true });
   return out;
 }

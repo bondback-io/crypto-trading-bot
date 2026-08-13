@@ -735,6 +735,16 @@ async function rebuildCandidates(): Promise<void> {
 export async function runZionScannerPollOnce(): Promise<void> {
   if (pollInFlight) return;
   if (!zionCfg()?.enabled || zionCfg().scanner?.enabled === false) return;
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('zion_scanner')) {
+      lastError = 'RPC workload OFF (test)';
+      return;
+    }
+  } catch {
+    /* */
+  }
   if (Date.now() < rpcCooldownUntil) {
     lastError = `RPC cooldown until ${new Date(rpcCooldownUntil).toISOString()}`;
     return;

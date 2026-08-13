@@ -1066,10 +1066,11 @@ export async function executeApprovedOffer(
   }
 
   try {
+    // Place Trade send path must use Trading (not Zion scanner / Data).
     const result = await runWithRpcRole(
-      getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad)),
+      getRpcRoleFor('zion_place_trade', Boolean(config.rpc?.shareLoad)),
       () => executeBuy(offer.mint, offer.symbol, buyOpts),
-      'zion'
+      'zion_place_trade'
     );
     if (autoProfileStamp) {
       try {

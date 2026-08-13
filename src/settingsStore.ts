@@ -136,6 +136,8 @@ export interface PersistedBotSettings {
   rpcMode?: 'classic' | 'multiLane' | 'simple';
   /** Favourites soft-watch wallet cap (0 = pause) */
   rpcSoftWatchCap?: number | null;
+  /** Stats → RPC workload kill-switches (test thrashing / latency) */
+  rpcWorkloads?: Partial<Record<string, boolean>>;
   /** Micro-bot Learning Mode (global gate overlays + fairness) */
   learningMode?: {
     enabled?: boolean;

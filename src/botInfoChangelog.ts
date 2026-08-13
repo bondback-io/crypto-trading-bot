@@ -43,6 +43,26 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.322',
+    title: 'RPC workload kill-switches + Alchemy Trading failover',
+    sections: ['execution', 'overview'],
+    items: [
+      'Stats → RPC: toggle each RPC-calling subsystem ON/OFF with lane labels (Trading/Data/Background) to isolate thrashing and latency; persists in settings.',
+      'Trading failover order is now Helius → Alchemy BACKUP → Helius BACKUP → Emergency (no longer Helius-only hops).',
+      'Workloads cover Favourites, scanners, Zion, migration, MEV, metrics/anti-rug, open marks, health probes, and more.',
+    ],
+  },
+  {
+    version: '1.2.321',
+    title: 'RPC 6+3 lanes: Trading / Data / Background / Emergency',
+    sections: ['execution', 'overview'],
+    items: [
+      'Wired 6 paid + 3 public endpoints: Trading=Helius (+BACKUP), Data=Alchemy (+BACKUP), Background=Alchemy BACKUP2→PUBLICNODE/RPC_URL/RPC_BETA, Emergency=Helius BACKUP2→publics.',
+      'New Background lane for Favourites soft-watch, activity, import, holdings discovery, and health-probe CU — never borrows Trading/Data preferred keys.',
+      'Zion Place Trade send path on Trading; Zion balance/sigs on Background. Health UI shows Trading/Data/Background/Emergency congestion strips.',
+    ],
+  },
+  {
     version: '1.2.320',
     title: 'Wipe RPC to Alchemy Trading / Data + public Emergency',
     sections: ['execution', 'overview'],

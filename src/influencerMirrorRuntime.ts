@@ -614,10 +614,14 @@ async function fetchWalletTokenMints(
       require('./connection') as typeof import('./connection');
     const owner = new PublicKey(address);
     const programId = new PublicKey(TOKEN_PROGRAM_ID);
-    const resp = await runWithRpcRole('secondary', async () => {
-      const conn = getConnection();
-      return conn.getParsedTokenAccountsByOwner(owner, { programId });
-    });
+    const resp = await runWithRpcRole(
+      'background',
+      async () => {
+        const conn = getConnection();
+        return conn.getParsedTokenAccountsByOwner(owner, { programId });
+      },
+      'influencer_holdings'
+    );
     const out: InfluencerTokenSnap[] = [];
     const now = Date.now();
     for (const row of resp?.value || []) {

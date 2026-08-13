@@ -6,12 +6,13 @@
 
 import { config } from './config';
 import { logger, errorToMeta } from './logger';
-import { isRpcGateSkipError } from './connection';
+import { isRpcGateSkipError, runWithRpcRole } from './connection';
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
 import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
+import { getRpcRoleFor } from './rpcRouting';
 import {
   fetchBondingCurve,
   getCachedBondingCurve,
@@ -281,7 +282,13 @@ async function enrichCurves(
         if (!mint) continue;
         try {
           const cached = getCachedBondingCurve(mint);
-          const state = cached || (await fetchBondingCurve(mint));
+          const state =
+            cached ||
+            (await runWithRpcRole(
+              getRpcRoleFor('alpha_scan'),
+              () => fetchBondingCurve(mint),
+              'alpha_scan'
+            ));
           if (!state || state.source === 'none') {
             out.set(mint, {
               progressPct: null,
@@ -474,6 +481,13 @@ export async function runAlphaScanFeedPass(): Promise<number> {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (!isSmartBotProfilesEnabled()) return 0;
   if (config.tradeProfiles?.enabled === false) return 0;
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('alpha_scan')) return 0;
+  } catch {
+    /* */
+  }
   if (!hasJupiterApiKey()) {
     lastError = 'No JUPITER_API_KEY';
     return 0;

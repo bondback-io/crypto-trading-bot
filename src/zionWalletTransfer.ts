@@ -337,8 +337,10 @@ function isValidSolanaAddress(addr: string): boolean {
 async function balanceForAddress(address: string): Promise<number | null> {
   try {
     const pk = new PublicKey(address);
-    const lamports = await withRpc('zionWalletBalance', (conn: Connection) =>
-      conn.getBalance(pk)
+    const lamports = await withRpc(
+      'zionWalletBalance',
+      (conn: Connection) => conn.getBalance(pk),
+      'background'
     );
     return lamports / LAMPORTS_PER_SOL;
   } catch (err) {
@@ -356,8 +358,10 @@ async function recentTxs(
 ): Promise<Array<{ signature: string; slot: number; err: unknown; blockTime: number | null }>> {
   try {
     const pk = new PublicKey(address);
-    const sigs = await withRpc('zionWalletSigs', (conn: Connection) =>
-      conn.getSignaturesForAddress(pk, { limit })
+    const sigs = await withRpc(
+      'zionWalletSigs',
+      (conn: Connection) => conn.getSignaturesForAddress(pk, { limit }),
+      'background'
     );
     return (sigs || []).map((s) => ({
       signature: s.signature,
@@ -893,22 +897,26 @@ async function executeTransfer(p: PendingTransfer): Promise<string> {
       })
     );
     tx.feePayer = kp.publicKey;
-    const sig = await withRpc('zionTransferSend', async (conn: Connection) => {
-      const { blockhash, lastValidBlockHeight } =
-        await conn.getLatestBlockhash('confirmed');
-      tx.recentBlockhash = blockhash;
-      tx.lastValidBlockHeight = lastValidBlockHeight;
-      tx.sign(kp);
-      const signature = await conn.sendRawTransaction(tx.serialize(), {
-        skipPreflight: false,
-        maxRetries: 3,
-      });
-      await conn.confirmTransaction(
-        { signature, blockhash, lastValidBlockHeight },
-        'confirmed'
-      );
-      return signature;
-    });
+    const sig = await withRpc(
+      'zionTransferSend',
+      async (conn: Connection) => {
+        const { blockhash, lastValidBlockHeight } =
+          await conn.getLatestBlockhash('confirmed');
+        tx.recentBlockhash = blockhash;
+        tx.lastValidBlockHeight = lastValidBlockHeight;
+        tx.sign(kp);
+        const signature = await conn.sendRawTransaction(tx.serialize(), {
+          skipPreflight: false,
+          maxRetries: 3,
+        });
+        await conn.confirmTransaction(
+          { signature, blockhash, lastValidBlockHeight },
+          'confirmed'
+        );
+        return signature;
+      },
+      'primary'
+    );
     lastTransferAt = Date.now();
     audit({
       at: Date.now(),

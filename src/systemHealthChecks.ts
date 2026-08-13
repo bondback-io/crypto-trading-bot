@@ -106,7 +106,7 @@ function checkRpc(): HealthIssue[] {
         title: 'Trading on Emergency public RPC',
         detail: cong.trading.congestion.cause,
         recommendation:
-          'Check ALCHEMY_API_KEY_BACKUP — Trading should recover automatically when healthy.',
+          'Check HELIUS_API_KEY / ALCHEMY_API_KEY_BACKUP — Trading should recover automatically when healthy.',
         sustainedHint: true,
       });
     }
@@ -117,9 +117,9 @@ function checkRpc(): HealthIssue[] {
         area: 'rpc',
         severity: 'watch',
         title: 'RPC gate stressed (backlog / concurrency)',
-        detail: `data queued=${stats.gate.lanes?.secondary?.queued ?? '?'}`,
+        detail: `data queued=${stats.gate.lanes?.secondary?.queued ?? '?'} background queued=${stats.gate.lanes?.background?.queued ?? '?'}`,
         recommendation:
-          'Raise Poll intervals slightly or lower soft-watch cap; Data backlog is growing.',
+          'Raise Poll intervals slightly or lower soft-watch cap; Data/Background backlog is growing.',
       });
     }
 
@@ -134,9 +134,9 @@ function checkRpc(): HealthIssue[] {
         area: 'rpc',
         severity: 'watch',
         title: 'Scanner/Favourites auto-slowed (high skips)',
-        detail: `slowFactor=${lc.scannerSlowFactor} dataSkips=${lc.secondarySkipsRecent}/min`,
+        detail: `slowFactor=${lc.scannerSlowFactor} dataSkips=${lc.secondarySkipsRecent}/min bgSkips=${lc.backgroundSkipsRecent ?? 0}/min`,
         recommendation:
-          'Normal under congestion — if sustained, check Trading/Data RPC health.',
+          'Normal under congestion — if sustained, check Trading/Data/Background RPC health.',
       });
     }
   } catch {

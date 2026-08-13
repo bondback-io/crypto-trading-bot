@@ -211,7 +211,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       id: 'wallet_poll',
       lane: walletPollLane,
       intervalMs: walletPoll,
-      note: `Favourites / wallet buy detection on Data lane (${softCapNote})`,
+      note: `Favourites / wallet buy detection on Background lane (${softCapNote})`,
     },
     {
       id: 'migration',
@@ -247,13 +247,13 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       id: 'activity',
       lane: activityLane,
       intervalMs: Math.max(walletPoll * 4, 60_000),
-      note: 'Wallet activity refresh (Data lane)',
+      note: 'Wallet activity refresh (Background lane)',
     },
     {
       id: 'health',
       lane: 'all',
       intervalMs: healthPoll,
-      note: 'RPC health getSlot — Trading + Data; Emergency only when active',
+      note: 'RPC health getSlot — Background-preferred probes; Trading/Data each tick; Emergency when active',
     },
   ];
 
@@ -270,14 +270,22 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   const walletPollStressed =
     secondaryStressed || lastPollRateLimited;
 
-  if (!process.env.ALCHEMY_API_KEY_BACKUP?.trim() && !process.env.ALCHEMY_RPC_URL_BACKUP?.trim()) {
+  if (!process.env.HELIUS_API_KEY?.trim() && !process.env.HELIUS_RPC_URL?.trim()) {
     chokeHints.push(
-      'Missing ALCHEMY_API_KEY_BACKUP — Trading lane has no dedicated Alchemy BACKUP key.'
+      'Missing HELIUS_API_KEY — Trading lane has no dedicated Helius key.'
     );
   }
   if (!process.env.ALCHEMY_API_KEY?.trim() && !process.env.ALCHEMY_RPC_URL?.trim()) {
     chokeHints.push(
       'Missing ALCHEMY_API_KEY — Data lane has no dedicated Alchemy key.'
+    );
+  }
+  if (
+    !process.env.ALCHEMY_API_KEY_BACKUP2?.trim() &&
+    !process.env.ALCHEMY_RPC_URL_BACKUP2?.trim()
+  ) {
+    chokeHints.push(
+      'Missing ALCHEMY_API_KEY_BACKUP2 — Background falls through to public RPCs (Favourites soft-watch).'
     );
   }
 
@@ -317,7 +325,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   }
   if (primary.public) {
     chokeHints.push(
-      'Trading is on a public RPC — set ALCHEMY_API_KEY_BACKUP for dedicated Trading CU.'
+      'Trading is on a public RPC — set HELIUS_API_KEY (preferred) and ALCHEMY_API_KEY_BACKUP (first failover).'
     );
   }
   if (lastPollRateLimited) {
@@ -325,7 +333,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   }
   if (rpc.lanesShareEndpoint) {
     chokeHints.push(
-      'Trading and Data share one URL — set distinct ALCHEMY_API_KEY_BACKUP vs ALCHEMY_API_KEY.'
+      'Trading and Data share one URL — set distinct HELIUS_API_KEY vs ALCHEMY_API_KEY.'
     );
   }
   if (rpc.warning) {

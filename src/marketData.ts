@@ -2087,8 +2087,16 @@ async function resolveOnchainBondingMark(
   try {
     const { fetchBondingCurve, estimateBondingCurvePriceSol } =
       require('./bondingCurve') as typeof import('./bondingCurve');
+    const { runWithRpcRole } =
+      require('./connection') as typeof import('./connection');
+    const { getRpcRoleFor } =
+      require('./rpcRouting') as typeof import('./rpcRouting');
     const state = await Promise.race([
-      fetchBondingCurve(mint),
+      runWithRpcRole(
+        getRpcRoleFor('open_mark'),
+        () => fetchBondingCurve(mint),
+        'open_mark'
+      ),
       sleep(4_000).then(() => null),
     ]);
     if (!state || state.source === 'none') return null;
