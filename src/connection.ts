@@ -579,6 +579,14 @@ function meteredFetch(endpointLabel: string) {
           latencyMs,
         });
       }
+      // Drive lane EWMA from real JSON-RPC traffic (not only health probes).
+      const idx = endpoints.findIndex(
+        (e) => e.endpoint.label === endpointLabel
+      );
+      if (idx >= 0) {
+        if (ok) recordSuccess(idx, latencyMs);
+        else recordFailure(idx, `HTTP ${res.status}`);
+      }
       return res;
     } catch (err) {
       const latencyMs = Date.now() - t0;
@@ -589,6 +597,15 @@ function meteredFetch(endpointLabel: string) {
           ok: false,
           latencyMs,
         });
+      }
+      const idx = endpoints.findIndex(
+        (e) => e.endpoint.label === endpointLabel
+      );
+      if (idx >= 0) {
+        recordFailure(
+          idx,
+          err instanceof Error ? err.message : String(err)
+        );
       }
       const name = err instanceof Error ? err.name : '';
       const msg = err instanceof Error ? err.message : String(err);
@@ -1818,9 +1835,13 @@ function recordSuccess(index: number, latencyMs: number): void {
   state.lastCallLatencyMs = sample;
   const feature = rpcFeatureAls.getStore() || 'ungated';
   const isProbe = feature === 'health_probe';
-  // Health probes must not dominate lane EWMA / soft-failover — they inflate
-  // Critical/Scanners when the preferred endpoint is idle or on a weak public URL.
-  if (!isProbe) {
+  // Health probes: soft-seed EWMA only when empty so UI isn't blank before
+  // first real call; they must not dominate sticky-lane latency after traffic.
+  if (isProbe) {
+    if (state.latencyMs == null) {
+      state.latencyMs = sample;
+    }
+  } else {
     state.latencyMs =
       state.latencyMs == null
         ? sample

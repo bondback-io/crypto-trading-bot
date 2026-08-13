@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.316',
+    title: 'Drive lane latency EWMA from real RPC traffic',
+    sections: ['execution', 'overview'],
+    items: [
+      'Sticky Critical/Scanners latency now updates from metered JSON-RPC calls (not only health probes), so EWMA is no longer blank/null after probe exclusion.',
+      'Probes may soft-seed an empty EWMA once but still cannot dominate lane stress after real traffic.',
+    ],
+  },
+  {
     version: '1.2.315',
     title: 'RPC bottleneck relief + Render-readable diagnostics',
     sections: ['execution', 'overview'],
