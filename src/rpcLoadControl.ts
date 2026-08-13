@@ -1,43 +1,47 @@
 /**
- * Adaptive RPC load control — shed scanner/utility work when lanes stress,
- * without touching Critical trade-entry paths.
+ * Adaptive RPC load control — shed scanner/Favourites work when lanes stress,
+ * without touching Trading trade-entry paths.
  *
- * Scanner slowdown is own-lane only (secondary skips / Scanners latency).
- * When Scanners RPC is healthy (~low EWMA), low-pri enrich skips must NOT
+ * Scanner slowdown is own-lane only (secondary skips / Data latency).
+ * When Data RPC is healthy (~low EWMA), low-pri enrich skips must NOT
  * latch scanner×3 and starve Market/Alpha/Zion signal intake.
- * Critical stress still sheds Favourites/utility, never raises scanner×.
- * Utility weak public sheds Favourites hard without latching global STRESSED.
+ * Trading stress still sheds Favourites first, never raises scanner×.
+ * Favourites ride Data — shed-first under Data pressure (no utilityWeakPublic).
  */
 import type { RpcGateRole } from './rpcGate';
 
-export type DegradedBy = 'none' | 'critical' | 'scanners' | 'utility';
+export type DegradedBy = 'none' | 'trading' | 'data' | 'critical' | 'scanners';
 
 export type RpcLoadControlSnapshot = {
   /** 1 = normal; higher = slower (e.g. 2 = half rate). */
   scannerSlowFactor: number;
+  /** Favourites soft-watch slow factor (legacy name utilitySlowFactor). */
   utilitySlowFactor: number;
-  /** True when background work should yield for Critical/Helius. */
+  /** Alias for Favourites shed factor. */
+  favouritesSlowFactor: number;
+  /** True when background work should yield for Trading. */
   shedBackground: boolean;
   /**
-   * True when shedBackground is protecting a paid Critical lane.
-   * False when Critical is itself weak public — Favourites must not hard-stop
-   * from Critical shed alone (utility hard-shed is separate).
+   * True when shedBackground is protecting a paid Trading lane.
+   * False when Trading is itself weak public — Favourites must not hard-stop
+   * from Trading shed alone (favourites hard-shed is separate).
    */
   shedProtectsPaidCritical: boolean;
   /**
    * True when scanner× > 1 and only secondary skips/latency drove it
-   * (Critical/utility stress did not raise scanner×).
+   * (Trading stress did not raise scanner×).
    */
   throttledByOwnLaneOnly: boolean;
-  /** Scanners preferred latency healthy enough to protect core signal intake. */
+  /** Data preferred latency healthy enough to protect core signal intake. */
   signalsRpcHealthy: boolean;
   reasons: string[];
   criticalReasons: string[];
   utilityReasons: string[];
   scannerReasons: string[];
   degradedBy: DegradedBy;
-  /** Utility-only hard shed (weak public / high utility×) — not Critical shed. */
+  /** Favourites hard shed — legacy utilityShedHard alias. */
   utilityShedHard: boolean;
+  favouritesShedHard: boolean;
   secondarySkipsRecent: number;
   updatedAt: number;
 };
@@ -81,6 +85,7 @@ let lastTickBypassLogAt = 0;
 let lastSnapshot: RpcLoadControlSnapshot = {
   scannerSlowFactor: 1,
   utilitySlowFactor: 1,
+  favouritesSlowFactor: 1,
   shedBackground: false,
   shedProtectsPaidCritical: false,
   throttledByOwnLaneOnly: false,
@@ -91,6 +96,7 @@ let lastSnapshot: RpcLoadControlSnapshot = {
   scannerReasons: [],
   degradedBy: 'none',
   utilityShedHard: false,
+  favouritesShedHard: false,
   secondarySkipsRecent: 0,
   updatedAt: Date.now(),
 };
@@ -331,35 +337,34 @@ function recompute(external?: {
 
   const uLat = external?.utilityLatencyMs;
   let utilityShedHard = false;
-  if (external?.utilityWeakPublic) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 3.5);
-    utilityReasons.push('Utility on weak public RPC → hard-shed Favourites/activity');
-    utilityShedHard = true;
+  // Favourites ride Data — shed-first under Data pressure (no weak-public Utility lane).
+  if (scannerSlowFactor >= 2 || (sLat != null && sLat >= 400)) {
+    utilitySlowFactor = Math.max(utilitySlowFactor, scannerSlowFactor >= 3 ? 3 : 2);
+    utilityReasons.push(
+      `Data pressure (scanner×${scannerSlowFactor}` +
+        (sLat != null ? ` ewma ${Math.round(sLat)}ms` : '') +
+        ') → shed Favourites first'
+    );
+    if (scannerSlowFactor >= 3) utilityShedHard = true;
   }
-  if (external?.utilityFailover) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    utilityReasons.push('Utility failover → reduce utility workload');
-    utilityShedHard = true;
+  if (external?.utilityWeakPublic) {
+    // Legacy signal ignored — Favourites no longer on public sticky.
   }
   if (uLat != null && uLat >= 800) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 3);
-    utilityReasons.push(`Utility latency ${Math.round(uLat)}ms → hard slow polls`);
-    utilityShedHard = true;
-  } else if (uLat != null && uLat >= 500) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-    utilityReasons.push(`Utility latency ${Math.round(uLat)}ms → soft slowdown`);
+    utilityReasons.push(`Favourites host latency ${Math.round(uLat)}ms → soft slow`);
   }
 
   if (sLat != null && sLat >= 600) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    scannerReasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
+    scannerReasons.push(`Data latency ${Math.round(sLat)}ms → slow scanners`);
   }
 
-  // Absolute heal: healthy Scanners + not saturated → never hard ×3.
+  // Absolute heal: healthy Data + not saturated → never hard ×3.
   if (scannersHealthy && scannerSlowFactor >= 3) {
     scannerSlowFactor = 1.5;
     scannerReasons.push(
-      `healed ×3→×1.5 — Scanners healthy (${Math.round(sLat ?? 0)}ms)`
+      `healed ×3→×1.5 — Data healthy (${Math.round(sLat ?? 0)}ms)`
     );
   }
 
@@ -377,16 +382,16 @@ function recompute(external?: {
 
   let degradedBy: DegradedBy = 'none';
   if (shedBackground || (pLat != null && pLat >= 450 && paidCritical)) {
-    degradedBy = 'critical';
+    degradedBy = 'trading';
   } else if (scannerSlowFactor >= 3) {
-    degradedBy = 'scanners';
-  } else if (utilityShedHard || utilitySlowFactor >= 2.5) {
-    degradedBy = 'utility';
+    degradedBy = 'data';
   }
+  // Never degradedBy=utility — public weakness alone must not paint STRESSED.
 
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
     utilitySlowFactor: Math.min(4, utilitySlowFactor),
+    favouritesSlowFactor: Math.min(4, utilitySlowFactor),
     shedBackground,
     shedProtectsPaidCritical,
     throttledByOwnLaneOnly,
@@ -397,6 +402,7 @@ function recompute(external?: {
     scannerReasons,
     degradedBy,
     utilityShedHard,
+    favouritesShedHard: utilityShedHard,
     secondarySkipsRecent: secSkip,
     updatedAt: now,
   };
@@ -425,8 +431,8 @@ function recompute(external?: {
   if (utilityShedHard && now - lastUtilityShedHardLogAt > 20_000) {
     lastUtilityShedHardLogAt = now;
     console.warn(
-      `[utility_shed_hard] utility×${lastSnapshot.utilitySlowFactor} ` +
-        `— ${utilityReasons.join('; ') || 'utility pressure'}`
+      `[favourites_shed_hard] fav×${lastSnapshot.utilitySlowFactor} ` +
+        `— ${utilityReasons.join('; ') || 'Data/Favourites pressure'}`
     );
   }
 }

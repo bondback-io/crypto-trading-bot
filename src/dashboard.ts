@@ -10857,7 +10857,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card rpc-health-panel" id="rpc-health-panel">
-          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Sticky lanes: Critical=ALCHEMY_API_KEY_BACKUP, Scanners=ALCHEMY_API_KEY, Utility=public. Helius + BACKUP2 are emergency-only (hard fail / 429 — not soft latency). Hosts only — API keys never shown."></span></div>
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Sticky lanes: Trading=ALCHEMY_API_KEY_BACKUP, Data=ALCHEMY_API_KEY (Favourites ride Data). Public emergency after Trading hard-fail only. Helius unused. Hosts only — API keys never shown."></span></div>
           <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
             <span class="rpc-health-chip" id="rpc-chip-all">All sticky</span>
             <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
@@ -10866,34 +10866,34 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="rpc-health-providers" class="rpc-lane-grid">
             <div class="rpc-prov-row" data-lane="critical">
-              <span class="rpc-prov-name">Critical</span>
+              <span class="rpc-prov-name">Trading</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-critical-pill">—</span></div>
               <span class="mint text-xs rpc-prov-meta" id="rpc-lane-critical-meta">Alchemy BACKUP sticky</span>
             </div>
             <div class="rpc-prov-row" data-lane="scanners">
-              <span class="rpc-prov-name">Scanners</span>
+              <span class="rpc-prov-name">Data</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-scanners-pill">—</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-scanners-meta">Alchemy sticky</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-scanners-meta">Alchemy sticky · Favourites here</span>
             </div>
             <div class="rpc-prov-row" data-lane="utility">
-              <span class="rpc-prov-name">Utility</span>
+              <span class="rpc-prov-name">Emergency</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-utility-pill">—</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-utility-meta">public — paid backups not used</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-utility-meta">public — Trading hard-fail only</span>
             </div>
             <div class="rpc-prov-row" data-lane="emergency">
-              <span class="rpc-prov-name">Emergency</span>
-              <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-emergency-pill">idle</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">idle · Helius emergency-only</span>
+              <span class="rpc-prov-name">Helius</span>
+              <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-emergency-pill">disabled</span></div>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">unused in 2-lane mode</span>
             </div>
           </div>
           <p class="rpc-plain" id="rpc-health-plain">—</p>
         </div>
 
         <div class="card" id="rpc-status-card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Sticky lanes when Share is ON: Critical=ALCHEMY_API_KEY_BACKUP, Scanners=ALCHEMY_API_KEY, Utility=public. HELIUS_API_KEY + ALCHEMY_API_KEY_BACKUP2 are emergency-only (hard fail / 429). Off dumps everything onto primary — not recommended."></span></div>
-          <div class="toggle-row mb-2"><span title="ON = sticky Alchemy Critical/Scanners + public Utility (recommended). Helius stays emergency-only. OFF = dump all work onto primary — not recommended.">Share RPC load (sticky lanes)</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Sticky lanes when Share is ON: Trading=ALCHEMY_API_KEY_BACKUP, Data=ALCHEMY_API_KEY (Favourites on Data). Public emergency after Trading hard-fail. Helius unused. Off dumps everything onto primary — not recommended."></span></div>
+          <div class="toggle-row mb-2"><span title="ON = sticky Alchemy Trading + Data (recommended). Favourites ride Data. Helius disabled. OFF = dump all work onto primary — not recommended.">Share RPC load (sticky lanes)</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
-            <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
+            <label class="ctl ctl-sm" title="Max Favourites wallets on Data soft-watch. Lower = less Data RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
               <span>Soft watch cap</span>
               <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
             </label>
@@ -10901,16 +10901,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → ALCHEMY_API_KEY_BACKUP (sticky)</strong> — entries, turbo, migration, live balance / marks</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → ALCHEMY_API_KEY (sticky)</strong> — Market / Alpha / Zion; never borrows Critical or Helius; own-lane throttle only</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public only</strong> — Favourites soft-watch, import, activity (never Helius / Critical / Scanners keys)</div>
-            <div class="mb-1"><strong style="color:#fca5a5">Emergency</strong> — HELIUS_API_KEY idle until Critical Alchemy hard-fails (429 / down ~30s); then BACKUP2 → Helius → Helius backup → QuickNode</div>
+            <div class="mb-1"><strong style="color:#34d399">Trading → ALCHEMY_API_KEY_BACKUP (sticky)</strong> — entries, turbo, migration, live balance / marks</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Data → ALCHEMY_API_KEY (sticky)</strong> — Market / Alpha / Zion + Favourites / activity (shed-first; never borrows Trading)</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Emergency → Public only</strong> — Trading hard-fail / 429 only (publicnode)</div>
+            <div class="mb-1"><strong style="color:#fca5a5">Helius</strong> — disabled / unused in 2-lane mode</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Sticky three-lane RPC (Share ON, recommended)</strong> — Critical = ALCHEMY_API_KEY_BACKUP, Scanners = ALCHEMY_API_KEY, Utility = public. Soft latency hops stay among Alchemy keys only; Helius is hard-fail emergency. No equal share-load.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Sticky 2-lane RPC (Share ON, recommended)</strong> — Trading = ALCHEMY_API_KEY_BACKUP, Data = ALCHEMY_API_KEY. Favourites ride Data under soft-watch caps. Public emergency only after Trading hard-fail. Helius unused.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Share OFF</strong> — dumps most work onto primary (not recommended).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email, GMGN/Kolscan HTTP, DexScreener marks.</div>
-            <div class="mint">Status polls are observational. Soft-watch starts ~45s after deploy. Under stress, Favourites/scanners shed automatically.</div>
+            <div class="mint">Status polls are observational. Soft-watch starts ~45s after deploy. Under stress, Favourites shed first; scanner core + Trading marks keep priority.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -26899,14 +26899,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         paintLaneCard('critical', 'set ALCHEMY_API_KEY_BACKUP');
         paintLaneCard('scanners', 'set ALCHEMY_RPC_URL or ALCHEMY_API_KEY');
-        paintLaneCard('utility', 'public utility');
+        paintLaneCard('utility', 'public emergency');
         const scanMeta = document.getElementById('rpc-lane-scanners-meta');
         if (scanMeta && lanes.scanners) {
           const lc = (rpcObj && rpcObj.loadControl) || {};
           const gSec = ((rpcObj && rpcObj.gate && rpcObj.gate.lanes) || {}).secondary || {};
           const bits = [];
           if (lc.throttledByOwnLaneOnly) bits.push('own-lane throttle');
-          else if ((lc.scannerSlowFactor || 1) > 1) bits.push('scanner×' + lc.scannerSlowFactor);
+          else if ((lc.scannerSlowFactor || 1) > 1) bits.push('data×' + lc.scannerSlowFactor);
           if (gSec.inFlight != null) bits.push('conc ' + gSec.inFlight + '/' + (gSec.maxConcurrent != null ? gSec.maxConcurrent : '—'));
           if (gSec.deduped) bits.push('dedupe ' + gSec.deduped);
           if (lc.secondarySkipsRecent) bits.push('skips60s ' + lc.secondarySkipsRecent);
@@ -26918,26 +26918,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const emerg = Array.isArray(lanes.emergency) ? lanes.emergency : [];
         const emergPill = document.getElementById('rpc-lane-emergency-pill');
         const emergMeta = document.getElementById('rpc-lane-emergency-meta');
-        const inUse = emerg.filter(function (e) { return e && e.inUse; });
-        const configured = emerg.filter(function (e) { return e && e.configured; });
+        const heliusInfo = (lanes.helius) || {};
+        const inUse = emerg.filter(function (e) { return e && e.inUse && e.label === 'public'; });
         if (emergPill) {
           emergPill.classList.remove('is-healthy', 'is-degraded', 'is-down', 'is-active');
-          if (inUse.length) {
-            emergPill.classList.add('is-degraded', 'is-active');
-            emergPill.textContent = 'IN USE · ' + inUse.map(function (e) { return e.label; }).join(', ');
-          } else if (configured.length) {
-            emergPill.classList.add('is-healthy');
-            emergPill.textContent = 'idle · Helius emergency-only';
-          } else {
-            emergPill.textContent = 'no backups configured';
-          }
+          emergPill.classList.add('is-healthy');
+          emergPill.textContent = heliusInfo.disabled !== false ? 'disabled' : 'unused';
         }
         if (emergMeta) {
-          emergMeta.textContent = configured.length
-            ? configured.map(function (e) {
-                return e.label + (e.host ? ' ' + e.host : '') + (e.inUse ? ' ACTIVE' : ' idle');
-              }).join(' · ')
-            : 'set HELIUS_API_KEY (emergency-only) / ALCHEMY_API_KEY_BACKUP2';
+          emergMeta.textContent = inUse.length
+            ? 'Trading on public emergency — Helius still unused'
+            : 'Helius unused · public emergency via Trading failover';
         }
         return;
       }
@@ -26976,7 +26967,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         rpcWrap.title =
           rpc.ok === false
             ? (rpc.warning || 'RPC unhealthy — wallet buys may not be detected')
-            : 'Critical lane: ' +
+            : 'Trading lane: ' +
               ((critLane.failover ? critLane.activeLabel : critLane.preferredLabel) ||
                 rpc.active ||
                 '—') +
@@ -27002,7 +26993,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         rpcLatEl.classList.toggle('is-bad', ms != null && ms >= 1200);
       }
       document.getElementById('rpc-summary').textContent =
-        'Critical lane: ' + ((rpc.lanes && rpc.lanes.critical && rpc.lanes.critical.activeLabel) || rpc.active || '—') +
+        'Trading lane: ' + ((rpc.lanes && rpc.lanes.critical && rpc.lanes.critical.activeLabel) || rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
         ' · Share load: ' + (rpc.shareLoad ? 'ON' : 'OFF') +
         ' · Soft watch: ' + (function () {
@@ -27048,16 +27039,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const s = rpc.secondary || {};
         const u = rpc.utility || {};
         laneSt.textContent =
-          'Critical: ' + (p.label || '—') +
+          'Trading: ' + (p.label || '—') +
           (p.failover ? ' (FAILOVER)' : '') +
           (p.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Scanners: ' + (s.label || '—') +
+          ' · Data: ' + (s.label || '—') +
           (s.failover ? ' (FAILOVER)' : '') +
           (s.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Utility: ' + (u.label || '—') +
-          (u.failover ? ' (FAILOVER)' : '') +
-          (u.healthy === false ? ' · preferred DOWN' : '') +
-          (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
+          ' · Emergency: ' + (u.label || '—') +
+          (u.failover ? ' (ACTIVE)' : ' idle') +
+          ' · Helius: disabled' +
+          (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct Alchemy keys)' : '');
       }
       const gateEl = document.getElementById('rpc-gate-status');
       if (gateEl) {
@@ -27065,8 +27056,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const L = g.lanes || {};
         const fmt = (role) => {
           const row = L[role] || {};
+          const title =
+            role === 'primary' ? 'Trading' :
+            role === 'secondary' ? 'Data' :
+            role === 'utility' ? 'Favourites' :
+            role.charAt(0).toUpperCase() + role.slice(1);
           const base =
-            role.charAt(0).toUpperCase() + role.slice(1) +
+            title +
             ' ' + (row.inFlight != null ? row.inFlight : '—') + '/' + (row.maxConcurrent != null ? row.maxConcurrent : '—') +
             ' q' + (row.queued != null ? row.queued : 0) +
             ' skip' + (row.skipped != null ? row.skipped : 0);
@@ -27086,7 +27082,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return base;
         };
         const stressBits = [];
-        if (g.stressed) stressBits.push('STRESSED Critical/Scanners');
+        if (g.stressed) stressBits.push('STRESSED Trading/Data');
         if (g.utilityStressed) stressBits.push('utility busy');
         if (g.stressedSince) {
           stressBits.push('since ' + Math.round((Date.now() - Number(g.stressedSince)) / 1000) + 's');
@@ -27127,11 +27123,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ' ' + (si.signalsPerMin || 0) + '/min'
           );
         }
-        if (rpc.criticalKeyIsolated) parts.push('Critical key isolated');
+        if (rpc.criticalKeyIsolated) parts.push('Trading/Data keys isolated');
         if (rpc.nonCriticalBlockedFromCritical) {
-          parts.push('blocked→Critical ' + rpc.nonCriticalBlockedFromCritical);
+          parts.push('blocked→Trading ' + rpc.nonCriticalBlockedFromCritical);
         }
-        if (rpc.utilityWeakPublic) parts.push('Utility=weak public (Favourites hard-shed)');
+        if (rpc.utilityWeakPublic) parts.push('Favourites soft-shed (legacy weak-public flag)');
         if (q.length) {
           parts.push(
             'Quarantine: ' + q.map(function (row) {
@@ -27217,10 +27213,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (rpcBody) {
         const eps = (rpc.endpoints || []).slice().sort(function (a, b) {
           const rank = function (e) {
-            if (e.lane === 'critical' || e.role === 'primary') return 10;
-            if (e.lane === 'scanners' || e.role === 'secondary') return 20;
-            if (e.lane === 'utility' || e.role === 'utility') return 30;
-            if (e.lane === 'emergency') return 40;
+            if (e.lane === 'trading' || e.lane === 'critical' || e.role === 'primary') return 10;
+            if (e.lane === 'data' || e.lane === 'scanners' || e.role === 'secondary') return 20;
+            if (e.lane === 'emergency' || e.lane === 'utility') return 30;
             return 90;
           };
           return rank(a) - rank(b);
@@ -27231,17 +27226,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               const lane =
                 e.lane ||
                 (e.role === 'primary'
-                  ? 'critical'
+                  ? 'trading'
                   : e.role === 'secondary'
-                    ? 'scanners'
+                    ? 'data'
                     : e.role || '—');
-              const label =
-                e.label ||
-                'rpc';
+              const laneTag =
+                lane === 'trading' || lane === 'critical'
+                  ? 'trading'
+                  : lane === 'data' || lane === 'scanners'
+                    ? 'data'
+                    : lane === 'utility'
+                      ? 'emergency'
+                      : lane;
+              const label = e.label || 'rpc';
               return \`
             <tr>
               <td title="\${e.url}">\${label}\${e.slot && e.slot !== 'solo' ? ' <span class="mint" style="opacity:0.75">(' + e.slot + ')</span>' : ''}</td>
-              <td>\${lane}</td>
+              <td>\${laneTag}</td>
               <td>\${e.healthy ? '✅' : '❌'}</td>
               <td>\${e.latencyMs != null ? e.latencyMs + 'ms' : '—'}</td>
               <td>\${e.successRate != null ? Number(e.successRate).toFixed(0) : '—'}% (\${e.successCount || 0}/\${(e.successCount || 0) + (e.failureCount || 0)})</td>
@@ -36203,7 +36204,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         if (st) {
           st.textContent = data.shareLoad
-            ? 'Share RPC load ON — Critical→Alchemy BACKUP, Scanners→Alchemy, Utility→public (Helius emergency-only)'
+            ? 'Share RPC load ON — Trading→Alchemy BACKUP, Data→Alchemy (Favourites on Data), Helius disabled'
             : 'Share RPC load OFF — legacy primary/secondary routing';
         }
         const shareAlloc = document.getElementById('rpc-share-alloc');

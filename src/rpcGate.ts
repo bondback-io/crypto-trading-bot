@@ -2,7 +2,7 @@
  * Per-lane RPC concurrency + rate limits + in-flight job dedupe.
  * Prevents unbounded parallel calls that choke providers a few minutes after boot.
  *
- * Global STRESSED is live Critical+Scanners only — never lifetime utility.skipped.
+ * Global STRESSED is live Trading+Data only — Favourites shed on Data, never a third lane.
  */
 
 /** Mirrors connection.RpcRole — kept local to avoid circular imports. */
@@ -38,7 +38,7 @@ export type RpcGateSnapshot = {
   backlog: number;
   /** Live Critical+Scanners pressure only (clears when those lanes quiet). */
   stressed: boolean;
-  /** Live utility queue/inFlight — Favourites defer, not global STRESSED. */
+  /** Favourites-on-Data pressure (legacy name utilityStressed). */
   utilityStressed: boolean;
   stressedSince: number | null;
 };
@@ -386,6 +386,10 @@ export async function acquireRpcLane(
   role: RpcGateRole,
   feature?: string
 ): Promise<{ release: () => void; decision: RpcGateDecision }> {
+  // Legacy utility acquires ride Data (Favourites / activity).
+  if (role === 'utility') {
+    return acquireRpcLane('secondary', feature);
+  }
   const limits = laneLimits(role);
   const lane = lanes[role];
   const critical = isCritical(feature);
@@ -691,15 +695,16 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
       skippedByReason: { ...lane.skippedByReason },
     };
   }
-  // Live Critical+Scanners only — never lifetime utility.skipped / hitConcurrency.
+  // Live Trading+Data only — Favourites ride secondary; no utility acquires.
   const stressed =
     out.primary.queued > 0 ||
     out.primary.inFlight >= out.primary.maxConcurrent ||
     out.secondary.queued > 2 ||
     out.secondary.inFlight >= out.secondary.maxConcurrent;
+  // Favourites share Data — surface secondary pressure for soft-watch defer.
   const utilityStressed =
-    out.utility.queued > 0 ||
-    out.utility.inFlight >= out.utility.maxConcurrent;
+    out.secondary.queued > 0 ||
+    out.secondary.inFlight >= out.secondary.maxConcurrent;
 
   const now = Date.now();
   if (stressed) {
@@ -709,8 +714,8 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
     if (now - lastDegradedClearedLogAt > 15_000) {
       lastDegradedClearedLogAt = now;
       console.warn(
-        `[degraded_cleared_critical_healthy] gate STRESSED cleared after ${Math.round(heldMs / 1000)}s ` +
-          `(Critical+Scanners live pressure gone)`
+        `[degraded_cleared_trading_healthy] gate STRESSED cleared after ${Math.round(heldMs / 1000)}s ` +
+          `(Trading+Data live pressure gone)`
       );
     }
     stressedSince = null;
@@ -726,67 +731,71 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
 }
 
 /**
- * Scanners defer only on own-lane saturation / own-lane ×3.
- * Utility yields when Critical busy or utility lane itself stressed.
+ * Scanners defer on own-lane saturation / own-lane ×3.
+ * Favourites (kind favourites|utility) defer when Trading budget tight or Data saturated.
  */
-export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = 'scanner'): {
+export function shouldDeferBackgroundForCritical(
+  kind: 'scanner' | 'utility' | 'favourites' = 'scanner'
+): {
   defer: boolean;
   reason: string | null;
 } {
   const snap = getRpcGateSnapshot();
   const p = snap.lanes.primary;
   const s = snap.lanes.secondary;
-  const u = snap.lanes.utility;
+  const favourites = kind === 'utility' || kind === 'favourites';
 
   try {
     const { getRpcLoadControlSnapshot } =
       require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     const load = getRpcLoadControlSnapshot();
-    // Own-lane ×3: hard-defer scanners (not Critical shed).
     if (kind === 'scanner' && load.scannerSlowFactor >= 3) {
       return {
         defer: true,
         reason: load.throttledByOwnLaneOnly
-          ? load.reasons.find((r) => /secondary|Scanners/i.test(r)) ||
+          ? load.reasons.find((r) => /secondary|Scanners|Data/i.test(r)) ||
             `own-lane scanner×${load.scannerSlowFactor}`
           : `scanner×${load.scannerSlowFactor}`,
       };
     }
-    if (kind === 'utility' && load.utilitySlowFactor >= 3) {
+    if (
+      favourites &&
+      (load.favouritesShedHard ||
+        load.utilityShedHard ||
+        load.utilitySlowFactor >= 3 ||
+        load.scannerSlowFactor >= 2)
+    ) {
       return {
         defer: true,
-        reason: `utility adaptive×${load.utilitySlowFactor}`,
+        reason: `Favourites shed-first (data×${load.scannerSlowFactor} fav×${load.utilitySlowFactor})`,
       };
     }
   } catch {
     /* */
   }
 
-  // Utility yields when Critical reserved budget is tight (keep ≥2 free slots).
   if (
-    kind === 'utility' &&
+    favourites &&
     (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 2))
   ) {
     return {
       defer: true,
-      reason: `Critical lane budget tight (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
+      reason: `Trading lane budget tight (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
     };
   }
-  // Use in-flight/queue only — lane.skipped is a lifetime counter and must NOT
-  // permanently disable scanners after a few early gate skips.
   if (
     kind === 'scanner' &&
     (s.queued >= 2 || s.inFlight >= s.maxConcurrent)
   ) {
     return {
       defer: true,
-      reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
+      reason: `Data lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
     };
   }
-  if (kind === 'utility' && (u.queued >= 2 || snap.utilityStressed)) {
+  if (favourites && (s.queued >= 2 || snap.utilityStressed)) {
     return {
       defer: true,
-      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued})`,
+      reason: `Data lane busy for Favourites (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
     };
   }
   return { defer: false, reason: null };

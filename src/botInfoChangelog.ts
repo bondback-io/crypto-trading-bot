@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.317',
+    title: 'Simplify RPC to Trading + Data (+ public emergency)',
+    sections: ['execution', 'overview'],
+    items: [
+      'Sticky 2-lane model: Trading=ALCHEMY_API_KEY_BACKUP, Data=ALCHEMY_API_KEY; Favourites/activity ride Data under soft-watch caps (shed-first). Public emergency only after Trading hard-fail; Helius unused.',
+      'No Utility sticky lane / no Helius probe or soft hops; degradedBy is trading|data only; Status cards rename Trading / Data / Emergency public / Helius disabled.',
+    ],
+  },
+  {
     version: '1.2.316',
     title: 'Drive lane latency EWMA from real RPC traffic',
     sections: ['execution', 'overview'],

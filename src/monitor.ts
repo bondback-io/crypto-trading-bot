@@ -1517,16 +1517,12 @@ function isRpcRateLimitError(err: unknown): boolean {
 }
 
 /**
- * Soft-throttle Favourites poll when the resolved URL is free/public OR when
- * Share ON routes wallet_poll to Utility (even after piggyback onto paid rpc-url).
- * Without this, Utility failover to a custom RPC drops the soft-watch cap and
- * floods Critical/Scanners fallbacks after ~30–60s.
+ * Soft-throttle Favourites poll always under Share ON (even on Alchemy Data) —
+ * Favourites are shed-first and must not flood Data/Trading.
  */
 function shouldSoftThrottleWalletPoll(rpcUrl: string): boolean {
   if (isSoftThrottleRpcUrl(rpcUrl)) return true;
-  const share = Boolean(config.rpc?.shareLoad);
-  if (!share) return false;
-  return getRpcRoleFor('wallet_poll', true) === 'utility';
+  return Boolean(config.rpc?.shareLoad);
 }
 
 /** Free Helius/Alchemy/public — gentle concurrency so boot seeding cannot crash Render. */
@@ -1637,14 +1633,25 @@ export function resolveSoftWatchCap(): {
       require('./rpcGate') as typeof import('./rpcGate');
     const load = getRpcLoadControlSnapshot();
     const gate = getRpcGateSnapshot();
-    if (load.shedBackground || gate.stressed || load.utilityShedHard) {
+    if (
+      load.shedBackground ||
+      gate.stressed ||
+      load.utilityShedHard ||
+      load.favouritesShedHard ||
+      load.scannerSlowFactor >= 2
+    ) {
       const tightened = Math.min(effectiveCap, 4);
       if (tightened < effectiveCap) {
         effectiveCap = tightened;
         pressureTightened = true;
       }
     }
-    if (load.utilityShedHard || load.utilitySlowFactor >= 3) {
+    if (
+      load.utilityShedHard ||
+      load.favouritesShedHard ||
+      load.utilitySlowFactor >= 3 ||
+      load.scannerSlowFactor >= 3
+    ) {
       const hard = Math.min(effectiveCap, 2);
       if (hard < effectiveCap) {
         effectiveCap = hard;
@@ -1869,7 +1876,7 @@ export function startMonitor(): void {
   const shareBoot = Boolean(config.rpc?.shareLoad);
   const softBoot =
     isSoftThrottleRpcUrl(getRpcUrl()) ||
-    (shareBoot && getRpcRoleFor('wallet_poll', true) === 'utility');
+    (shareBoot && getRpcRoleFor('wallet_poll', true) === 'secondary');
   // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
   const firstPollDelayMs = softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000;
   if (softWatchBootTimer) clearTimeout(softWatchBootTimer);
