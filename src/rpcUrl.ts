@@ -121,12 +121,46 @@ function resolvePublic(label: string, url: string): RpcEndpointRef {
 }
 
 /**
- * Trading ← ALCHEMY_API_KEY
- * Data ← HELIUS_API_KEY
- * Background ← PUBLICNODE (else RPC_URL)
- * Emergency ← the other of PUBLICNODE / RPC_URL
+ * UI-assigned Main / Emergency per lane (source of truth via rpcInventory).
+ * Falls back to env 2+2 defaults when inventory module unavailable.
  */
 export function rpcEndpointsSimple(): SimpleRpcEndpoints {
+  try {
+    const {
+      rpcEndpointsFromAssignments,
+    } = require('./rpcInventory') as typeof import('./rpcInventory');
+    const a = rpcEndpointsFromAssignments();
+    const publics: RpcEndpointRef[] = [];
+    const seen = new Set<string>();
+    for (const e of [
+      a.background,
+      a.backgroundEmergency,
+      a.tradingEmergency,
+      a.dataEmergency,
+    ]) {
+      if (!e?.url) continue;
+      const key = e.url.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      publics.push(e);
+    }
+    return {
+      trading: a.trading,
+      tradingAlchemyFailover: null,
+      tradingFailover: null,
+      data: a.data,
+      dataFailover: a.dataEmergency,
+      background: a.background,
+      emergencyPaid: null,
+      emergencyPublic: a.tradingEmergency,
+      publics,
+      heliusCold: [],
+      heliusDisabled: false,
+    };
+  } catch {
+    /* fall through */
+  }
+
   const trading = resolveAlchemyEndpoint(
     process.env.ALCHEMY_RPC_URL,
     process.env.ALCHEMY_API_KEY,
@@ -137,7 +171,6 @@ export function rpcEndpointsSimple(): SimpleRpcEndpoints {
     process.env.HELIUS_API_KEY,
     'helius'
   );
-
   const publicnodeEnv = (
     process.env.PUBLICNODE ||
     process.env.PUBLICNODE_RPC_URL ||
@@ -149,38 +182,31 @@ export function rpcEndpointsSimple(): SimpleRpcEndpoints {
       ? publicnodeEnv
       : PUBLICNODE_RPC_URL
   );
-
   const rpcUrlRaw = (process.env.RPC_URL || '').trim();
   const rpcUrlEp =
     rpcUrlRaw && looksLikeFullHttpUrl(rpcUrlRaw)
       ? resolvePublic('rpc-url', rpcUrlRaw)
       : null;
-
-  // Background prefers publicnode; Emergency = RPC_URL when it is a distinct URL.
-  // If RPC_URL is the only configured public (and matches publicnode), both lanes share it.
-  const background: RpcEndpointRef = publicnode;
   const emergencyPublic: RpcEndpointRef | null =
     rpcUrlEp && rpcUrlEp.url.toLowerCase() !== publicnode.url.toLowerCase()
       ? rpcUrlEp
       : null;
-
   const publics: RpcEndpointRef[] = [];
   const seen = new Set<string>();
-  for (const e of [background, emergencyPublic]) {
+  for (const e of [publicnode, emergencyPublic]) {
     if (!e?.url) continue;
     const key = e.url.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     publics.push(e);
   }
-
   return {
     trading,
     tradingAlchemyFailover: null,
     tradingFailover: null,
     data,
     dataFailover: null,
-    background,
+    background: publicnode,
     emergencyPaid: null,
     emergencyPublic,
     publics,

@@ -10868,7 +10868,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card rpc-health-panel" id="rpc-health-panel">
-          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="2 paid + 2 public: Trading=Alchemy, Data=Helius, Background=publicnode (or RPC_URL), Emergency=the other public. Hosts only — API keys never shown."></span></div>
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="UI-assigned Main / Emergency per Trading, Data, Background lane. Exclusive inventory ownership. Hosts only — API keys never shown."></span></div>
           <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
             <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
             <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
@@ -10897,7 +10897,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="rpc-prov-row" data-lane="emergency">
               <span class="rpc-prov-name">Emergency</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-emergency-pill">—</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">other public · idle</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">per-lane · idle</span>
               <span class="mint text-xs rpc-prov-cong" id="rpc-lane-emergency-cong">—</span>
             </div>
           </div>
@@ -10905,7 +10905,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
 
         <div class="card" id="rpc-status-card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Trading=Alchemy. Data=Helius. Background=publicnode (or RPC_URL). Emergency=the other public. Soft watch caps Favourites on Background."></span></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Assign exclusive Main (+ optional Emergency) per Trading / Data / Background from env inventory. Soft watch caps Favourites on Background."></span></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Background soft-watch. Lower = less Background RPC. 0 = pause Favourites watch. Default 12.">
               <span>Soft watch cap</span>
@@ -10914,18 +10914,58 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
-          <div id="rpc-simple-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8">
-            <div class="mb-1"><strong style="color:#34d399">Trading → Alchemy</strong> — hard-fail → Emergency public</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Data → Helius</strong> — scanners, signals, market/alpha/zion, metrics/anti-rug</div>
-            <div class="mb-1"><strong style="color:#a78bfa">Background → publicnode / RPC_URL</strong> — only when Favourites/activity/holdings/zion-read ON; else idle</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Emergency → the other public</strong> — Trading hard-fail only</div>
+          <div id="rpc-lane-assign" class="text-xs mb-3" style="line-height:1.45;border:1px solid rgba(51,65,85,0.45);border-radius:0.5rem;padding:0.65rem 0.75rem;background:rgba(15,23,42,0.35)">
+            <div class="mb-2"><strong style="color:#e2e8f0">Lane assignment</strong> <span class="mint" style="color:#64748b">— each inventory id used at most once</span></div>
+            <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+              <label class="ctl ctl-md" title="Trading Main endpoint">
+                <span style="color:#34d399">Trading Main</span>
+                <select id="rpc-assign-trading-main" onchange="onRpcLaneAssignChange()"></select>
+              </label>
+              <label class="ctl ctl-md" title="Trading Emergency (optional)">
+                <span style="color:#34d399">Trading Emergency</span>
+                <select id="rpc-assign-trading-emergency" onchange="onRpcLaneAssignChange()"></select>
+              </label>
+            </div>
+            <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+              <label class="ctl ctl-md" title="Data Main endpoint">
+                <span style="color:#38bdf8">Data Main</span>
+                <select id="rpc-assign-data-main" onchange="onRpcLaneAssignChange()"></select>
+              </label>
+              <label class="ctl ctl-md" title="Data Emergency (optional)">
+                <span style="color:#38bdf8">Data Emergency</span>
+                <select id="rpc-assign-data-emergency" onchange="onRpcLaneAssignChange()"></select>
+              </label>
+            </div>
+            <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+              <label class="ctl ctl-md" title="Background Main endpoint">
+                <span style="color:#a78bfa">Background Main</span>
+                <select id="rpc-assign-background-main" onchange="onRpcLaneAssignChange()"></select>
+              </label>
+              <label class="ctl ctl-md" title="Background Emergency (optional)">
+                <span style="color:#a78bfa">Background Emergency</span>
+                <select id="rpc-assign-background-emergency" onchange="onRpcLaneAssignChange()"></select>
+              </label>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button type="button" class="btn btn-primary text-xs" onclick="saveRpcLaneAssignments()" title="Validate exclusive ownership, persist, rebuild pool">Save / Apply</button>
+              <span class="mint text-xs" id="rpc-lane-assign-status">—</span>
+            </div>
+            <p class="mint text-xs mt-2" id="rpc-lane-assign-warn" style="color:#fbbf24;display:none">Trading or Data Main is empty — that lane will soft-fail.</p>
           </div>
+          <div id="rpc-simple-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8">
+            <div class="mb-1"><strong style="color:#34d399">Trading → UI Main</strong> — hard-fail → that lane’s Emergency</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Data → UI Main</strong> — scanners, signals, market/alpha/zion, metrics/anti-rug</div>
+            <div class="mb-1"><strong style="color:#a78bfa">Background → UI Main</strong> — only when Favourites/activity/holdings/zion-read ON; else idle</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Emergency → per-lane optional</strong> — exclusive inventory; unassigned keys never probed</div>
+          </div>
+          <div class="section-title text-sm mt-3 mb-1">Other <span class="tip" tabindex="0" data-tip="Master kill-switches that batch related workloads ON/OFF. Individual toggles below still work for fine A/B."></span></div>
+          <div id="rpc-workload-groups" class="text-xs mb-3" style="display:flex;flex-direction:column;gap:0.35rem"></div>
           <div class="section-title text-sm mt-3 mb-1">RPC workload toggles <span class="tip" tabindex="0" data-tip="Turn OFF subsystems that call Solana RPC to isolate thrashing / latency. Lane assignment shown per row. Persists in settings."></span></div>
           <p class="mint text-xs mb-2" style="color:#64748b;line-height:1.4">Test kill-switches — OFF skips that work (no RPC). Does not change strategy profiles.</p>
           <div id="rpc-workload-toggles" class="text-xs mb-3" style="display:flex;flex-direction:column;gap:0.35rem"></div>
           <span class="mint text-xs" id="rpc-workload-status">—</span>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">2+2 pool</strong> — Alchemy Trading + Helius Data + two publics (Background / Emergency). Probes rare (120s; 300s when all features OFF).</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">UI-assigned Main / Emergency per lane</strong> — exclusive inventory ownership. Probes rare (120s; 300s when all features OFF). Unassigned keys never probed.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener/Jupiter).</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
@@ -26849,7 +26889,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (plain) {
           plain.textContent =
             (rpcObj && rpcObj.warning) ||
-            (ok ? 'Trading/Data healthy (2+2 pool)' : 'RPC unhealthy') ||
+            (ok ? 'Trading/Data healthy (UI-assigned lanes)' : 'RPC unhealthy') ||
             '—';
         }
         function hostOf(url) {
@@ -26902,10 +26942,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               details;
           }
         }
-        paintLane('trading', t, 'set ALCHEMY_API_KEY');
-        paintLane('data', d, 'set HELIUS_API_KEY');
-        paintLane('background', b, 'set PUBLICNODE / RPC_URL');
-        paintLane('emergency', e, 'other public');
+        paintLane('trading', t, 'assign Trading Main');
+        paintLane('data', d, 'assign Data Main');
+        paintLane('background', b, 'assign Background Main');
+        paintLane('emergency', e, 'no Emergency assigned');
         const cp = document.getElementById('rpc-control-plane');
         if (cp && rpcObj) {
           const thrash = rpcObj.controlPlaneThrash
@@ -27111,6 +27151,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       try {
         paintRpcWorkloadToggles(rpc.workloads || []);
+      } catch (_) {}
+      try {
+        if (rpc.workloadGroups) paintRpcWorkloadGroups(rpc.workloadGroups);
+        else loadRpcWorkloadGroups();
+      } catch (_) {}
+      try {
+        if (rpc.laneAssignments) syncRpcLaneAssignFromStatus(rpc);
+        else if (!_rpcAssignLoaded) loadRpcLaneAssignments();
       } catch (_) {}
       const rpcBanner = document.getElementById('rpc-banner');
       if (rpcBanner) {
@@ -36118,6 +36166,240 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    let _rpcInventoryCache = null;
+    let _rpcAssignDraft = null;
+    let _rpcAssignLoaded = false;
+
+    function rpcAssignSelectIds() {
+      return [
+        'rpc-assign-trading-main',
+        'rpc-assign-trading-emergency',
+        'rpc-assign-data-main',
+        'rpc-assign-data-emergency',
+        'rpc-assign-background-main',
+        'rpc-assign-background-emergency',
+      ];
+    }
+
+    function readRpcAssignDraftFromSelects() {
+      const val = function (id) {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        const v = el.value;
+        return v ? v : null;
+      };
+      return {
+        trading: {
+          main: val('rpc-assign-trading-main'),
+          emergency: val('rpc-assign-trading-emergency'),
+        },
+        data: {
+          main: val('rpc-assign-data-main'),
+          emergency: val('rpc-assign-data-emergency'),
+        },
+        background: {
+          main: val('rpc-assign-background-main'),
+          emergency: val('rpc-assign-background-emergency'),
+        },
+      };
+    }
+
+    function fillRpcLaneAssignSelects(inventory, assignments) {
+      const inv = Array.isArray(inventory) ? inventory : [];
+      _rpcInventoryCache = inv;
+      _rpcAssignDraft = assignments || {
+        trading: { main: null, emergency: null },
+        data: { main: null, emergency: null },
+        background: { main: null, emergency: null },
+      };
+      const slots = [
+        ['rpc-assign-trading-main', 'trading', 'main', false],
+        ['rpc-assign-trading-emergency', 'trading', 'emergency', true],
+        ['rpc-assign-data-main', 'data', 'main', false],
+        ['rpc-assign-data-emergency', 'data', 'emergency', true],
+        ['rpc-assign-background-main', 'background', 'main', false],
+        ['rpc-assign-background-emergency', 'background', 'emergency', true],
+      ];
+      const used = {};
+      for (let i = 0; i < slots.length; i++) {
+        const lane = slots[i][1];
+        const slot = slots[i][2];
+        const cur = (_rpcAssignDraft[lane] && _rpcAssignDraft[lane][slot]) || null;
+        if (cur) used[cur] = lane + '.' + slot;
+      }
+      for (let i = 0; i < slots.length; i++) {
+        const elId = slots[i][0];
+        const lane = slots[i][1];
+        const slot = slots[i][2];
+        const allowEmpty = slots[i][3];
+        const el = document.getElementById(elId);
+        if (!el) continue;
+        const selected =
+          (_rpcAssignDraft[lane] && _rpcAssignDraft[lane][slot]) || '';
+        let html = allowEmpty
+          ? '<option value="">None</option>'
+          : '<option value="">— select —</option>';
+        for (let j = 0; j < inv.length; j++) {
+          const item = inv[j];
+          const takenBy = used[item.id];
+          const mine = takenBy === lane + '.' + slot;
+          const disabled = takenBy && !mine ? ' disabled' : '';
+          const label =
+            (item.label || item.id) +
+            (item.host ? ' · ' + item.host : '') +
+            (takenBy && !mine ? ' (in use)' : '');
+          html +=
+            '<option value="' +
+            item.id +
+            '"' +
+            (selected === item.id ? ' selected' : '') +
+            disabled +
+            '>' +
+            label +
+            '</option>';
+        }
+        el.innerHTML = html;
+        if (selected) el.value = selected;
+      }
+      _rpcAssignLoaded = true;
+      onRpcLaneAssignChange();
+    }
+
+    function onRpcLaneAssignChange() {
+      _rpcAssignDraft = readRpcAssignDraftFromSelects();
+      const used = {};
+      const pairs = [
+        ['trading', 'main'],
+        ['trading', 'emergency'],
+        ['data', 'main'],
+        ['data', 'emergency'],
+        ['background', 'main'],
+        ['background', 'emergency'],
+      ];
+      for (let i = 0; i < pairs.length; i++) {
+        const id = _rpcAssignDraft[pairs[i][0]][pairs[i][1]];
+        if (id) used[id] = pairs[i][0] + '.' + pairs[i][1];
+      }
+      const ids = rpcAssignSelectIds();
+      for (let i = 0; i < ids.length; i++) {
+        const el = document.getElementById(ids[i]);
+        if (!el) continue;
+        const cur = el.value || '';
+        const opts = el.options;
+        for (let j = 0; j < opts.length; j++) {
+          const opt = opts[j];
+          if (!opt.value) {
+            opt.disabled = false;
+            continue;
+          }
+          const taken = used[opt.value];
+          opt.disabled = Boolean(taken && taken !== pairs[i][0] + '.' + pairs[i][1]);
+        }
+      }
+      const warn = document.getElementById('rpc-lane-assign-warn');
+      if (warn) {
+        const empty =
+          !_rpcAssignDraft.trading.main || !_rpcAssignDraft.data.main;
+        warn.style.display = empty ? 'block' : 'none';
+      }
+    }
+
+    async function loadRpcLaneAssignments() {
+      try {
+        const data = await fetchJSON('/api/rpc/inventory');
+        fillRpcLaneAssignSelects(data.inventory || [], data.assignments || null);
+        const st = document.getElementById('rpc-lane-assign-status');
+        if (st) {
+          st.textContent =
+            (data.inventory || []).length +
+            ' inventory endpoint' +
+            ((data.inventory || []).length === 1 ? '' : 's');
+          st.style.color = '#94a3b8';
+        }
+      } catch (err) {
+        const st = document.getElementById('rpc-lane-assign-status');
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
+    function syncRpcLaneAssignFromStatus(rpc) {
+      if (_rpcAssignLoaded && document.activeElement) {
+        const activeId = document.activeElement.id || '';
+        if (activeId.indexOf('rpc-assign-') === 0) return;
+      }
+      if (!_rpcInventoryCache) {
+        loadRpcLaneAssignments();
+        return;
+      }
+      if (rpc && rpc.laneAssignments) {
+        fillRpcLaneAssignSelects(_rpcInventoryCache, rpc.laneAssignments);
+      }
+    }
+
+    async function saveRpcLaneAssignments() {
+      const st = document.getElementById('rpc-lane-assign-status');
+      if (st) st.textContent = 'Saving…';
+      const assignments = readRpcAssignDraftFromSelects();
+      try {
+        const data = await fetchJSON('/api/rpc/lane-assignments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignments: assignments }),
+        });
+        fillRpcLaneAssignSelects(data.inventory || _rpcInventoryCache || [], data.assignments);
+        if (st) {
+          st.textContent = 'Applied — pool rebuilt';
+          st.style.color = '#34d399';
+        }
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        if (st) {
+          st.textContent = err.message || String(err);
+          st.style.color = '#f87171';
+        }
+      }
+    }
+
+    function paintRpcWorkloadGroups(groups) {
+      const host = document.getElementById('rpc-workload-groups');
+      if (!host) return;
+      const rows = Array.isArray(groups) ? groups : [];
+      if (!rows.length) {
+        host.innerHTML = '<span class="mint">Master toggles unavailable</span>';
+        return;
+      }
+      host.innerHTML = rows.map(function (g) {
+        const id = String(g.id || '');
+        const state = g.state || (g.enabled ? 'on' : 'off');
+        const on = state !== 'off';
+        const stateLabel =
+          state === 'mixed' ? 'mixed' : state === 'on' ? 'all on' : 'all off';
+        return (
+          '<div class="toggle-row" style="align-items:flex-start;gap:0.5rem;padding:0.25rem 0;border-top:1px solid rgba(51,65,85,0.35)">' +
+            '<div style="flex:1;min-width:0">' +
+              '<div><strong style="color:#e2e8f0">' + (g.label || id) + '</strong>' +
+              ' <span class="mint" style="opacity:0.8">· ' + stateLabel + '</span></div>' +
+              '<div class="mint" style="color:#64748b;margin-top:0.1rem">' + (g.note || '') + '</div>' +
+            '</div>' +
+            '<label class="switch" title="' + (on ? 'ON — related workloads enabled' : 'OFF — related workloads skipped') + '">' +
+              '<input type="checkbox" data-rpc-workload-group="' + id + '" ' + (on ? 'checked' : '') +
+              (state === 'mixed' ? ' data-mixed="1"' : '') +
+              ' onchange="toggleRpcWorkloadGroup(\\'' + id + '\\', this.checked)" />' +
+              '<span class="slider"></span>' +
+            '</label>' +
+          '</div>'
+        );
+      }).join('');
+    }
+
+    async function loadRpcWorkloadGroups() {
+      try {
+        const data = await fetchJSON('/api/rpc/workloads');
+        paintRpcWorkloadGroups(data.groups || []);
+        if (data.workloads) paintRpcWorkloadToggles(data.workloads);
+      } catch (_) {}
+    }
+
     function paintRpcWorkloadToggles(workloads) {
       const host = document.getElementById('rpc-workload-toggles');
       if (!host) return;
@@ -36161,6 +36443,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    async function toggleRpcWorkloadGroup(groupId, enabled) {
+      try {
+        const data = await fetchJSON('/api/rpc/workloads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group: groupId, enabled: !!enabled }),
+        });
+        paintRpcWorkloadGroups(data.groups || []);
+        paintRpcWorkloadToggles(data.workloads || []);
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        const inp = document.querySelector('input[data-rpc-workload-group="' + groupId + '"]');
+        if (inp) inp.checked = !enabled;
+        const st = document.getElementById('rpc-workload-status');
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
     async function toggleRpcWorkload(id, enabled) {
       const st = document.getElementById('rpc-workload-status');
       if (st) st.textContent = 'Saving…';
@@ -36171,6 +36471,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           body: JSON.stringify({ id: id, enabled: !!enabled }),
         });
         paintRpcWorkloadToggles(data.workloads || []);
+        paintRpcWorkloadGroups(data.groups || []);
         if (typeof refresh === 'function') refresh();
       } catch (err) {
         const inp = document.querySelector('input[data-rpc-workload="' + id + '"]');

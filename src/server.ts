@@ -942,9 +942,13 @@ export function createServer(): express.Application {
 
   app.get('/api/rpc/workloads', (_req: Request, res: Response) => {
     try {
-      const { getRpcWorkloadSnapshot } =
+      const { getRpcWorkloadSnapshot, getRpcWorkloadGroupSnapshot } =
         require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
-      res.json({ ok: true, workloads: getRpcWorkloadSnapshot() });
+      res.json({
+        ok: true,
+        workloads: getRpcWorkloadSnapshot(),
+        groups: getRpcWorkloadGroupSnapshot(),
+      });
     } catch (err) {
       res.status(500).json({
         ok: false,
@@ -955,9 +959,24 @@ export function createServer(): express.Application {
 
   app.post('/api/rpc/workloads', (req: Request, res: Response) => {
     try {
-      const { setRpcWorkloadsEnabled } =
+      const { setRpcWorkloadsEnabled, setRpcWorkloadGroupEnabled } =
         require('./config') as typeof import('./config');
       const body = (req.body ?? {}) as Record<string, unknown>;
+      if (body.group != null && typeof body.enabled === 'boolean') {
+        const workloads = setRpcWorkloadGroupEnabled(
+          String(body.group),
+          body.enabled
+        );
+        const { getRpcWorkloadGroupSnapshot } =
+          require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+        res.json({
+          ok: true,
+          workloads,
+          groups: getRpcWorkloadGroupSnapshot(),
+          rpc: getRpcStats(),
+        });
+        return;
+      }
       const patch: Record<string, boolean> = {};
       if (body.id != null && typeof body.enabled === 'boolean') {
         patch[String(body.id)] = body.enabled;
@@ -969,7 +988,96 @@ export function createServer(): express.Application {
         }
       }
       const workloads = setRpcWorkloadsEnabled(patch);
-      res.json({ ok: true, workloads, rpc: getRpcStats() });
+      const { getRpcWorkloadGroupSnapshot } =
+        require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+      res.json({
+        ok: true,
+        workloads,
+        groups: getRpcWorkloadGroupSnapshot(),
+        rpc: getRpcStats(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/rpc/inventory', (_req: Request, res: Response) => {
+    try {
+      const {
+        inventoryPublicView,
+        getRpcLaneAssignments,
+        exclusivityMap,
+      } = require('./rpcInventory') as typeof import('./rpcInventory');
+      const assignments = getRpcLaneAssignments();
+      res.json({
+        ok: true,
+        inventory: inventoryPublicView(),
+        assignments,
+        exclusivity: exclusivityMap(assignments),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/rpc/lane-assignments', (_req: Request, res: Response) => {
+    try {
+      const { getRpcLaneAssignments } =
+        require('./rpcInventory') as typeof import('./rpcInventory');
+      res.json({ ok: true, assignments: getRpcLaneAssignments() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/rpc/lane-assignments', (req: Request, res: Response) => {
+    try {
+      const { setRpcLaneAssignments } =
+        require('./config') as typeof import('./config');
+      const {
+        inventoryPublicView,
+        exclusivityMap,
+        emptyLaneAssignments,
+      } = require('./rpcInventory') as typeof import('./rpcInventory');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const src =
+        (body.assignments as Record<string, unknown> | undefined) || body;
+      const next = emptyLaneAssignments();
+      for (const lane of ['trading', 'data', 'background'] as const) {
+        const slot = src[lane] as
+          | { main?: unknown; emergency?: unknown }
+          | undefined;
+        if (!slot || typeof slot !== 'object') continue;
+        next[lane].main =
+          slot.main == null || slot.main === ''
+            ? null
+            : String(slot.main);
+        next[lane].emergency =
+          slot.emergency == null || slot.emergency === ''
+            ? null
+            : String(slot.emergency);
+      }
+      const result = setRpcLaneAssignments(next);
+      if (!result.ok) {
+        res.status(400).json({ ok: false, error: result.error });
+        return;
+      }
+      res.json({
+        ok: true,
+        assignments: result.assignments,
+        inventory: inventoryPublicView(),
+        exclusivity: exclusivityMap(result.assignments),
+        rpc: getRpcStats(),
+      });
     } catch (err) {
       res.status(500).json({
         ok: false,

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.328',
+    title: 'UI RPC lane assignment + Other master kill-switches',
+    sections: ['execution', 'overview'],
+    items: [
+      'Stats → RPC: assign exclusive Main (+ optional Emergency) per Trading / Data / Background from configured env inventory; unassigned keys never probed.',
+      'Assignments persist and rebuild the hot pool on Save / Apply; missing Main soft-fails with a warning.',
+      'Other master toggles batch Setup watches, Scanners, Favourites/Background reads, and Migration+MEV (individual workload toggles remain).',
+    ],
+  },
+  {
     version: '1.2.327',
     title: 'Emergency RPC idle isolation + residual caller tracer',
     sections: ['execution', 'overview'],

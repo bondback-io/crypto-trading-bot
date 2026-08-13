@@ -138,6 +138,12 @@ export interface PersistedBotSettings {
   rpcSoftWatchCap?: number | null;
   /** Stats → RPC workload kill-switches (test thrashing / latency) */
   rpcWorkloads?: Partial<Record<string, boolean>>;
+  /** Stats → RPC exclusive Main/Emergency inventory ids per lane */
+  rpcLaneAssignments?: {
+    trading?: { main?: string | null; emergency?: string | null };
+    data?: { main?: string | null; emergency?: string | null };
+    background?: { main?: string | null; emergency?: string | null };
+  };
   /** Micro-bot Learning Mode (global gate overlays + fairness) */
   learningMode?: {
     enabled?: boolean;

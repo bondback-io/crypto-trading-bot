@@ -349,6 +349,96 @@ export function setRpcWorkloads(
   return getRpcWorkloadEnabledMap();
 }
 
+/** Master kill-switch groups for Stats → RPC → Other. */
+export type RpcWorkloadGroupId =
+  | 'setup_watches'
+  | 'scanners'
+  | 'favourites_background'
+  | 'migration_mev';
+
+export const RPC_WORKLOAD_GROUPS: Record<
+  RpcWorkloadGroupId,
+  { label: string; note: string; ids: readonly RpcWorkloadId[] }
+> = {
+  setup_watches: {
+    label: 'Setup watches',
+    note: 'Dip/Steady, Trend Rider, Medium/Majors armed watches',
+    ids: ['dip_setup_watch', 'trend_setup_watch', 'majors_armed_watch'],
+  },
+  scanners: {
+    label: 'Scanners',
+    note: 'Market Scanner, Alpha Scan, Zion scanner',
+    ids: ['market_scanner', 'alpha_scan', 'zion_scanner'],
+  },
+  favourites_background: {
+    label: 'Favourites / Background reads',
+    note: 'Wallet poll, activity, influencer holdings, Zion wallet read',
+    ids: [
+      'wallet_poll',
+      'activity',
+      'influencer_holdings',
+      'zion_wallet_read',
+    ],
+  },
+  migration_mev: {
+    label: 'Migration + MEV',
+    note: 'Migration listener + MEV sandwich check',
+    ids: ['migration', 'mev'],
+  },
+};
+
+export function getRpcWorkloadGroupState(
+  groupId: RpcWorkloadGroupId
+): 'on' | 'off' | 'mixed' {
+  const g = RPC_WORKLOAD_GROUPS[groupId];
+  if (!g) return 'off';
+  let onN = 0;
+  for (const id of g.ids) {
+    if (isRpcWorkloadEnabled(id)) onN += 1;
+  }
+  if (onN === 0) return 'off';
+  if (onN === g.ids.length) return 'on';
+  return 'mixed';
+}
+
+export function setRpcWorkloadGroup(
+  groupId: RpcWorkloadGroupId,
+  enabledOn: boolean
+): Record<RpcWorkloadId, boolean> {
+  const g = RPC_WORKLOAD_GROUPS[groupId];
+  if (!g) throw new Error(`Unknown RPC workload group: ${groupId}`);
+  const patch: Partial<Record<RpcWorkloadId, boolean>> = {};
+  for (const id of g.ids) patch[id] = enabledOn;
+  console.log(
+    `[rpc-workload] group ${groupId} → ${enabledOn ? 'ON' : 'OFF'} (${g.ids.join(', ')})`
+  );
+  return setRpcWorkloads(patch);
+}
+
+export function getRpcWorkloadGroupSnapshot(): Array<{
+  id: RpcWorkloadGroupId;
+  label: string;
+  note: string;
+  ids: RpcWorkloadId[];
+  state: 'on' | 'off' | 'mixed';
+  enabled: boolean;
+}> {
+  return (Object.keys(RPC_WORKLOAD_GROUPS) as RpcWorkloadGroupId[]).map(
+    (id) => {
+      const g = RPC_WORKLOAD_GROUPS[id];
+      const state = getRpcWorkloadGroupState(id);
+      return {
+        id,
+        label: g.label,
+        note: g.note,
+        ids: [...g.ids],
+        state,
+        enabled: state !== 'off',
+      };
+    }
+  );
+}
+
 export function getRpcWorkloadEnabledMap(): Record<RpcWorkloadId, boolean> {
   const out = {} as Record<RpcWorkloadId, boolean>;
   for (const w of RPC_WORKLOAD_CATALOG) {

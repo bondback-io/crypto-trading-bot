@@ -3128,6 +3128,15 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         return undefined;
       }
     })(),
+    rpcLaneAssignments: (() => {
+      try {
+        const { getRpcLaneAssignments } =
+          require('./rpcInventory') as typeof import('./rpcInventory');
+        return getRpcLaneAssignments();
+      } catch {
+        return undefined;
+      }
+    })(),
     learningMode: config.learningMode
       ? (cloneJson(config.learningMode) as PersistedBotSettings['learningMode'])
       : {
@@ -3897,6 +3906,22 @@ function applySettingsSnapshot(
       const { applyRpcWorkloadSaved } =
         require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
       applyRpcWorkloadSaved(saved.rpcWorkloads);
+    } catch {
+      /* */
+    }
+  }
+  if (saved.rpcLaneAssignments && typeof saved.rpcLaneAssignments === 'object') {
+    try {
+      const { applyRpcLaneAssignmentsSaved } =
+        require('./rpcInventory') as typeof import('./rpcInventory');
+      applyRpcLaneAssignmentsSaved(
+        saved.rpcLaneAssignments as Parameters<
+          typeof applyRpcLaneAssignmentsSaved
+        >[0]
+      );
+      const { resetRpcEndpointPool } =
+        require('./connection') as typeof import('./connection');
+      resetRpcEndpointPool();
     } catch {
       /* */
     }
@@ -5888,6 +5913,45 @@ export function setRpcWorkloadsEnabled(
   return getRpcWorkloadSnapshot();
 }
 
+/** Persist exclusive Main/Emergency inventory assignments and rebuild pool. */
+export function setRpcLaneAssignments(
+  next: import('./rpcInventory').RpcLaneAssignments
+):
+  | { ok: true; assignments: import('./rpcInventory').RpcLaneAssignments }
+  | { ok: false; error: string } {
+  const {
+    setRpcLaneAssignmentsInMemory,
+  } = require('./rpcInventory') as typeof import('./rpcInventory');
+  const result = setRpcLaneAssignmentsInMemory(next);
+  if (!result.ok) return result;
+  persistUserSettings();
+  try {
+    const { applyLaneAssignments } =
+      require('./connection') as typeof import('./connection');
+    applyLaneAssignments();
+  } catch {
+    /* */
+  }
+  return result;
+}
+
+/** Persist Stats → RPC Other master kill-switch group. */
+export function setRpcWorkloadGroupEnabled(
+  groupId: string,
+  enabled: boolean
+): ReturnType<typeof import('./rpcWorkloadControl').getRpcWorkloadSnapshot> {
+  const {
+    setRpcWorkloadGroup,
+    getRpcWorkloadSnapshot,
+  } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+  setRpcWorkloadGroup(
+    groupId as import('./rpcWorkloadControl').RpcWorkloadGroupId,
+    enabled
+  );
+  persistUserSettings();
+  return getRpcWorkloadSnapshot();
+}
+
 /** @deprecated No routing effect — simple Trading/Data is always on. */
 export function setRpcShareLoad(enabled: boolean): boolean {
   config.rpc.shareLoad = Boolean(enabled);
@@ -5911,7 +5975,7 @@ export function setRpcMode(_mode: RpcOperatingMode): RpcOperatingMode {
   } catch {
     /* connection may not be loaded yet at boot */
   }
-  console.log('[rpc] Mode → simple 2+2 (Trading Alchemy / Data Helius / Background+Emergency publics)');
+  console.log('[rpc] Mode → simple (UI-assigned Main/Emergency per lane)');
   return 'simple';
 }
 

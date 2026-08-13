@@ -1,9 +1,8 @@
 /**
- * Simple 2+2 RPC pool:
- * Trading (Alchemy) → Emergency public
- * Data (Helius)
- * Background (publicnode / RPC_URL) — only when background feature workloads ON
- * Emergency = the other public
+ * UI-assigned RPC pool:
+ * Per lane (Trading / Data / Background): Main + optional Emergency.
+ * Unassigned inventory never enters the hot pool.
+ * Background Main only hot when background feature workloads ON.
  */
 
 import { AsyncLocalStorage } from 'async_hooks';
@@ -25,12 +24,11 @@ import {
   resolveTradingWalletSecret,
 } from './config';
 import { logger, errorToMeta } from './logger';
+import { isPublicRpcUrl, type RpcEndpointRef } from './rpcUrl';
 import {
-  rpcEndpointsSimple,
-  isPublicRpcUrl,
-  type SimpleRpcEndpoints,
-  type RpcEndpointRef,
-} from './rpcUrl';
+  getRpcLaneAssignments,
+  rpcEndpointsFromAssignments,
+} from './rpcInventory';
 import {
   getRpcGateSnapshot,
   isRpcGateSkipError,
@@ -117,7 +115,6 @@ const keypairCache = new Map<string, Keypair>();
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let started = false;
 
-let simple: SimpleRpcEndpoints | null = null;
 let poolBuilt = false;
 let hotIncludesBackground = false;
 let tradingPref: EndpointState | null = null;
@@ -128,16 +125,18 @@ let tradingFailover: EndpointState | null = null;
 let dataPref: EndpointState | null = null;
 let dataFailover: EndpointState | null = null;
 let backgroundPref: EndpointState | null = null;
-/** Hot emergency public only. */
+/** Trading lane Emergency (assigned). Alias kept for probe/stats paths. */
 let emergencyPublic: EndpointState | null = null;
-/** @deprecated — Helius not hot */
+let backgroundEmergency: EndpointState | null = null;
+/** @deprecated — paid emergency unused */
 let emergencyPaid: EndpointState | null = null;
 let publics: EndpointState[] = [];
 let heliusCold: RpcEndpointRef[] = [];
 
-/** Trading: 0=alchemy primary, 1+=emergency public */
+/** Trading: 0=Main, 1=Emergency */
 let tradingHop = 0;
 let dataOnFailover = false;
+/** Background: 0=Main, 1=Emergency */
 let backgroundIdx = 0;
 let tradingHardFailStreak = 0;
 let tradingRecoverAt = 0;
@@ -326,67 +325,51 @@ function emergencyChain(): EndpointState[] {
 
 function ensureEndpoints(): void {
   if (poolBuilt) return;
-  simple = rpcEndpointsSimple();
+  const assigned = rpcEndpointsFromAssignments();
   heliusCold = [];
   tradingAlchemyFailover = null;
   tradingFailover = null;
-  dataFailover = null;
   emergencyPaid = null;
 
-  if (simple.trading) tradingPref = makeState(simple.trading);
-  if (simple.data) dataPref = makeState(simple.data);
+  tradingPref = assigned.trading ? makeState(assigned.trading) : null;
+  dataPref = assigned.data ? makeState(assigned.data) : null;
+  dataFailover = assigned.dataEmergency
+    ? makeState(assigned.dataEmergency, true)
+    : null;
+  emergencyPublic = assigned.tradingEmergency
+    ? makeState(assigned.tradingEmergency, true)
+    : null;
+  backgroundEmergency = assigned.backgroundEmergency
+    ? makeState(assigned.backgroundEmergency, true)
+    : null;
 
-  // Background preferred public; Emergency = the other (or same if only one).
-  const bgRef = simple.background;
-  const emRef = simple.emergencyPublic || simple.background;
-  if (emRef) {
-    emergencyPublic = makeState(emRef, true);
-  } else {
-    emergencyPublic = null;
-  }
-  publics = emergencyPublic ? [emergencyPublic] : [];
-
-  if (!tradingPref && dataPref) {
-    tradingPref = makeState({
-      url: dataPref.endpoint.url,
-      label: dataPref.endpoint.label + '-as-trading',
-    });
-  }
-  if (!tradingPref && emergencyPublic) {
-    tradingPref = makeState(emergencyPublic.endpoint as RpcEndpointRef);
-  }
-  if (!dataPref && tradingPref) {
-    dataPref = makeState({
-      url: tradingPref.endpoint.url,
-      label: tradingPref.endpoint.label + '-as-data',
-    });
-  }
+  publics = [emergencyPublic, backgroundEmergency, dataFailover].filter(
+    (e): e is EndpointState => Boolean(e)
+  );
 
   hotIncludesBackground = wantBackgroundHot();
-  if (hotIncludesBackground) {
-    if (bgRef) {
-      if (
-        emergencyPublic &&
-        emergencyPublic.endpoint.url.toLowerCase() === bgRef.url.toLowerCase()
-      ) {
-        backgroundPref = emergencyPublic;
-      } else {
-        backgroundPref = makeState(bgRef);
-      }
-    } else if (emergencyPublic) {
-      backgroundPref = emergencyPublic;
-    }
+  if (hotIncludesBackground && assigned.background) {
+    backgroundPref = makeState(assigned.background);
   } else {
     backgroundPref = null;
   }
 
   poolBuilt = true;
+  const asg = getRpcLaneAssignments();
   console.log(
-    `[rpc] 2+2 pool: trading=${tradingPref?.endpoint.label || 'none'}` +
+    `[rpc] lane pool: trading=${tradingPref?.endpoint.label || 'none'}` +
+      (asg.trading.emergency ? `+em(${asg.trading.emergency})` : '') +
       ` data=${dataPref?.endpoint.label || 'none'}` +
+      (asg.data.emergency ? `+em(${asg.data.emergency})` : '') +
       ` background=${hotIncludesBackground ? backgroundPref?.endpoint.label || 'on' : 'idle'}` +
-      ` emergency=${emergencyPublic?.endpoint.label || 'none'}`
+      (asg.background.emergency ? `+em(${asg.background.emergency})` : '')
   );
+  if (!tradingPref) {
+    console.warn('[rpc] Trading Main unassigned — soft-fail until assigned in Stats → RPC');
+  }
+  if (!dataPref) {
+    console.warn('[rpc] Data Main unassigned — soft-fail until assigned in Stats → RPC');
+  }
 }
 
 /** Rematerialize Background hot slot when feature workloads toggle. */
@@ -395,7 +378,7 @@ export function refreshRpcHotPool(): void {
     ensureEndpoints();
     return;
   }
-  simple = simple || rpcEndpointsSimple();
+  const assigned = rpcEndpointsFromAssignments();
   const wantBg = wantBackgroundHot();
   if (wantBg === hotIncludesBackground) {
     if (!wantBg) backgroundPref = null;
@@ -408,18 +391,11 @@ export function refreshRpcHotPool(): void {
     console.log('[rpc] Background → idle (feature workloads OFF)');
     return;
   }
-  if (simple.background) {
-    if (
-      emergencyPublic &&
-      emergencyPublic.endpoint.url.toLowerCase() ===
-        simple.background.url.toLowerCase()
-    ) {
-      backgroundPref = emergencyPublic;
-    } else {
-      backgroundPref = makeState(simple.background);
-    }
-  } else if (emergencyPublic) {
-    backgroundPref = emergencyPublic;
+  backgroundPref = assigned.background
+    ? makeState(assigned.background)
+    : null;
+  if (!backgroundEmergency && assigned.backgroundEmergency) {
+    backgroundEmergency = makeState(assigned.backgroundEmergency, true);
   }
   hotIncludesBackground = Boolean(backgroundPref);
   console.log(
@@ -434,11 +410,11 @@ export function resetRpcEndpointPool(): void {
   dataPref = null;
   dataFailover = null;
   backgroundPref = null;
+  backgroundEmergency = null;
   emergencyPaid = null;
   emergencyPublic = null;
   publics = [];
   heliusCold = [];
-  simple = null;
   poolBuilt = false;
   hotIncludesBackground = false;
   tradingHop = 0;
@@ -452,6 +428,16 @@ export function resetRpcEndpointPool(): void {
   featureCallAts.length = 0;
   healthPageRefreshAts.length = 0;
   ensureEndpoints();
+}
+
+/** Rebuild pool after UI lane assignment Apply. */
+export function applyLaneAssignments(): void {
+  resetRpcEndpointPool();
+  try {
+    syncRpcIdleIsolation();
+  } catch {
+    /* */
+  }
 }
 
 export function isWeakPublicUtilityUrl(url: string | null | undefined): boolean {
@@ -507,10 +493,14 @@ function usable(st: EndpointState | null): boolean {
 
 function tradingActive(): EndpointState | null {
   ensureEndpoints();
-  // 0 Alchemy → 1+ Emergency public
+  if (!tradingPref && !emergencyPublic) return null;
+  // 0 Main → 1 Emergency (assigned only)
   if (tradingHop <= 0) {
+    if (!tradingPref) {
+      return usable(emergencyPublic) ? emergencyPublic : emergencyPublic;
+    }
     if (usable(tradingPref)) return tradingPref;
-    if (tradingPref && !isHardFailed(tradingPref) && !isRateLimited(tradingPref)) {
+    if (!isHardFailed(tradingPref) && !isRateLimited(tradingPref)) {
       return tradingPref;
     }
   }
@@ -521,8 +511,12 @@ function tradingActive(): EndpointState | null {
 
 function dataActive(): EndpointState | null {
   ensureEndpoints();
+  if (!dataPref && !dataFailover) return null;
   if (dataOnFailover && dataFailover) return dataFailover;
   if (usable(dataPref)) return dataPref;
+  if (dataPref && !isHardFailed(dataPref) && !isRateLimited(dataPref)) {
+    return dataPref;
+  }
   if (dataFailover) {
     dataOnFailover = true;
     return dataFailover;
@@ -533,14 +527,16 @@ function dataActive(): EndpointState | null {
 function backgroundActive(): EndpointState | null {
   ensureEndpoints();
   if (!wantBackgroundHot()) return null;
-  if (!backgroundPref && emergencyPublic) {
-    // lazy materialize if toggle raced
+  if (!backgroundPref) {
     refreshRpcHotPool();
   }
   const chain: EndpointState[] = [];
   if (backgroundPref) chain.push(backgroundPref);
-  if (emergencyPublic && emergencyPublic !== backgroundPref) {
-    chain.push(emergencyPublic);
+  if (
+    backgroundEmergency &&
+    backgroundEmergency !== backgroundPref
+  ) {
+    chain.push(backgroundEmergency);
   }
   if (!chain.length) return null;
   const idx = Math.min(backgroundIdx, chain.length - 1);
@@ -627,7 +623,7 @@ function noteTradingOutcome(ok: boolean, message?: string): void {
       if (Date.now() >= tradingRecoverAt) {
         tradingHop = 0;
         tradingRecoverAt = 0;
-        console.log('[rpc] Trading recovered → Alchemy');
+        console.log('[rpc] Trading recovered → Main');
       }
     }
     return;
@@ -662,13 +658,18 @@ function noteDataOutcome(ok: boolean): void {
 }
 
 function noteBackgroundOutcome(ok: boolean): void {
-  if (ok) return;
-  const max = (backgroundPref ? 1 : 0) + publics.length;
+  if (ok) {
+    if (backgroundIdx > 0 && usable(backgroundPref)) backgroundIdx = 0;
+    return;
+  }
+  const max =
+    (backgroundPref ? 1 : 0) +
+    (backgroundEmergency && backgroundEmergency !== backgroundPref ? 1 : 0);
   if (backgroundIdx < max - 1) {
     backgroundIdx += 1;
     const st = backgroundActive();
     console.warn(
-      `[rpc] Background overflow → ${st?.endpoint.label || 'public'} (idx=${backgroundIdx})`
+      `[rpc] Background → Emergency ${st?.endpoint.label || ''} (idx=${backgroundIdx})`
     );
   }
 }
@@ -970,9 +971,20 @@ export function getRpcStats() {
   const dActive = laneState('secondary');
   const bgFeatureOn = wantBackgroundHot();
   const bActive = bgFeatureOn ? laneState('background') : null;
-  const eActive = emergencyPublic || null;
-  const tradingOnEmergency = tradingHop >= 1;
+  const tradingOnEmergency = tradingHop >= 1 && Boolean(emergencyPublic);
+  const dataOnEmergency = dataOnFailover && Boolean(dataFailover);
+  const backgroundOnEmergency =
+    bgFeatureOn && backgroundIdx >= 1 && Boolean(backgroundEmergency);
+  const eActive =
+    tradingOnEmergency
+      ? emergencyPublic
+      : dataOnEmergency
+        ? dataFailover
+        : backgroundOnEmergency
+          ? backgroundEmergency
+          : emergencyPublic || dataFailover || backgroundEmergency || null;
   const backgroundIdleWhenWorkloadsOff = !bgFeatureOn;
+  const asg = getRpcLaneAssignments();
   const probeCallsPerMin = perMin(probeCallAts);
   const featureCallsPerMin = perMin(featureCallAts);
   const healthPageRefreshCallsPerMin = perMin(healthPageRefreshAts);
@@ -986,9 +998,11 @@ export function getRpcStats() {
   }
   const hotStates = [
     tradingPref,
+    tradingOnEmergency ? emergencyPublic : null,
     dataPref,
-    emergencyPublic,
+    dataOnEmergency ? dataFailover : null,
     bgFeatureOn ? backgroundPref : null,
+    backgroundOnEmergency ? backgroundEmergency : null,
   ].filter((e): e is EndpointState => Boolean(e));
   // Deduplicate by URL for count
   const activeEndpointsCount = new Set(
@@ -1024,14 +1038,18 @@ export function getRpcStats() {
   );
 
   let warning: string | null = null;
-  if (!anyHealthy) {
+  if (!tradingPref) {
+    warning = 'Trading Main unassigned — assign in Stats → RPC.';
+  } else if (!dataPref) {
+    warning = 'Data Main unassigned — assign in Stats → RPC.';
+  } else if (!anyHealthy) {
     warning =
-      'Trading/Data unhealthy — set ALCHEMY_API_KEY (Trading) and HELIUS_API_KEY (Data).';
+      'Trading/Data unhealthy — check assigned Mains or hop to Emergency.';
   } else if (tradingOnEmergency) {
-    warning = `Trading on Emergency (${tActive?.endpoint.label || 'public'}) — Alchemy recovering.`;
+    warning = `Trading on Emergency (${tActive?.endpoint.label || 'em'}) — Main recovering.`;
   } else if (lanesShareEndpoint()) {
     warning =
-      'Trading and Data share a URL — set distinct ALCHEMY_API_KEY vs HELIUS_API_KEY.';
+      'Trading and Data share a URL — assign distinct inventory ids.';
   } else if (controlPlaneThrash) {
     warning =
       'Control-plane thrash: feature workloads OFF but probes still high — check health_probe rate.';
@@ -1086,7 +1104,10 @@ export function getRpcStats() {
     recoverAt: tradingRecoverAt || undefined,
     gateRole: 'primary',
   });
-  const dataCong = buildCongestion('data', dActive, { gateRole: 'secondary' });
+  const dataCong = buildCongestion('data', dActive, {
+    onEmergency: dataOnEmergency,
+    gateRole: 'secondary',
+  });
   let bgCong = buildCongestion('background', bActive, {
     gateRole: 'background',
   });
@@ -1127,12 +1148,28 @@ export function getRpcStats() {
     if (s) endpoints.push(s);
   };
   pushEp(tradingPref, 'primary', tActive === tradingPref, 'primary');
+  if (emergencyPublic) {
+    pushEp(
+      emergencyPublic,
+      'utility',
+      tActive === emergencyPublic,
+      'utility'
+    );
+  }
   pushEp(
     dataPref,
     'secondary',
     tActive !== dataPref && dActive === dataPref,
     'secondary'
   );
+  if (dataFailover) {
+    pushEp(
+      dataFailover,
+      'secondary',
+      dActive === dataFailover,
+      'secondary'
+    );
+  }
   if (bgFeatureOn) {
     pushEp(
       backgroundPref,
@@ -1140,13 +1177,15 @@ export function getRpcStats() {
       bActive === backgroundPref,
       'background'
     );
+    if (backgroundEmergency) {
+      pushEp(
+        backgroundEmergency,
+        'background',
+        bActive === backgroundEmergency,
+        'background'
+      );
+    }
   }
-  pushEp(
-    emergencyPublic,
-    'utility',
-    tActive === emergencyPublic,
-    'utility'
-  );
 
   const idleBackups = heliusCold.map((h) => ({
     label: h.label,
@@ -1237,29 +1276,48 @@ export function getRpcStats() {
       }
     })(),
     controlPlaneThrash,
+    laneAssignments: asg,
     lanes: {
       trading: {
-        label: tActive?.endpoint.label || 'none',
+        label: tActive?.endpoint.label || (tradingPref ? tradingPref.endpoint.label : 'none'),
         url: tActive?.endpoint.url || '',
-        healthy: Boolean(tActive?.healthy),
+        healthy: tradingPref ? Boolean(tActive?.healthy) : false,
         latencyMs: tActive?.latencyMs ?? null,
         successRate: successRate(tActive),
-        active: true,
-        congestion: tradingCong,
+        active: Boolean(tradingPref || emergencyPublic),
+        mainId: asg.trading.main,
+        emergencyId: asg.trading.emergency,
+        onEmergency: tradingOnEmergency,
+        congestion: !tradingPref
+          ? {
+              state: 'disabled' as const,
+              cause: 'Trading Main unassigned',
+              details: ['assign in Stats → RPC'],
+            }
+          : tradingCong,
       },
       data: {
-        label: dActive?.endpoint.label || 'none',
+        label: dActive?.endpoint.label || (dataPref ? dataPref.endpoint.label : 'none'),
         url: dActive?.endpoint.url || '',
-        healthy: Boolean(dActive?.healthy),
+        healthy: dataPref ? Boolean(dActive?.healthy) : false,
         latencyMs: dActive?.latencyMs ?? null,
         successRate: successRate(dActive),
-        active: true,
-        congestion: dataCong,
+        active: Boolean(dataPref || dataFailover),
+        mainId: asg.data.main,
+        emergencyId: asg.data.emergency,
+        onEmergency: dataOnEmergency,
+        congestion: !dataPref
+          ? {
+              state: 'disabled' as const,
+              cause: 'Data Main unassigned',
+              details: ['assign in Stats → RPC'],
+            }
+          : dataCong,
       },
       background: {
         label: backgroundIdleWhenWorkloadsOff
           ? 'idle'
-          : bActive?.endpoint.label || 'none',
+          : bActive?.endpoint.label || (backgroundPref ? backgroundPref.endpoint.label : 'none'),
         url: backgroundIdleWhenWorkloadsOff ? '' : bActive?.endpoint.url || '',
         healthy: backgroundIdleWhenWorkloadsOff
           ? true
@@ -1271,24 +1329,40 @@ export function getRpcStats() {
           ? 100
           : successRate(bActive),
         active: bgFeatureOn,
+        mainId: asg.background.main,
+        emergencyId: asg.background.emergency,
+        onEmergency: backgroundOnEmergency,
         congestion: bgCong,
       },
       emergency: {
-        label: eActive?.endpoint.label || 'none',
+        label: (() => {
+          const parts: string[] = [];
+          if (tradingOnEmergency) parts.push('Trading');
+          if (dataOnEmergency) parts.push('Data');
+          if (backgroundOnEmergency) parts.push('Background');
+          if (!parts.length) {
+            return eActive?.endpoint.label
+              ? `${eActive.endpoint.label} · idle`
+              : 'none assigned';
+          }
+          return `active: ${parts.join(', ')}`;
+        })(),
         url: eActive?.endpoint.url || '',
         healthy: Boolean(eActive?.healthy),
         latencyMs: eActive?.latencyMs ?? null,
         successRate: successRate(eActive),
-        active: tradingOnEmergency,
+        active: tradingOnEmergency || dataOnEmergency || backgroundOnEmergency,
         congestion: emergCong,
       },
       helius: {
         disabled: false as const,
-        label: dataPref?.endpoint.label || 'helius',
+        label: dataPref?.endpoint.label || 'data-main',
         congestion: {
           state: 'ok' as const,
-          cause: 'Data lane = HELIUS_API_KEY',
-          details: [dataPref?.endpoint.label || 'helius'].filter(Boolean),
+          cause: 'Data lane = UI-assigned Main',
+          details: [dataPref?.endpoint.label || asg.data.main || 'none'].filter(
+            Boolean
+          ),
         },
       },
     },
@@ -1297,6 +1371,15 @@ export function getRpcStats() {
         const { getRpcWorkloadSnapshot } =
           require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
         return getRpcWorkloadSnapshot();
+      } catch {
+        return [];
+      }
+    })(),
+    workloadGroups: (() => {
+      try {
+        const { getRpcWorkloadGroupSnapshot } =
+          require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+        return getRpcWorkloadGroupSnapshot();
       } catch {
         return [];
       }
