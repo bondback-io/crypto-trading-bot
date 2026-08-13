@@ -122,7 +122,7 @@ function checkRpc(): HealthIssue[] {
         title: 'Scanner/utility auto-slowed (high skips)',
         detail: `slowFactor=${lc.scannerSlowFactor} secondarySkips=${lc.secondarySkipsRecent}/60s`,
         recommendation:
-          'Normal under congestion — if sustained, check Trading/Data RPC health.',
+          'Normal under congestion — if sustained, check Critical/Scanners RPC health.',
       });
     }
   } catch {
@@ -288,7 +288,7 @@ function checkTrading(): HealthIssue[] {
           title: `Soft-watch coverage low (${Math.round(soft.coveragePct30m)}%)`,
           detail: `cap ${soft.softWatchCap} / ${soft.enabledWallets} enabled wallets`,
           recommendation:
-            'Data/Favourites may be congested — lower soft-watch cap or check Data lane load.',
+            'Utility/Favourites may be congested — lower soft-watch cap or check Utility lane load.',
         });
       }
     } catch {

@@ -11,7 +11,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick, adaptiveScannerIntervalMs, scannersUnderPressure } from './rpcLoadControl';
+import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
 import {
   fetchBondingCurve,
   getCachedBondingCurve,
@@ -76,10 +76,8 @@ export interface AlphaScanSnapshot {
 const MAX_ROWS_PER_COLUMN = 40;
 /** Cap curve RPCs per AlphaScan refresh — parallel 40 blew Secondary (Alchemy) RPS. */
 const CURVE_ENRICH_CAP = 16;
-const CURVE_ENRICH_CAP_PRESSURE = 8;
 /** Max in-flight bonding-curve fetches (Secondary lane is ~3 concurrent / 6 RPS). */
 const CURVE_ENRICH_CONCURRENCY = 2;
-const CURVE_ENRICH_CONCURRENCY_PRESSURE = 1;
 
 let lastPollAt: number | null = null;
 let lastError: string | null = null;
@@ -267,11 +265,8 @@ async function enrichCurves(
         .toLowerCase()
         .endsWith('pump')
   );
-  const pressure = scannersUnderPressure();
-  const enrichCap = pressure ? CURVE_ENRICH_CAP_PRESSURE : CURVE_ENRICH_CAP;
-  const enrichConc = pressure
-    ? CURVE_ENRICH_CONCURRENCY_PRESSURE
-    : CURVE_ENRICH_CONCURRENCY;
+  const enrichCap = CURVE_ENRICH_CAP;
+  const enrichConc = CURVE_ENRICH_CONCURRENCY;
   const slice = pumpish.slice(0, enrichCap);
   // No outer runWithRpcRole + Promise.all(40) — that held one gate slot while
   // firing dozens of parallel getAccountInfo and starved Secondary RPS.

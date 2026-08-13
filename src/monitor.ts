@@ -16,7 +16,6 @@ import {
   getConnection,
   getRpcStats,
   getRpcUrl,
-  peekRpcUrl,
   runWithRpcRole,
   isRpcGateSkipError,
   isUtilityOnWeakPublic,
@@ -28,7 +27,6 @@ import {
 } from './rpcGate';
 import {
   getRpcLoadControlSnapshot,
-  shouldHardSkipFavouritesForShed,
   utilityPollScale,
 } from './rpcLoadControl';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
@@ -1517,12 +1515,22 @@ function isRpcRateLimitError(err: unknown): boolean {
 }
 
 /**
- * Soft-throttle Favourites poll always under Share ON (even on Alchemy Data) —
- * Favourites are shed-first and must not flood Data/Trading.
+ * Soft-throttle Favourites poll on free/public Utility URLs, or always under
+ * Share ON (Favourites ride Utility and must not flood Critical/Scanners).
  */
 function shouldSoftThrottleWalletPoll(rpcUrl: string): boolean {
   if (isSoftThrottleRpcUrl(rpcUrl)) return true;
   return Boolean(config.rpc?.shareLoad);
+}
+
+/** Classic shed signal — yield Favourites when Critical/load control asks. */
+function shouldShedFavouritesPoll(): boolean {
+  try {
+    const snap = getRpcLoadControlSnapshot();
+    return Boolean(snap.shedBackground) || snap.utilitySlowFactor >= 2.5;
+  } catch {
+    return false;
+  }
 }
 
 /** Free Helius/Alchemy/public — gentle concurrency so boot seeding cannot crash Render. */
@@ -1636,8 +1644,7 @@ export function resolveSoftWatchCap(): {
     if (
       load.shedBackground ||
       gate.stressed ||
-      load.utilityShedHard ||
-      load.favouritesShedHard ||
+      load.utilitySlowFactor >= 2 ||
       load.scannerSlowFactor >= 2
     ) {
       const tightened = Math.min(effectiveCap, 4);
@@ -1647,8 +1654,6 @@ export function resolveSoftWatchCap(): {
       }
     }
     if (
-      load.utilityShedHard ||
-      load.favouritesShedHard ||
       load.utilitySlowFactor >= 3 ||
       load.scannerSlowFactor >= 3
     ) {
@@ -1698,7 +1703,7 @@ export function getSoftWatchRuntimeSnapshot(): {
   const pollRole = getRpcRoleFor('wallet_poll', cap.shareLoad);
   let utilityHost: string | null = null;
   try {
-    utilityHost = new URL(peekRpcUrl(pollRole)).hostname;
+    utilityHost = new URL(getRpcUrl(pollRole)).hostname;
   } catch {
     utilityHost = null;
   }
@@ -1928,7 +1933,7 @@ export function startMonitor(): void {
       return;
     }
     try {
-      if (shouldHardSkipFavouritesForShed()) return;
+      if (shouldShedFavouritesPoll()) return;
     } catch {
       /* */
     }
@@ -2014,7 +2019,7 @@ async function pollAllWallets(): Promise<void> {
     return;
   }
   try {
-    if (shouldHardSkipFavouritesForShed()) {
+    if (shouldShedFavouritesPoll()) {
       logBackgroundDeferred(
         'Favourites wallet watch',
         'background_rpc_throttled',
@@ -8628,19 +8633,13 @@ const SIGNAL_LIVE_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Entries/Signals "RPC down" should follow Critical-lane health, not Utility
- * quarantine alone. Emergency failover with a healthy active host stays clear.
+ * quarantine alone. Failover with a healthy active host stays clear.
  */
 function isCriticalLaneRpcHealthy(
   rpc: ReturnType<typeof getRpcStats>
 ): boolean {
-  const crit = rpc.lanes?.critical;
-  if (crit) {
-    if (crit.healthy) return true;
-    // Preferred down but traffic already on a healthy emergency host.
-    if (crit.failover && rpc.ok) return true;
-    return false;
-  }
   if (rpc.primary?.healthy) return true;
+  if (rpc.primary?.failover && rpc.ok) return true;
   return Boolean(rpc.ok);
 }
 
@@ -9054,13 +9053,14 @@ export function getMonitorStatus(): {
     topBlockReasons: [] as Array<{ reason: string; count: number }>,
   };
   try {
-    const { isSignalsRpcHealthy, getRpcLoadControlSnapshot } =
+    const { getRpcLoadControlSnapshot } =
       require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     const { getSignalIntakeStats } =
       require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+    const snap = getRpcLoadControlSnapshot();
+    // Classic proxy: scanners not in hard shed / ×3 backoff.
     signalsRpcHealthy =
-      isSignalsRpcHealthy() ||
-      Boolean(getRpcLoadControlSnapshot().signalsRpcHealthy);
+      !snap.shedBackground && snap.scannerSlowFactor < 3;
     intake = getSignalIntakeStats();
   } catch {
     /* */

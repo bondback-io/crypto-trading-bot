@@ -281,17 +281,17 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   if (shareLoad && softWatch && !softWatch.softWatchPaused) {
     if (utilityStressed || lastPollRateLimited) {
       chokeHints.push(
-        `Favourites soft-watch under Data pressure (cap ${softWatch.softWatchCap}, pool ${softWatch.watchPool}/${softWatch.enabledWallets}, last poll ${softWatch.lastPollElapsedMs ?? '—'}ms). Lower Soft watch cap in Stats → RPC (try 8–12, or 0 to pause Favourites watch).`
+        `Utility soft-watch under pressure (cap ${softWatch.softWatchCap}, pool ${softWatch.watchPool}/${softWatch.enabledWallets}, last poll ${softWatch.lastPollElapsedMs ?? '—'}ms). Lower Soft watch cap in Config → MEV/RPC (try 8–12, or 0 to pause Favourites watch).`
       );
     } else if (softWatch.softWatchCap >= 25 && softWatch.enabledWallets > softWatch.softWatchCap) {
       chokeHints.push(
-        `Soft watch cap ${softWatch.softWatchCap} still large vs ${softWatch.enabledWallets} enabled wallets — consider 8–12 to ease Data/Favourites.`
+        `Soft watch cap ${softWatch.softWatchCap} still large vs ${softWatch.enabledWallets} enabled wallets — consider 8–12 to ease Utility.`
       );
     }
   }
   if (softWatch?.softWatchPaused) {
     chokeHints.push(
-      'Favourites soft-watch is PAUSED (cap 0) — Data wallet_poll idle; copy buys from Favourites will not fire until you raise the cap.'
+      'Favourites soft-watch is PAUSED (cap 0) — Utility wallet_poll idle; copy buys from Favourites will not fire until you raise the cap.'
     );
   }
 
@@ -355,7 +355,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
         60_000
       ),
       reason: shareLoad
-        ? 'Favourites ride Data under soft-watch caps — longer interval eases Data lane pressure.'
+        ? 'Utility/public carries Favourites wallet watch — longer interval eases public RPC pressure.'
         : 'Primary carries copy wallet polling — longer interval reduces getSignatures pressure.',
     });
   }

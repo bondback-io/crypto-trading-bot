@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.318',
+    title: 'Restore classic RPC stack to 1.2.262',
+    sections: ['execution', 'overview'],
+    items: [
+      'RPC runtime restored from Release 1.2.262 (last known-good before Aug 11 dual-pool / sticky churn): connection, gates, load control, URL prefs, routing, diagnostic.',
+      'Classic Share ON again: Critical=Helius, Scanners=Alchemy, Utility=public Solana; Favourites ride Utility. Post-262 Trading/Data sticky and bottleneck-debug paths dropped from the live stack.',
+      'Later scanners/Favourites/dashboard callers rewired onto classic APIs so product work since 1.2.262 keeps running without changing the RPC structure.',
+    ],
+  },
+  {
     version: '1.2.317',
     title: 'Simplify RPC to Trading + Data (+ public emergency)',
     sections: ['execution', 'overview'],

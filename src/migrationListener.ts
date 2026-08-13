@@ -20,9 +20,9 @@ import { isDeniedCopyMint } from './deniedMints';
 import {
   getConnection,
   getRpcGateSnapshot,
+  getRpcStats,
   getRpcUrl,
   noteActiveRpcFailure,
-  peekRpcLatencyMs,
   runWithRpcRole,
   shouldDeferHeavyRpc,
 } from './connection';
@@ -492,7 +492,17 @@ async function pollMigrations(): Promise<void> {
   } catch {
     gateStressed = false;
   }
-  const primaryMs = peekRpcLatencyMs('primary');
+  const primaryMs = (() => {
+    try {
+      const stats = getRpcStats();
+      const active =
+        stats.endpoints.find((e) => e.lane === 'primary' && e.isActive) ||
+        stats.endpoints.find((e) => e.isActive);
+      return active?.latencyMs ?? null;
+    } catch {
+      return null;
+    }
+  })();
   const primaryWarm = primaryMs != null && primaryMs >= 200;
   const primaryHot = primaryMs != null && primaryMs >= 500;
   const minGap =
@@ -505,42 +515,6 @@ async function pollMigrations(): Promise<void> {
   lastMigrationPollAt = Date.now();
 
   const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
-  // #region agent log
-  {
-    const nowM = Date.now();
-    if (!(globalThis as { __dbgMigAt?: number }).__dbgMigAt) {
-      (globalThis as { __dbgMigAt?: number }).__dbgMigAt = 0;
-    }
-    if (nowM - ((globalThis as { __dbgMigAt?: number }).__dbgMigAt || 0) > 12_000) {
-      (globalThis as { __dbgMigAt?: number }).__dbgMigAt = nowM;
-      fetch('http://127.0.0.1:7710/ingest/4a93e060-3c93-430c-865a-86d3cc897ce8', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '06c3b9',
-        },
-        body: JSON.stringify({
-          sessionId: '06c3b9',
-          runId: 'post-fix',
-          hypothesisId: 'H1',
-          location: 'migrationListener.ts:pollMigrations',
-          message: 'migration_poll_start',
-          data: {
-            role,
-            minGap,
-            gateStressed,
-            primaryWarm,
-            primaryHot,
-            primaryMs,
-            wsMode,
-            parseInFlight: migrationParseInFlight,
-          },
-          timestamp: nowM,
-        }),
-      }).catch(() => {});
-    }
-  }
-  // #endregion
   return runWithRpcRole(role, async () => {
   try {
     const conn = getConnection();

@@ -675,17 +675,6 @@ async function fetchOnChainHolderMetrics(
 ): Promise<Partial<TokenMetrics>> {
   // Share load: keep heavy holder RPCs off Utility (Favourites soft-watch).
   // Public utility was timing out ~15s on getTokenLargestAccounts.
-  try {
-    const { scannersUnderPressure } =
-      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-    // Under Scanners congestion, skip holder fanout — these were 0.8–4s avg and
-    // crowded Secondary without helping core signal intake.
-    if (scannersUnderPressure()) {
-      return {};
-    }
-  } catch {
-    /* */
-  }
   const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
   return runWithRpcRole(role, () => fetchOnChainHolderMetricsInner(mint), 'token_metrics');
 }
