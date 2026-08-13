@@ -1846,20 +1846,19 @@ export interface BotConfig {
     /** Prefer other lane only after preferred endpoint is unhealthy this long (ms). */
     failoverDownMs: number;
     /**
-     * When true, split workloads: Helius=critical, Alchemy=scanners/Zion,
-     * public=utility (import/activity).
+     * @deprecated No routing effect since 1.2.320 simple Trading/Data lanes.
+     * Kept for persisted settings compatibility.
      */
     shareLoad: boolean;
     /**
-     * RPC operating mode.
-     * - classic: 1.2.318 Share three-lane (default)
-     * - multiLane: typed sticky pool across discovered endpoints
+     * RPC operating mode — always simple 2-lane since 1.2.320.
+     * classic/multiLane values are accepted but ignored for routing.
      */
-    mode: 'classic' | 'multiLane';
+    mode: 'classic' | 'multiLane' | 'simple';
     /**
-     * Favourites soft-watch wallet cap (Utility lane when Share ON).
-     * 0 = pause Favourites RPC watch (utility relief).
-     * unset = default 12 (Share ON) / 20 (Share OFF). Env RPC_SOFT_WATCH_CAP wins if set.
+     * Favourites soft-watch wallet cap (Data lane volume knob).
+     * 0 = pause Favourites RPC watch.
+     * unset = default 12. Env RPC_SOFT_WATCH_CAP wins if set.
      */
     softWatchCap: number | null;
     priorityFee: {
@@ -2696,25 +2695,9 @@ export const config: BotConfig = {
     healthIntervalMs: 45_000,
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
-    shareLoad:
-      process.env.RPC_SHARE_LOAD === '0' ||
-      process.env.RPC_SHARE_LOAD === 'false'
-        ? false
-        : process.env.RPC_SHARE_LOAD === '1' ||
-          process.env.RPC_SHARE_LOAD === 'true' ||
-          // Default ON when both free providers exist (API key or full RPC URL).
-          Boolean(
-            (process.env.HELIUS_API_KEY?.trim() ||
-              process.env.HELIUS_RPC_URL?.trim()) &&
-              (process.env.ALCHEMY_API_KEY?.trim() ||
-                process.env.ALCHEMY_RPC_URL?.trim())
-          ),
-    mode:
-      process.env.RPC_MODE === 'multiLane' ||
-      process.env.RPC_MODE === 'multilane' ||
-      process.env.RPC_MODE === 'pool'
-        ? 'multiLane'
-        : 'classic',
+    // shareLoad / mode kept for settings compatibility — routing always simple 2-lane.
+    shareLoad: false,
+    mode: 'simple',
     softWatchCap:
       process.env.RPC_SOFT_WATCH_CAP != null &&
       process.env.RPC_SOFT_WATCH_CAP !== '' &&
@@ -3130,8 +3113,8 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     bondingCurve: { ...config.bondingCurve },
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
-    rpcShareLoad: Boolean(config.rpc.shareLoad),
-    rpcMode: config.rpc.mode === 'multiLane' ? 'multiLane' : 'classic',
+    rpcShareLoad: false,
+    rpcMode: 'simple',
     rpcSoftWatchCap:
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
         ? config.rpc.softWatchCap
@@ -3886,11 +3869,10 @@ function applySettingsSnapshot(
     config.pollIntervalMs = saved.pollIntervalMs;
   }
   if (typeof saved.rpcShareLoad === 'boolean') {
-    config.rpc.shareLoad = saved.rpcShareLoad;
+    // No routing effect since 1.2.320 — always simple Trading/Data.
+    config.rpc.shareLoad = false;
   }
-  if (saved.rpcMode === 'multiLane' || saved.rpcMode === 'classic') {
-    config.rpc.mode = saved.rpcMode;
-  }
+  config.rpc.mode = 'simple';
   if (
     saved.rpcSoftWatchCap === null ||
     (typeof saved.rpcSoftWatchCap === 'number' &&
@@ -5875,26 +5857,21 @@ export function updateConfig(partial: Partial<BotConfig>): void {
   persistUserSettings();
 }
 
-/** Enable/disable Share RPC load mode (Helius/Alchemy/public workload split). */
+/** @deprecated No routing effect — simple Trading/Data is always on. */
 export function setRpcShareLoad(enabled: boolean): boolean {
   config.rpc.shareLoad = Boolean(enabled);
   persistUserSettings();
   console.log(
-    `[rpc] Share RPC load ${config.rpc.shareLoad ? 'ON' : 'OFF'} — ` +
-      (config.rpc.shareLoad
-        ? 'critical→Helius, scanners/Zion→Alchemy, wallet-watch+utility→public'
-        : 'legacy primary/secondary routing')
+    '[rpc] Share RPC load toggle ignored — routing is always Trading/Data/Emergency (1.2.320+)'
   );
   return config.rpc.shareLoad;
 }
 
-export type RpcOperatingMode = 'classic' | 'multiLane';
+export type RpcOperatingMode = 'classic' | 'multiLane' | 'simple';
 
-/** Switch classic Share vs Multi-lane typed sticky pool (opt-in). */
-export function setRpcMode(mode: RpcOperatingMode): RpcOperatingMode {
-  const next: RpcOperatingMode =
-    mode === 'multiLane' ? 'multiLane' : 'classic';
-  config.rpc.mode = next;
+/** @deprecated Mode selector ignored — always simple 2-lane. */
+export function setRpcMode(_mode: RpcOperatingMode): RpcOperatingMode {
+  config.rpc.mode = 'simple';
   persistUserSettings();
   try {
     const { resetRpcEndpointPool } =
@@ -5903,22 +5880,17 @@ export function setRpcMode(mode: RpcOperatingMode): RpcOperatingMode {
   } catch {
     /* connection may not be loaded yet at boot */
   }
-  console.log(
-    `[rpc] Mode → ${next}` +
-      (next === 'multiLane'
-        ? ' (typed sticky pool; classic Share remains available)'
-        : ' (classic Share three-lane)')
-  );
-  return config.rpc.mode;
+  console.log('[rpc] Mode → simple (Trading Alchemy BACKUP / Data Alchemy / Emergency public)');
+  return 'simple';
 }
 
 export function getRpcMode(): RpcOperatingMode {
-  return config.rpc.mode === 'multiLane' ? 'multiLane' : 'classic';
+  return 'simple';
 }
 
 /**
- * Favourites soft-watch wallet cap (Utility when Share ON).
- * 0 = pause Favourites RPC watch. null clears to code default (12/20).
+ * Favourites soft-watch wallet cap (Data lane volume knob).
+ * 0 = pause Favourites RPC watch. null clears to code default (12).
  */
 export function setRpcSoftWatchCap(cap: number | null): number | null {
   if (cap == null || !Number.isFinite(Number(cap))) {

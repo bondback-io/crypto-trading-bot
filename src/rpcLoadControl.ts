@@ -1,27 +1,36 @@
 /**
- * Adaptive RPC load control — shed scanner/utility work when lanes stress,
- * without touching Critical trade-entry paths.
+ * Adaptive load control for Data-lane pressure (scanners / Favourites shed).
+ * Never marks global STRESSED from public emergency alone.
+ * Snapshot fields keep classic names for monitor/dashboard compatibility.
  */
-import type { RpcGateRole } from './rpcGate';
+
+import { getRpcGateSnapshot, type RpcGateRole } from './rpcGate';
 
 export type RpcLoadControlSnapshot = {
-  /** 1 = normal; higher = slower (e.g. 2 = half rate). */
+  /** 1 = normal; higher = slower scanners. */
   scannerSlowFactor: number;
+  /** Favourites/activity slowdown (maps from Data pressure). */
   utilitySlowFactor: number;
-  /** True when background work should yield for Critical/Helius. */
+  /** True when background should yield for Trading. */
   shedBackground: boolean;
   reasons: string[];
   secondarySkipsRecent: number;
   updatedAt: number;
+  /** Simple-model aliases */
+  level: 'ok' | 'busy' | 'shed';
+  cause: string | null;
+  scannerMultiplier: number;
+  favouritesDeferred: boolean;
+  dataPressure: boolean;
 };
 
-type SkipSample = { at: number; role: RpcGateRole };
-
-const skipSamples: SkipSample[] = [];
-const SKIP_WINDOW_MS = 60_000;
-/** Cap how often skip samples can refresh the adaptive window (per role). */
-const SKIP_NOTE_MIN_GAP_MS = 2_500;
-const lastSkipNoteAt: Partial<Record<RpcGateRole, number>> = {};
+let lastSignals = {
+  tradingLatencyMs: null as number | null,
+  dataLatencyMs: null as number | null,
+  tradingOnEmergency: false,
+  dataHealthy: true,
+  primaryQueued: 0,
+};
 
 let lastSnapshot: RpcLoadControlSnapshot = {
   scannerSlowFactor: 1,
@@ -30,181 +39,171 @@ let lastSnapshot: RpcLoadControlSnapshot = {
   reasons: [],
   secondarySkipsRecent: 0,
   updatedAt: Date.now(),
+  level: 'ok',
+  cause: null,
+  scannerMultiplier: 1,
+  favouritesDeferred: false,
+  dataPressure: false,
 };
 
 let lastLogAt = 0;
 
-/** Record a non-critical skip so adaptive backoff can react. */
-export function noteBackgroundRpcSkip(role: RpcGateRole, feature?: string): void {
-  const now = Date.now();
-  const last = lastSkipNoteAt[role] || 0;
-  // bonding_curve / token_metrics can skip dozens of times in one enrich burst —
-  // one sample per gap keeps adaptive from locking ×3 forever.
-  if (now - last < SKIP_NOTE_MIN_GAP_MS) {
-    void feature;
-    return;
-  }
-  lastSkipNoteAt[role] = now;
-  skipSamples.push({ at: now, role });
-  while (skipSamples.length && now - skipSamples[0].at > SKIP_WINDOW_MS) {
-    skipSamples.shift();
-  }
-  void feature;
-  recompute();
+export function noteBackgroundRpcSkip(_role: RpcGateRole, _feature?: string): void {
+  /* skips are counted live via getRpcGateSnapshot */
 }
 
-function recompute(external?: {
-  primaryLatencyMs?: number | null;
-  secondaryLatencyMs?: number | null;
-  utilityLatencyMs?: number | null;
-  utilityWeakPublic?: boolean;
-  utilityFailover?: boolean;
-  primaryQueued?: number;
-  /** @deprecated Lifetime gate skips — ignored (was locking scanner×3 forever). */
-  secondarySkipped?: number;
-  /** Secondary lane currently idle (heal skip-based ×3). */
-  secondaryIdle?: boolean;
-}): void {
-  const now = Date.now();
-  while (skipSamples.length && now - skipSamples[0].at > SKIP_WINDOW_MS) {
-    skipSamples.shift();
-  }
-  const secondarySkipsRecent = skipSamples.filter(
-    (s) => s.role === 'secondary' && now - s.at <= SKIP_WINDOW_MS
-  ).length;
-  const secondarySkipsHot = skipSamples.filter(
-    (s) => s.role === 'secondary' && now - s.at <= 15_000
-  ).length;
+function recompute(): void {
+  const gate = getRpcGateSnapshot();
+  const dataQ = gate.lanes.secondary.queued;
+  const dataSkips = gate.lanes.secondary.skipsPerMin;
+  const dataLat = lastSignals.dataLatencyMs;
+  const tradeLat = lastSignals.tradingLatencyMs;
+  const latSpike = dataLat != null && dataLat >= 2_500;
+  const reasons: string[] = [];
 
   let scannerSlowFactor = 1;
   let utilitySlowFactor = 1;
   let shedBackground = false;
-  const reasons: string[] = [];
+  let level: 'ok' | 'busy' | 'shed' = 'ok';
+  let cause: string | null = null;
 
-  // Only the rolling 60s window — never lifetime lane.skipped (that never resets
-  // and permanently pinned scanner×3 after the first boot burst).
-  const secSkip = secondarySkipsRecent;
-  const laneIdle = external?.secondaryIdle === true;
-  // Higher bars + idle heal: micro-skips must not pin scanners at ×3 while
-  // Secondary is already empty.
-  if (!laneIdle && secondarySkipsHot >= 6) {
-    scannerSlowFactor = Math.max(scannerSlowFactor, 3);
-    reasons.push(`secondary skips ${secondarySkipsHot}/15s → scanner×3`);
-  } else if (!laneIdle && secSkip >= 10) {
-    scannerSlowFactor = Math.max(scannerSlowFactor, 3);
-    reasons.push(`secondary skips ${secSkip}/60s → scanner×3`);
-  } else if (secSkip >= 4) {
-    scannerSlowFactor = Math.max(scannerSlowFactor, laneIdle ? 1.5 : 2);
-    reasons.push(
-      laneIdle
-        ? `secondary idle — soft ×${scannerSlowFactor} (${secSkip}/60s)`
-        : `secondary skips ${secSkip}/60s → scanner×2`
-    );
+  // Trading pressure → shed background (not emergency-alone).
+  if (!lastSignals.tradingOnEmergency) {
+    if (tradeLat != null && tradeLat >= 700) {
+      shedBackground = true;
+      scannerSlowFactor = Math.max(scannerSlowFactor, 3);
+      utilitySlowFactor = Math.max(utilitySlowFactor, 2);
+      reasons.push(`Trading latency ${Math.round(tradeLat)}ms → shed background`);
+    } else if (tradeLat != null && tradeLat >= 450) {
+      shedBackground = true;
+      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+      reasons.push(`Trading latency ${Math.round(tradeLat)}ms → reduce scanners`);
+    }
+  }
+  if (lastSignals.primaryQueued > 0) {
+    shedBackground = true;
+    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+    reasons.push('Trading queue > 0 → shed scanners/Favourites');
   }
 
-  const pLat = external?.primaryLatencyMs;
-  if (pLat != null && pLat >= 700) {
-    shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 3);
+  if (!lastSignals.dataHealthy || dataSkips > 30 || dataQ > 24 || latSpike) {
+    level = 'shed';
+    cause = !lastSignals.dataHealthy
+      ? 'data lane unhealthy'
+      : latSpike
+        ? `data latency ${Math.round(dataLat!)}ms`
+        : dataSkips > 30
+          ? `data skips/min ${dataSkips}`
+          : `data queue ${dataQ}`;
+    scannerSlowFactor = Math.max(scannerSlowFactor, 4);
+    utilitySlowFactor = Math.max(utilitySlowFactor, 3);
+    reasons.push(cause);
+  } else if (
+    dataQ > 8 ||
+    dataSkips > 10 ||
+    (dataLat != null && dataLat >= 1_200)
+  ) {
+    level = 'busy';
+    cause =
+      dataQ > 8
+        ? `data queue ${dataQ}`
+        : dataSkips > 10
+          ? `data skips/min ${dataSkips}`
+          : `data latency ${Math.round(dataLat!)}ms`;
+    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-    reasons.push(`Critical latency ${Math.round(pLat)}ms → shed background`);
-  } else if (pLat != null && pLat >= 450) {
-    shedBackground = true;
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push(`Critical latency ${Math.round(pLat)}ms → reduce scanners`);
+    reasons.push(cause);
   }
 
-  if ((external?.primaryQueued ?? 0) > 0) {
-    shedBackground = true;
+  if (dataLat != null && dataLat >= 600) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push('Critical queue > 0 → shed scanners/utility');
+    reasons.push(`Data latency ${Math.round(dataLat)}ms → slow scanners`);
   }
 
-  const uLat = external?.utilityLatencyMs;
-  if (external?.utilityWeakPublic) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    reasons.push('Utility on weak public RPC → cut Favourites/activity');
-  }
-  if (external?.utilityFailover) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2);
-    reasons.push('Utility failover → reduce utility workload');
-  }
-  if (uLat != null && uLat >= 800) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    reasons.push(`Utility latency ${Math.round(uLat)}ms → slow polls`);
-  } else if (uLat != null && uLat >= 500) {
-    utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
-    reasons.push(`Utility latency ${Math.round(uLat)}ms → soft slowdown`);
-  }
-
-  const sLat = external?.secondaryLatencyMs;
-  if (sLat != null && sLat >= 600) {
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
-  }
+  const favouritesDeferred = utilitySlowFactor >= 2.5 || level === 'shed';
+  if (shedBackground && level === 'ok') level = 'busy';
+  if (shedBackground && scannerSlowFactor >= 3) level = 'shed';
 
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
     utilitySlowFactor: Math.min(4, utilitySlowFactor),
     shedBackground,
     reasons,
-    secondarySkipsRecent: secSkip,
-    updatedAt: now,
+    secondarySkipsRecent: dataSkips,
+    updatedAt: Date.now(),
+    level,
+    cause: cause || reasons[0] || null,
+    scannerMultiplier: Math.min(4, scannerSlowFactor),
+    favouritesDeferred,
+    dataPressure: level !== 'ok',
   };
 
-  if (reasons.length && now - lastLogAt > 20_000) {
-    lastLogAt = now;
+  if (reasons.length && Date.now() - lastLogAt > 20_000) {
+    lastLogAt = Date.now();
     console.warn(
       `[rpc-load] adaptive backoff: scanner×${lastSnapshot.scannerSlowFactor} ` +
-        `utility×${lastSnapshot.utilitySlowFactor}` +
+        `favourites×${lastSnapshot.utilitySlowFactor}` +
         (shedBackground ? ' shedBackground=ON' : '') +
         ` — ${reasons.join('; ')}`
     );
   }
 }
 
-/** Feed live latency / failover signals from connection (call periodically). */
-export function updateRpcLoadSignals(signals: {
+export function updateRpcLoadSignals(s: {
   primaryLatencyMs?: number | null;
   secondaryLatencyMs?: number | null;
   utilityLatencyMs?: number | null;
   utilityWeakPublic?: boolean;
   utilityFailover?: boolean;
+  tradingOnEmergency?: boolean;
+  dataHealthy?: boolean;
   primaryQueued?: number;
   secondarySkipped?: number;
   secondaryIdle?: boolean;
 }): void {
-  recompute(signals);
+  if (s.primaryLatencyMs !== undefined) {
+    lastSignals.tradingLatencyMs = s.primaryLatencyMs;
+  }
+  if (s.secondaryLatencyMs !== undefined) {
+    lastSignals.dataLatencyMs = s.secondaryLatencyMs;
+  }
+  if (s.tradingOnEmergency !== undefined) {
+    lastSignals.tradingOnEmergency = s.tradingOnEmergency;
+  }
+  if (s.dataHealthy !== undefined) {
+    lastSignals.dataHealthy = s.dataHealthy;
+  }
+  if (s.primaryQueued !== undefined) {
+    lastSignals.primaryQueued = s.primaryQueued;
+  }
+  // utilityWeakPublic / utilityFailover intentionally ignored — emergency
+  // alone must not drive global stress.
+  recompute();
 }
 
 export function getRpcLoadControlSnapshot(): RpcLoadControlSnapshot {
+  recompute();
   return { ...lastSnapshot, reasons: [...lastSnapshot.reasons] };
 }
 
-/** Effective scanner poll interval after adaptive slowdown. */
 export function adaptiveScannerIntervalMs(baseMs: number): number {
   const f = getRpcLoadControlSnapshot().scannerSlowFactor;
   return Math.round(Math.max(baseMs, baseMs * f));
 }
 
-/** True if this scanner tick should skip under adaptive load. */
 export function shouldSkipScannerTick(subsystem: string): {
   skip: boolean;
   reason: string | null;
 } {
   const snap = getRpcLoadControlSnapshot();
-  // ×3+ means Secondary is already shedding — always skip the tick so we
-  // do not keep acquiring (and re-noting skips) every 22s.
   if (snap.scannerSlowFactor >= 3) {
     return {
       skip: true,
       reason: snap.shedBackground
-        ? `adaptive shed for Critical (${snap.reasons[0] || 'load'})`
+        ? `adaptive shed for Trading (${snap.reasons[0] || 'load'})`
         : `adaptive scanner×${snap.scannerSlowFactor} (${subsystem})`,
     };
   }
-  // Probabilistic skip when mild slowdown (×2). Cap so Market Scanner cannot
-  // go quiet for long stretches.
   if (snap.scannerSlowFactor >= 2) {
     const skipChance = Math.min(0.35, 1 - 1 / snap.scannerSlowFactor);
     if (Math.random() < skipChance) {
@@ -228,4 +227,8 @@ export function utilityPollScale(): {
     gapScale: f,
     skipActivity: f >= 2.5,
   };
+}
+
+export function shouldDeferFavouritesWork(): boolean {
+  return getRpcLoadControlSnapshot().favouritesDeferred;
 }

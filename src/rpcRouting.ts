@@ -1,95 +1,69 @@
 /**
- * Feature → RPC lane routing for classic Share and Multi-lane modes.
+ * Feature → RPC lane map (simple 2-lane).
+ * primary = Trading (Alchemy BACKUP)
+ * secondary = Data (Alchemy primary)
  */
-
-import type { RpcRole } from './connection';
-import { getRpcMode } from './config';
 
 export type RpcFeature =
   | 'trade_entry'
   | 'migration'
+  | 'live_balance'
+  | 'open_mark'
   | 'market_scanner'
   | 'alpha_scan'
   | 'zion'
+  | 'bonding_curve'
+  | 'token_metrics'
+  | 'anti_rug'
   | 'wallet_poll'
   | 'wallet_import'
   | 'activity'
-  | 'token_metrics'
-  | 'anti_rug'
-  | 'bonding_curve'
-  | 'default';
+  | 'default'
+  | string;
+
+export type RpcRole =
+  | 'primary'
+  | 'secondary'
+  | 'utility'
+  | 'scannersB'
+  | 'metrics';
 
 /**
- * Map a workload feature to an RPC lane.
- * Share OFF: mostly primary; Zion + activity stay secondary (legacy).
- * Share ON classic: critical→primary (Helius), scanners/Zion→secondary (Alchemy),
- * wallet poll + import/activity→utility (public).
- * Multi-lane: typed sticky buckets — ScannersA=secondary, ScannersB/Metrics distinct.
+ * Map feature → lane. Legacy utility/scannersB/metrics collapse to secondary.
+ * Second arg (`shareLoad`) is ignored — kept so existing call sites compile.
  */
 export function getRpcRoleFor(
   feature: RpcFeature,
-  shareLoad: boolean
+  _shareLoad?: boolean
 ): RpcRole {
-  if (getRpcMode() === 'multiLane' && shareLoad) {
-    return getMultiLaneRoleFor(feature);
-  }
-
-  if (!shareLoad) {
-    if (feature === 'zion' || feature === 'activity') return 'secondary';
-    return 'primary';
-  }
-
   switch (feature) {
     case 'trade_entry':
     case 'migration':
+    case 'live_balance':
+    case 'open_mark':
+    case 'priority_fee':
+    case 'mev':
+    case 'send':
       return 'primary';
     case 'market_scanner':
     case 'alpha_scan':
     case 'zion':
+    case 'bonding_curve':
     case 'token_metrics':
     case 'anti_rug':
-    case 'bonding_curve':
-      return 'secondary';
     case 'wallet_poll':
     case 'wallet_import':
     case 'activity':
-      return 'utility';
-    case 'default':
+    case 'favourites':
+    case 'health_probe':
+      return 'secondary';
     default:
       return 'primary';
   }
 }
 
-/** Multi-lane typed sticky buckets (Share ON + mode=multiLane). */
-function getMultiLaneRoleFor(feature: RpcFeature): RpcRole {
-  switch (feature) {
-    case 'trade_entry':
-    case 'migration':
-    case 'default':
-      return 'primary';
-    case 'market_scanner':
-    case 'bonding_curve':
-      return 'secondary';
-    case 'alpha_scan':
-    case 'zion':
-      return 'scannersB';
-    case 'token_metrics':
-    case 'anti_rug':
-      return 'metrics';
-    case 'wallet_poll':
-    case 'wallet_import':
-    case 'activity':
-      return 'utility';
-    default:
-      return 'primary';
-  }
-}
-
-/** Human labels for Config → RPC share chips / Multi-lane cards. */
-export function shareLoadLaneTitle(role: RpcRole): string {
-  if (role === 'primary') return 'Critical';
-  if (role === 'secondary') return 'Scanners';
-  if (role === 'scannersB') return 'Scanners B';
-  if (role === 'metrics') return 'Metrics';
-  return 'Utility';
+/** Normalize legacy roles onto the 2-lane model. */
+export function normalizeRpcRole(role: RpcRole | string | undefined): 'primary' | 'secondary' {
+  if (role === 'primary') return 'primary';
+  return 'secondary';
 }

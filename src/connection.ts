@@ -1,6 +1,6 @@
 /**
- * Multi-RPC connection manager with primary / secondary / utility lanes,
- * health monitoring, cross-lane failover, priority fees, and stats.
+ * Simple 2-lane RPC: Trading (Alchemy BACKUP) + Data (Alchemy) + Emergency (public).
+ * Helius is never probed or routed. Facade preserved for callers.
  */
 
 import { AsyncLocalStorage } from 'async_hooks';
@@ -15,32 +15,29 @@ import {
 } from '@solana/web3.js';
 import bs58 from 'bs58';
 import dotenv from 'dotenv';
-import { config, getActiveTradingWallet, listTradingWalletSlots, resolveTradingWalletSecret } from './config';
+import {
+  config,
+  getActiveTradingWallet,
+  listTradingWalletSlots,
+  resolveTradingWalletSecret,
+} from './config';
 import { logger, errorToMeta } from './logger';
 import {
-  PUBLIC_SOLANA_RPC,
-  normalizeRpcEndpoints,
-  rpcEndpointsFromEnv,
-  discoverAllRpcEndpoints,
-  countPaidDiscoveredEndpoints,
-  RPC_LANE_SUPPORTS,
-  RPC_SHARE_LOAD_SUPPORTS,
+  rpcEndpointsSimple,
   isPublicRpcUrl,
-  isQuicknodeRpcUrl,
-  isOfficialMainnetBetaRpcUrl,
-  type RpcLaneRole,
+  type SimpleRpcEndpoints,
 } from './rpcUrl';
 import {
-  acquireRpcLane,
   getRpcGateSnapshot,
   isRpcGateSkipError,
+  runWithRpcFeatureGate,
+  type RpcGateRole,
 } from './rpcGate';
+import { normalizeRpcRole } from './rpcRouting';
 
 dotenv.config();
 
-const DEFAULT_RPC = PUBLIC_SOLANA_RPC;
-
-/** Workload lane — classic: primary/secondary/utility; multiLane adds scannersB/metrics */
+/** Workload lane — legacy roles map onto primary|secondary. */
 export type RpcRole =
   | 'primary'
   | 'secondary'
@@ -51,18 +48,16 @@ export type RpcRole =
 export interface RpcEndpoint {
   url: string;
   label: string;
-  /** Optional dedicated websocket URL */
   wsUrl?: string;
-  role?: RpcLaneRole;
+  role?: 'primary' | 'secondary' | 'utility';
 }
 
 export interface RpcEndpointStats {
   url: string;
   label: string;
-  role: RpcLaneRole;
+  role: 'primary' | 'secondary' | 'utility';
   healthy: boolean;
   latencyMs: number | null;
-  /** Latest single-call sample (may spike); UI prefers latencyMs EWMA */
   lastCallLatencyMs?: number | null;
   successCount: number;
   failureCount: number;
@@ -71,17 +66,21 @@ export interface RpcEndpointStats {
   lastCheckedAt: number | null;
   unhealthySince: number | null;
   isActive: boolean;
-  /** Preferred endpoint for primary, secondary, or utility lane */
   lane?: RpcRole | null;
+  emergencyOnly?: boolean;
 }
+
+export type LaneCongestion = {
+  state: 'ok' | 'busy' | 'congested' | 'failover' | 'down' | 'idle' | 'disabled';
+  cause: string;
+  details: string[];
+};
 
 interface EndpointState {
   endpoint: RpcEndpoint;
   connection: Connection;
   healthy: boolean;
-  /** Smoothed latency (EWMA) — used for UI + latency soft-failover */
   latencyMs: number | null;
-  /** Most recent single call latency (spikes included) */
   lastCallLatencyMs: number | null;
   successCount: number;
   failureCount: number;
@@ -89,1449 +88,385 @@ interface EndpointState {
   lastCheckedAt: number | null;
   consecutiveFailures: number;
   unhealthySince: number | null;
-  role: RpcLaneRole;
-  /** Skip this endpoint until this time after a 429 (immediate failover). */
   rateLimitedUntil: number;
-  /**
-   * Hard-fail / quarantine until this time. Stop probe/retry storms
-   * against dead QuickNode/fallbacks so healthy lanes stay clear.
-   */
   hardFailUntil: number;
-  /** Escalating quarantine streak (longer cooldown each re-entry). */
   quarantineStreak: number;
-  /** Last time we logged quarantine enter/exit. */
-  lastQuarantineLogAt: number;
-  /** Last time we logged "marked unhealthy" for this endpoint. */
-  lastUnhealthyLogAt: number;
-  /** When EWMA first crossed LATENCY_STRESS_MS (null when not stressed). */
-  latencyStressedSince: number | null;
-  /** Last time we logged latency soft-failover. */
-  lastLatencyFailoverLogAt: number;
+  emergencyOnly: boolean;
 }
 
-let endpoints: EndpointState[] = [];
-/** Preferred index for each lane */
-let preferredPrimary = 0;
-let preferredSecondary = 0;
-let preferredUtility = 0;
-let preferredScannersB = 0;
-let preferredMetrics = 0;
-/** Mid-tier paid failover (QuickNode); -1 when unset */
-let preferredQuicknode = -1;
-/** Emergency-only indices (hard-fail / 429); never soft-picked for background. */
-let emergencyIndices: number[] = [];
-/** True when multi-lane assignment is active (vs classic Share). */
-let multiLaneActive = false;
-let lastMultiLaneAssignAt = 0;
-const MULTI_LANE_RERANK_MS = 3 * 60_000;
-/** Currently resolved index serving each lane (may differ after failover) */
-let activePrimary = 0;
-let activeSecondary = 0;
-let activeUtility = 0;
-let activeScannersB = 0;
-let activeMetrics = 0;
-/** Legacy single active pointer — mirrors primary lane for older callers */
-let activeIndex = 0;
+type LaneId = 'trading' | 'data' | 'emergency';
 
 const rpcRoleAls = new AsyncLocalStorage<RpcRole>();
-/** Optional feature tag for call metering (wallet_poll, health_probe, …). */
 const rpcFeatureAls = new AsyncLocalStorage<string>();
-/** >0 when already inside an acquired lane gate (nested runWithRpcRole). */
 const rpcGateDepthAls = new AsyncLocalStorage<number>();
 
-/** Cached keypairs by trading wallet id — secrets never leave process memory */
 const keypairCache = new Map<string, Keypair>();
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let started = false;
 
-/** HTTP JSON-RPC call meter — counts real CU burn (getConnection path included). */
+let simple: SimpleRpcEndpoints | null = null;
+let trading: EndpointState | null = null;
+let data: EndpointState | null = null;
+let emergency: EndpointState | null = null;
+
+/** Trading sticky vs emergency failover */
+let tradingOnEmergency = false;
+let tradingHardFailStreak = 0;
+let tradingRecoverAt = 0;
+const TRADING_HARD_FAIL_NEED = 3;
+const TRADING_RECOVER_MS = 45_000;
+const RATE_LIMIT_COOLDOWN_MS = 60_000;
+const HARD_FAIL_COOLDOWN_MS = 120_000;
+const LATENCY_EWMA_ALPHA = 0.25;
+const WITH_RPC_MAX_ATTEMPTS_CRITICAL = 3;
+const WITH_RPC_MAX_ATTEMPTS_OTHER = 2;
+
 export type RpcCallTrafficRow = {
   endpoint: string;
   feature: string;
-  method: string;
   role: RpcRole | 'unknown';
-  calls: number;
-  errors: number;
-  totalMs: number;
-  avgMs: number;
+  count: number;
+  lastAt: number;
 };
 
-type CallMeterKey = string;
-const callMeter = new Map<
-  CallMeterKey,
-  {
-    endpoint: string;
-    feature: string;
-    method: string;
-    role: RpcRole | 'unknown';
-    calls: number;
-    errors: number;
-    totalMs: number;
-  }
->();
-let callMeterStartedAt = Date.now();
+const callTraffic = new Map<string, RpcCallTrafficRow>();
 
-function callMeterKey(
-  endpoint: string,
-  feature: string,
-  method: string,
-  role: string
-): CallMeterKey {
-  return `${endpoint}|${feature}|${method}|${role}`;
-}
-
-function recordHttpRpcCall(opts: {
-  endpoint: string;
-  method: string;
-  ok: boolean;
-  latencyMs: number;
-}): void {
-  const feature = rpcFeatureAls.getStore() || 'ungated';
-  const role = rpcRoleAls.getStore() ?? 'unknown';
-  const key = callMeterKey(opts.endpoint, feature, opts.method, role);
-  let row = callMeter.get(key);
-  if (!row) {
-    row = {
-      endpoint: opts.endpoint,
+function noteCallTraffic(endpoint: string, feature: string, role: RpcRole | 'unknown') {
+  const key = `${endpoint}|${feature}|${role}`;
+  const prev = callTraffic.get(key);
+  if (prev) {
+    prev.count += 1;
+    prev.lastAt = Date.now();
+  } else {
+    callTraffic.set(key, {
+      endpoint,
       feature,
-      method: opts.method,
       role,
-      calls: 0,
-      errors: 0,
-      totalMs: 0,
-    };
-    callMeter.set(key, row);
+      count: 1,
+      lastAt: Date.now(),
+    });
   }
-  row.calls += 1;
-  if (!opts.ok) row.errors += 1;
-  row.totalMs += Math.max(0, opts.latencyMs);
 }
 
 export function getRpcCallTraffic(limit = 40): {
-  sinceMs: number;
-  totalCalls: number;
-  byEndpoint: Record<string, number>;
-  byFeature: Record<string, number>;
-  top: RpcCallTrafficRow[];
+  rows: RpcCallTrafficRow[];
+  total: number;
 } {
-  const top: RpcCallTrafficRow[] = [];
-  const byEndpoint: Record<string, number> = {};
-  const byFeature: Record<string, number> = {};
-  let totalCalls = 0;
-  for (const row of callMeter.values()) {
-    totalCalls += row.calls;
-    byEndpoint[row.endpoint] = (byEndpoint[row.endpoint] || 0) + row.calls;
-    byFeature[row.feature] = (byFeature[row.feature] || 0) + row.calls;
-    top.push({
-      ...row,
-      avgMs: row.calls ? Math.round(row.totalMs / row.calls) : 0,
-    });
-  }
-  top.sort((a, b) => b.calls - a.calls);
-  return {
-    sinceMs: Date.now() - callMeterStartedAt,
-    totalCalls,
-    byEndpoint,
-    byFeature,
-    top: top.slice(0, Math.max(1, limit)),
-  };
+  const rows = [...callTraffic.values()].sort((a, b) => b.count - a.count);
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  return { rows: rows.slice(0, limit), total };
 }
 
-function parseRpcMethodsFromBody(body: unknown): string[] {
-  try {
-    let raw = '';
-    if (typeof body === 'string') raw = body;
-    else if (body != null && typeof (body as { toString?: () => string }).toString === 'function') {
-      raw = String(body);
-    }
-    if (!raw) return ['unknown'];
-    const parsed = JSON.parse(raw) as
-      | { method?: string }
-      | Array<{ method?: string }>;
-    if (Array.isArray(parsed)) {
-      const methods = parsed
-        .map((p) => p?.method)
-        .filter((m): m is string => Boolean(m));
-      return methods.length ? methods : ['batch'];
-    }
-    return [parsed?.method || 'unknown'];
-  } catch {
-    return ['unknown'];
-  }
-}
-
-function meteredFetch(endpointLabel: string) {
-  const baseFetch = globalThis.fetch.bind(globalThis);
-  return async (
-    input: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1]
-  ): Promise<Response> => {
-    const methods = parseRpcMethodsFromBody(init?.body);
-    const t0 = Date.now();
-    let ok = false;
-    try {
-      const res = await baseFetch(input, init);
-      ok = res.ok;
-      const latencyMs = Date.now() - t0;
-      for (const method of methods) {
-        recordHttpRpcCall({
-          endpoint: endpointLabel,
-          method,
-          ok,
-          latencyMs,
-        });
-      }
-      return res;
-    } catch (err) {
-      const latencyMs = Date.now() - t0;
-      for (const method of methods) {
-        recordHttpRpcCall({
-          endpoint: endpointLabel,
-          method,
-          ok: false,
-          latencyMs,
-        });
-      }
-      throw err;
-    }
-  };
-}
-
-/** Default cross-lane piggyback grace — preferred must stay unhealthy this long. */
-const DEFAULT_FAILOVER_DOWN_MS = 30_000;
-/** Floor so env typos cannot collapse failover to zero. */
-const MIN_FAILOVER_DOWN_MS = 5_000;
-/** After a 429, leave the hot endpoint alone so failover can breathe. */
-const RATE_LIMIT_COOLDOWN_MS = 60_000;
-/** Dead/failing endpoints: base quarantine (escalates with streak). */
-const HARD_FAIL_COOLDOWN_MS = 5 * 60_000;
-const HARD_FAIL_COOLDOWN_MAX_MS = 20 * 60_000;
-/** Cap withRpc endpoint walks — avoid retry storms across every fallback. */
-const WITH_RPC_MAX_ATTEMPTS_CRITICAL = 4;
-const WITH_RPC_MAX_ATTEMPTS_OTHER = 3;
-/** Don't re-log "marked unhealthy" more often than this. */
-const UNHEALTHY_LOG_THROTTLE_MS = 15_000;
-/** EWMA weight for new samples — dampens single getTransaction spikes in the UI. */
-const LATENCY_EWMA_ALPHA = 0.22;
-/** EWMA above this → start latency-stress timer (matches rpcDiagnostic). */
-const LATENCY_STRESS_MS = 500;
-/** EWMA below this → clear latency stress (hysteresis). */
-const LATENCY_RECOVER_MS = 320;
-/**
- * Utility may soft-fail onto QuickNode only when preferred EWMA is this hot
- * (after public/fallback alternatives) and QN is not already serving Critical/Scanners.
- */
-const UTILITY_QUICKNODE_STRESS_MS = 1000;
-/** Prefer piggyback after preferred stays latency-stressed this long. */
-const LATENCY_STRESS_GRACE_MS = 15_000;
-/** Public Solana is often chronically slow from cloud hosts — fail over sooner. */
-const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
-/** Don't re-log latency piggyback more often than this. */
-const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
-
-function latencyStressGraceMs(state: EndpointState | undefined): number {
-  if (state && isPublicRpcUrl(state.endpoint.url)) {
-    return LATENCY_STRESS_GRACE_PUBLIC_MS;
-  }
-  return LATENCY_STRESS_GRACE_MS;
-}
-
-/**
- * True 429 / provider rate-limit signals only.
- * Do NOT treat connect timeouts / generic "fetch failed" as rate limits —
- * that applied a 60s probe blackout and, combined with stressed-gate skip of
- * non-active endpoints, left preferred lanes sticky-DOWN for hours while
- * the hosts were fine.
- */
-function isRpcRateLimitMessage(error: string): boolean {
-  return /429|rate.?limit|-32429|too many requests/i.test(error);
-}
-
-function isEndpointRateLimited(state: EndpointState | undefined): boolean {
-  return Boolean(state && state.rateLimitedUntil > Date.now());
-}
-
-function isEndpointHardFailed(state: EndpointState | undefined): boolean {
-  return Boolean(state && state.hardFailUntil > Date.now());
-}
-
-function quarantineMsFor(state: EndpointState): number {
-  const streak = Math.max(1, state.quarantineStreak || 1);
-  return Math.min(
-    HARD_FAIL_COOLDOWN_MAX_MS,
-    HARD_FAIL_COOLDOWN_MS * Math.pow(2, Math.min(3, streak - 1))
-  );
-}
-
-function enterQuarantine(state: EndpointState, reason: string): void {
-  const wasQuarantined = state.hardFailUntil > Date.now();
-  if (!wasQuarantined) {
-    state.quarantineStreak = Math.min(8, (state.quarantineStreak || 0) + 1);
-  }
-  const ms = quarantineMsFor(state);
-  state.hardFailUntil = Date.now() + ms;
-  state.healthy = false;
-  const now = Date.now();
-  if (now - state.lastQuarantineLogAt >= 15_000) {
-    state.lastQuarantineLogAt = now;
-    console.warn(
-      `[rpc-quarantine] ENTER ${state.endpoint.label} for ${Math.round(ms / 1000)}s ` +
-        `(streak ${state.quarantineStreak}) — ${reason}`
-    );
-    try {
-      const { requestZionSupervisionEventCheck } =
-        require('./zionSupervision') as typeof import('./zionSupervision');
-      requestZionSupervisionEventCheck('rpc_quarantine');
-    } catch {
-      /* optional */
-    }
-  }
-}
-
-/** Official mainnet-beta / publicnode — chronically slow from cloud hosts. */
-export function isWeakPublicUtilityUrl(url: string | null | undefined): boolean {
-  const u = (url || '').toLowerCase();
-  if (!u) return true;
-  if (isOfficialMainnetBetaRpcUrl(u)) return true;
-  if (u.includes('publicnode.com')) return true;
-  if (!isPublicRpcUrl(u)) return false;
-  // Keyed / paid hosts are not "weak public" even if classified public by mistake.
-  if (
-    u.includes('helius') ||
-    u.includes('alchemy') ||
-    u.includes('quiknode') ||
-    u.includes('quicknode') ||
-    u.includes('triton') ||
-    u.includes('rpcpool')
-  ) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * True when the Utility lane is actively on a weak public endpoint
- * (favourites/activity should slow hard).
- */
-export function isUtilityOnWeakPublic(): boolean {
-  ensureEndpoints();
-  const idx = resolveIndexForRole('utility');
-  const state = endpoints[idx];
-  if (!state) return true;
-  return isWeakPublicUtilityUrl(state.endpoint.url);
-}
-
-/** Stronger utility candidate: configured rpc-url / utility role that is not weak public. */
-function isStrongUtilityEndpoint(state: EndpointState | undefined): boolean {
-  if (!state) return false;
-  if (isWeakPublicUtilityUrl(state.endpoint.url)) return false;
-  if (isEndpointHardFailed(state) || isEndpointRateLimited(state)) return false;
-  const label = (state.endpoint.label || '').toLowerCase();
-  if (state.role === 'utility') return true;
-  if (label === 'rpc-url' || state.role === 'fallback') {
-    // Custom RPC_URL / mid-tier fallback — prefer over publicnode/mainnet-beta.
-    return !isPublicRpcUrl(state.endpoint.url) || label === 'rpc-url';
-  }
-  return false;
-}
-
-function pickPreferredUtilityIndex(): number {
-  // 1) Dedicated utility role that is not weak public
-  for (let i = 0; i < endpoints.length; i++) {
-    const e = endpoints[i];
-    if (e?.role === 'utility' && isStrongUtilityEndpoint(e)) return i;
-  }
-  // 2) rpc-url / non-public fallback
-  for (let i = 0; i < endpoints.length; i++) {
-    const e = endpoints[i];
-    if (!e) continue;
-    const label = (e.endpoint.label || '').toLowerCase();
-    if (
-      (label === 'rpc-url' || e.role === 'fallback') &&
-      isStrongUtilityEndpoint(e)
-    ) {
-      return i;
-    }
-  }
-  // 3) Any non-weak, non-primary/secondary public-ish
-  for (let i = 0; i < endpoints.length; i++) {
-    if (i === preferredPrimary || i === preferredSecondary) continue;
-    if (isStrongUtilityEndpoint(endpoints[i])) return i;
-  }
-  // 4) Classic: first utility role, else first public
-  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
-  if (utilIdx >= 0) return utilIdx;
-  const pub = endpoints.findIndex((e) => isPublicRpcUrl(e.endpoint.url));
-  if (pub >= 0) return pub;
-  return preferredSecondary;
-}
-
-/** Sticky window so Utility does not thrash between weak publics. */
-const UTILITY_FAILOVER_STICKY_MS = 45_000;
-let lastUtilityFailoverAt = 0;
-let lastUtilityFailoverIdx = -1;
-
-/**
- * True when every configured endpoint is in a 429 cooldown — callers should
- * skip non-critical RPC (migration parse, wallet seed) so /health stays alive.
- */
-export function shouldDeferHeavyRpc(): boolean {
-  ensureEndpoints();
-  if (endpoints.length === 0) return false;
-  return endpoints.every((e) => isEndpointRateLimited(e));
-}
-
-/** True when the lane's preferred (or active) endpoint is cooling after a 429. */
-export function isLaneRateLimited(role: RpcRole = 'primary'): boolean {
-  ensureEndpoints();
-  const pref = endpoints[preferredIndexFor(role)];
-  if (isEndpointRateLimited(pref)) return true;
-  const active = endpoints[resolveIndexForRole(role)];
-  return isEndpointRateLimited(active);
-}
-
-function failoverDownMs(): number {
-  const fromEnv = Number(process.env.RPC_FAILOVER_DOWN_MS);
-  if (Number.isFinite(fromEnv) && fromEnv >= MIN_FAILOVER_DOWN_MS) return fromEnv;
-  const fromCfg = Number(
-    (config.rpc as { failoverDownMs?: number } | undefined)?.failoverDownMs
-  );
-  if (Number.isFinite(fromCfg) && fromCfg >= MIN_FAILOVER_DOWN_MS) return fromCfg;
-  return DEFAULT_FAILOVER_DOWN_MS;
-}
-
-function formatFailoverGrace(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  return `${Math.round(ms / 60_000)}m`;
-}
-
-function parseRpcList(): RpcEndpoint[] {
-  if (config.rpc?.mode === 'multiLane') {
-    const discovered = discoverAllRpcEndpoints();
-    const paid = countPaidDiscoveredEndpoints(discovered);
-    if (paid >= 3) {
-      return normalizeRpcEndpoints(
-        discovered.map((e) => ({
-          url: e.url,
-          label: e.label,
-          wsUrl: e.wsUrl,
-          role: 'fallback' as RpcLaneRole,
-        }))
-      );
-    }
-    // Fewer than 3 paid → classic Share assignment (auto-fallback).
-    console.warn(
-      `[rpc] Multi-lane needs ≥3 paid endpoints (found ${paid}) — using classic Share assignment`
-    );
-  }
-  const fromConfig = config.rpc?.endpoints ?? [];
-  if (fromConfig.length > 0) {
-    return normalizeRpcEndpoints(
-      fromConfig.map((e, i) => ({
-        url: e.url,
-        label: e.label || `rpc-${i + 1}`,
-        wsUrl: e.wsUrl,
-        role: (e as { role?: RpcLaneRole }).role,
-      }))
-    );
-  }
-  return rpcEndpointsFromEnv();
-}
-
-function toWsUrl(httpUrl: string): string {
-  return httpUrl.replace('https://', 'wss://').replace('http://', 'ws://');
-}
-
-/** Prefer Helius, then Alchemy, then QuickNode, then other paid. */
-function paidSeatScore(label: string, url: string): number {
-  const l = (label || '').toLowerCase();
-  if (l.includes('helius') && !l.includes('backup')) return 0;
-  if (l.includes('helius')) return 1;
-  if (l.includes('alchemy') && !l.includes('backup')) return 2;
-  if (l.includes('alchemy')) return 3;
-  if (isQuicknodeRpcUrl(url) || l.includes('quicknode')) return 4;
-  if (isPublicRpcUrl(url)) return 100;
-  return 10;
-}
-
-function assignClassicLanePrefs(): void {
-  multiLaneActive = false;
-  emergencyIndices = [];
-  preferredPrimary = Math.max(
-    0,
-    endpoints.findIndex((e) => e.role === 'primary')
-  );
-  const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
-  preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
-  preferredScannersB = preferredSecondary;
-  preferredMetrics = preferredSecondary;
-  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
-  preferredUtility = pickPreferredUtilityIndex();
-  if (utilIdx >= 0 && preferredUtility !== utilIdx) {
-    console.log(
-      `[rpc] Utility preferred ${endpoints[preferredUtility]?.endpoint.label} ` +
-        `(stronger than role-utility ${endpoints[utilIdx]?.endpoint.label})`
-    );
-  }
-  preferredQuicknode = endpoints.findIndex(
-    (e) =>
-      e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
-  );
-  activePrimary = preferredPrimary;
-  activeSecondary = preferredSecondary;
-  activeUtility = preferredUtility;
-  activeScannersB = preferredScannersB;
-  activeMetrics = preferredMetrics;
-  activeIndex = activePrimary;
-}
-
-/**
- * Rank paid hosts and pin typed sticky lanes; hold 1–2 as emergency-only.
- */
-function assignMultiLanePrefs(): void {
-  const paidIdx: number[] = [];
-  const publicIdx: number[] = [];
-  for (let i = 0; i < endpoints.length; i++) {
-    const e = endpoints[i];
-    if (!e) continue;
-    if (isPublicRpcUrl(e.endpoint.url)) publicIdx.push(i);
-    else paidIdx.push(i);
-  }
-  paidIdx.sort((a, b) => {
-    const sa = paidSeatScore(
-      endpoints[a]!.endpoint.label,
-      endpoints[a]!.endpoint.url
-    );
-    const sb = paidSeatScore(
-      endpoints[b]!.endpoint.label,
-      endpoints[b]!.endpoint.url
-    );
-    if (sa !== sb) return sa - sb;
-    const la = endpoints[a]!.latencyMs;
-    const lb = endpoints[b]!.latencyMs;
-    if (la != null && lb != null && la !== lb) return la - lb;
-    return a - b;
+function makeConnection(url: string): Connection {
+  return new Connection(url, {
+    commitment: 'confirmed',
+    disableRetryOnRateLimit: true,
+    confirmTransactionInitialTimeout: 60_000,
   });
-
-  if (paidIdx.length < 3) {
-    assignClassicLanePrefs();
-    console.warn(
-      '[rpc] Multi-lane assignment fell back to classic (insufficient paid hosts)'
-    );
-    return;
-  }
-
-  multiLaneActive = true;
-  lastMultiLaneAssignAt = Date.now();
-
-  // Sticky seats: Critical, ScannersA, ScannersB, Metrics (merge if short), Utility=public
-  const stickyPaid: number[] = [];
-  const emergPaid: number[] = [];
-  // Hold QuickNode / last paid as emergency when we have extras
-  for (let i = 0; i < paidIdx.length; i++) {
-    const idx = paidIdx[i]!;
-    const label = (endpoints[idx]!.endpoint.label || '').toLowerCase();
-    const isQn =
-      isQuicknodeRpcUrl(endpoints[idx]!.endpoint.url) ||
-      label.includes('quicknode');
-    // Prefer keeping QuickNode + last spare as emergency once we have 4 sticky paid candidates
-    if (
-      stickyPaid.length >= 4 &&
-      (isQn || emergPaid.length < 2)
-    ) {
-      emergPaid.push(idx);
-      continue;
-    }
-    if (stickyPaid.length < 4) {
-      stickyPaid.push(idx);
-    } else if (emergPaid.length < 2) {
-      emergPaid.push(idx);
-    } else {
-      stickyPaid.push(idx);
-    }
-  }
-  // Ensure at least one emergency: QuickNode or last paid moved out
-  if (emergPaid.length === 0 && stickyPaid.length > 3) {
-    const last = stickyPaid.pop()!;
-    emergPaid.push(last);
-  }
-
-  preferredPrimary = stickyPaid[0] ?? paidIdx[0]!;
-  preferredSecondary = stickyPaid[1] ?? preferredPrimary;
-  preferredScannersB = stickyPaid[2] ?? preferredSecondary;
-  preferredMetrics =
-    stickyPaid.length >= 4 ? stickyPaid[3]! : preferredScannersB;
-
-  // Utility: publicnode preferred over mainnet-beta
-  let util = publicIdx.find((i) =>
-    (endpoints[i]!.endpoint.label || '').includes('publicnode')
-  );
-  if (util == null) util = publicIdx[0];
-  if (util == null) {
-    util = pickPreferredUtilityIndex();
-  }
-  preferredUtility = util;
-
-  // Emergency: reserved paid + one public spare (not utility preferred)
-  emergencyIndices = [...emergPaid];
-  for (const i of publicIdx) {
-    if (i === preferredUtility) continue;
-    if (emergencyIndices.length >= 2) break;
-    emergencyIndices.push(i);
-  }
-  if (emergencyIndices.length === 0 && publicIdx.length > 0) {
-    const spare = publicIdx.find((i) => i !== preferredUtility);
-    if (spare != null) emergencyIndices.push(spare);
-  }
-
-  preferredQuicknode = endpoints.findIndex(
-    (e) =>
-      e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
-  );
-
-  // Tag roles for stats/UI
-  for (const e of endpoints) {
-    e.role = 'fallback';
-    e.endpoint.role = 'fallback';
-  }
-  const tag = (idx: number, role: RpcLaneRole) => {
-    if (idx < 0 || !endpoints[idx]) return;
-    endpoints[idx]!.role = role;
-    endpoints[idx]!.endpoint.role = role;
-  };
-  tag(preferredPrimary, 'primary');
-  tag(preferredSecondary, 'secondary');
-  tag(preferredUtility, 'utility');
-
-  activePrimary = preferredPrimary;
-  activeSecondary = preferredSecondary;
-  activeScannersB = preferredScannersB;
-  activeMetrics = preferredMetrics;
-  activeUtility = preferredUtility;
-  activeIndex = activePrimary;
-
-  console.log(
-    `[rpc] Multi-lane sticky — Critical→${endpoints[preferredPrimary]?.endpoint.label} · ` +
-      `ScannersA→${endpoints[preferredSecondary]?.endpoint.label} · ` +
-      `ScannersB→${endpoints[preferredScannersB]?.endpoint.label} · ` +
-      `Metrics→${endpoints[preferredMetrics]?.endpoint.label} · ` +
-      `Utility→${endpoints[preferredUtility]?.endpoint.label} · ` +
-      `Emergency→[${emergencyIndices
-        .map((i) => endpoints[i]?.endpoint.label)
-        .join(', ')}]`
-  );
 }
 
-/** Tear down pool so mode switches / rediscovery re-init cleanly. */
-export function resetRpcEndpointPool(): void {
-  stopRpcHealthMonitor();
-  endpoints = [];
-  multiLaneActive = false;
-  emergencyIndices = [];
-  lastMultiLaneAssignAt = 0;
-  ensureEndpoints();
-  startRpcHealthMonitor();
+function makeState(
+  ep: { url: string; label: string },
+  emergencyOnly = false
+): EndpointState {
+  return {
+    endpoint: { url: ep.url, label: ep.label },
+    connection: makeConnection(ep.url),
+    healthy: true,
+    latencyMs: null,
+    lastCallLatencyMs: null,
+    successCount: 0,
+    failureCount: 0,
+    lastCheckedAt: null,
+    consecutiveFailures: 0,
+    unhealthySince: null,
+    rateLimitedUntil: 0,
+    hardFailUntil: 0,
+    quarantineStreak: 0,
+    emergencyOnly,
+  };
 }
 
 function ensureEndpoints(): void {
-  if (endpoints.length > 0) {
-    // Slow re-rank for multi-lane without flapping on every call
-    if (
-      multiLaneActive &&
-      config.rpc?.mode === 'multiLane' &&
-      Date.now() - lastMultiLaneAssignAt > MULTI_LANE_RERANK_MS
-    ) {
-      assignMultiLanePrefs();
-    }
-    return;
+  if (trading || data || emergency) return;
+  simple = rpcEndpointsSimple();
+  if (simple.trading) trading = makeState(simple.trading);
+  if (simple.data) data = makeState(simple.data);
+  emergency = makeState(simple.emergency, true);
+
+  // If Trading missing, fall back to Data then Emergency for primary work.
+  if (!trading && data) {
+    trading = makeState({ url: data.endpoint.url, label: data.endpoint.label + '-as-trading' });
   }
-
-  const list = parseRpcList();
-  endpoints = list.map((endpoint) => {
-    const role: RpcLaneRole =
-      endpoint.role ||
-      (endpoint.label === 'primary'
-        ? 'primary'
-        : endpoint.label === 'secondary'
-          ? 'secondary'
-          : endpoint.label === 'utility'
-            ? 'utility'
-            : 'fallback');
-    return {
-      endpoint: { ...endpoint, role },
-      connection: new Connection(endpoint.url, {
-        commitment: 'confirmed',
-        wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
-        disableRetryOnRateLimit: true,
-        fetch: meteredFetch(endpoint.label || `rpc`),
-      }),
-      healthy: true,
-      latencyMs: null,
-      lastCallLatencyMs: null,
-      successCount: 0,
-      failureCount: 0,
-      lastCheckedAt: null,
-      consecutiveFailures: 0,
-      unhealthySince: null,
-      role,
-      rateLimitedUntil: 0,
-      hardFailUntil: 0,
-      quarantineStreak: 0,
-      lastQuarantineLogAt: 0,
-      lastUnhealthyLogAt: 0,
-      latencyStressedSince: null,
-      lastLatencyFailoverLogAt: 0,
-    };
-  });
-
-  const wantMulti =
-    config.rpc?.mode === 'multiLane' &&
-    countPaidDiscoveredEndpoints() >= 3;
-
-  if (wantMulti) {
-    assignMultiLanePrefs();
-  } else {
-    assignClassicLanePrefs();
+  if (!trading && emergency) {
+    trading = makeState({ url: emergency.endpoint.url, label: emergency.endpoint.label });
+  }
+  if (!data && trading) {
+    data = makeState({ url: trading.endpoint.url, label: trading.endpoint.label + '-as-data' });
+  }
+  if (!data && emergency) {
+    data = makeState({ url: emergency.endpoint.url, label: emergency.endpoint.label });
   }
 
   console.log(
-    `[rpc] Initialized ${endpoints.length} endpoint(s): ` +
-      endpoints
-        .map((e) => `${e.endpoint.label}[${e.role}]`)
-        .join(', ')
+    `[rpc] Simple 2-lane: tradingEndpoint=${simple.trading?.label || trading?.endpoint.label || 'none'} ` +
+      `dataEndpoint=${simple.data?.label || data?.endpoint.label || 'none'} ` +
+      `helius=disabled emergency=${simple.emergency.label} (idle until Trading hard-fail)`
   );
-  if (!multiLaneActive) {
-    console.log(
-      `[rpc] Lanes — primary→${endpoints[preferredPrimary]?.endpoint.label} ` +
-        `(${maskUrlForLog(endpoints[preferredPrimary]?.endpoint.url)}) · ` +
-        `secondary→${endpoints[preferredSecondary]?.endpoint.label} ` +
-        `(${maskUrlForLog(endpoints[preferredSecondary]?.endpoint.url)}) · ` +
-        `utility→${endpoints[preferredUtility]?.endpoint.label} ` +
-        `(${maskUrlForLog(endpoints[preferredUtility]?.endpoint.url)})` +
-        (preferredQuicknode >= 0
-          ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
-          : '') +
-        ` · cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
-        (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
-    );
-    if (preferredPrimary === preferredSecondary) {
-      console.warn(
-        '[rpc] Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. ' +
-          'Set a distinct RPC_SECONDARY (must differ from RPC_URL).'
-      );
-    }
-  }
 }
 
-function maskUrlForLog(url: string | undefined): string {
-  if (!url) return '—';
+export function resetRpcEndpointPool(): void {
+  trading = null;
+  data = null;
+  emergency = null;
+  simple = null;
+  tradingOnEmergency = false;
+  tradingHardFailStreak = 0;
+  tradingRecoverAt = 0;
+  callTraffic.clear();
+  ensureEndpoints();
+}
+
+export function isWeakPublicUtilityUrl(url: string | null | undefined): boolean {
+  return isPublicRpcUrl(url);
+}
+
+export function isUtilityOnWeakPublic(): boolean {
+  ensureEndpoints();
+  return tradingOnEmergency && isPublicRpcUrl(emergency?.endpoint.url);
+}
+
+export function shouldDeferHeavyRpc(): boolean {
   try {
-    const u = new URL(url);
-    const host = u.host || 'rpc';
-    return host.length > 40 ? host.slice(0, 38) + '…' : host;
+    const { shouldDeferFavouritesWork } = require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    return shouldDeferFavouritesWork();
   } catch {
-    return url.replace(/\/\/.*@/, '//***@').slice(0, 40);
+    return false;
   }
 }
 
-/** True when both lanes prefer the same endpoint index / URL (no distinct secondary). */
+export function isLaneRateLimited(role: RpcRole = 'primary'): boolean {
+  ensureEndpoints();
+  const st = laneState(normalizeRole(role));
+  return Boolean(st && st.rateLimitedUntil > Date.now());
+}
+
 export function lanesShareEndpoint(): boolean {
   ensureEndpoints();
-  if (preferredPrimary === preferredSecondary) return true;
-  const pUrl = endpoints[preferredPrimary]?.endpoint.url;
-  const sUrl = endpoints[preferredSecondary]?.endpoint.url;
-  return Boolean(pUrl && sUrl && pUrl === sUrl);
+  if (!trading || !data) return true;
+  return trading.endpoint.url === data.endpoint.url;
+}
+
+function normalizeRole(role: RpcRole | undefined): 'primary' | 'secondary' {
+  return normalizeRpcRole(role);
 }
 
 function currentRole(): RpcRole {
-  const stored = rpcRoleAls.getStore();
-  if (stored) return stored;
-  // Ungated getConnection() callers (curves, metrics, logs) must not burn
-  // Helius/Alchemy when Share load is on — send them to public/utility.
-  if (Boolean(config.rpc?.shareLoad)) return 'utility';
-  return 'primary';
+  return rpcRoleAls.getStore() ?? 'primary';
 }
 
-/** True when code is inside runWithRpcRole (or an explicit role was bound). */
 export function hasRpcRoleContext(): boolean {
   return rpcRoleAls.getStore() != null;
 }
 
-/** Run work on the secondary (or primary) lane — nested getConnection() inherits the role. */
-export async function runWithRpcRole<T>(
-  role: RpcRole,
-  fn: () => Promise<T> | T,
-  feature?: string
-): Promise<T> {
-  const depth = rpcGateDepthAls.getStore() ?? 0;
-  const bind = async () => {
-    const run = () => rpcRoleAls.run(role, async () => await fn());
-    if (feature) return rpcFeatureAls.run(feature, run);
-    return run();
-  };
-
-  // Nested callers already hold a lane slot — do not double-acquire.
-  if (depth > 0 || feature === 'health_probe') {
-    return bind();
-  }
-
-  let release: (() => void) | null = null;
-  try {
-    const gate = await acquireRpcLane(role, feature);
-    release = gate.release;
-  } catch (err) {
-    if (isRpcGateSkipError(err)) throw err;
-    throw err;
-  }
-
-  try {
-    return await rpcGateDepthAls.run(depth + 1, bind);
-  } finally {
-    release?.();
-  }
-}
-
-export { getRpcGateSnapshot, isRpcGateSkipError } from './rpcGate';
-export type { RpcGateSnapshot, RpcLaneGateStats } from './rpcGate';
-export {
-  shouldDeferBackgroundForCritical,
-  logBackgroundDeferred,
-} from './rpcGate';
-
-/** Tag current async context for HTTP call metering (health probes, etc.). */
-export async function runWithRpcFeature<T>(
-  feature: string,
-  fn: () => Promise<T> | T
-): Promise<T> {
-  return rpcFeatureAls.run(feature, async () => await fn());
-}
-
-function preferredIndexFor(role: RpcRole): number {
+function laneState(role: 'primary' | 'secondary'): EndpointState | null {
   ensureEndpoints();
-  if (role === 'secondary') return preferredSecondary;
-  if (role === 'utility') return preferredUtility;
-  if (role === 'scannersB') return preferredScannersB;
-  if (role === 'metrics') return preferredMetrics;
-  return preferredPrimary;
-}
-
-function downForMs(state: EndpointState | undefined): number {
-  if (!state || state.healthy || !state.unhealthySince) return 0;
-  return Math.max(0, Date.now() - state.unhealthySince);
-}
-
-function setActiveForRole(role: RpcRole, index: number): void {
   if (role === 'primary') {
-    activePrimary = index;
-    activeIndex = index;
-  } else if (role === 'secondary') {
-    activeSecondary = index;
-  } else if (role === 'scannersB') {
-    activeScannersB = index;
-  } else if (role === 'metrics') {
-    activeMetrics = index;
-  } else {
-    activeUtility = index;
+    if (tradingOnEmergency && emergency) return emergency;
+    return trading;
   }
+  return data;
 }
 
-function piggybackOrder(role: RpcRole): RpcRole[] {
-  // Multi-lane / classic: never soft-hop scanners onto Critical.
-  if (role === 'primary') {
-    return multiLaneActive
-      ? ['secondary', 'scannersB', 'metrics']
-      : ['secondary'];
-  }
-  if (role === 'secondary') {
-    return multiLaneActive ? ['scannersB', 'metrics'] : ['primary'];
-  }
-  if (role === 'scannersB') return ['secondary', 'metrics'];
-  if (role === 'metrics') return ['scannersB', 'secondary'];
-  return multiLaneActive
-    ? ['secondary', 'scannersB']
-    : ['secondary', 'primary'];
+function preferredTrading(): EndpointState | null {
+  ensureEndpoints();
+  return trading;
 }
 
-function isEmergencyIndex(idx: number): boolean {
-  return emergencyIndices.includes(idx);
+function isRateLimited(st: EndpointState): boolean {
+  return st.rateLimitedUntil > Date.now();
 }
 
-/** True when Critical or Scanners are already piggybacking on QuickNode. */
-function isQuicknodeBusyAsPaidFailover(): boolean {
-  if (preferredQuicknode < 0) return false;
+function isHardFailed(st: EndpointState): boolean {
+  return st.hardFailUntil > Date.now();
+}
+
+function is429(message: string): boolean {
+  return /429|too many requests|rate.?limit/i.test(message);
+}
+
+function isHardError(message: string): boolean {
   return (
-    activePrimary === preferredQuicknode ||
-    activeSecondary === preferredQuicknode
+    is429(message) ||
+    /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed|socket hang up|503|502|500|401|403/i.test(
+      message
+    )
   );
 }
 
-/**
- * Utility soft-failover may use QuickNode when preferred is severely stressed,
- * QN is healthy/faster, and not already serving primary/secondary.
- */
-function utilityMayUseQuicknodeSoft(pref: EndpointState): boolean {
-  if (preferredQuicknode < 0) return false;
-  if ((pref.latencyMs ?? 0) < UTILITY_QUICKNODE_STRESS_MS) return false;
-  if (isQuicknodeBusyAsPaidFailover()) return false;
-  const qn = endpoints[preferredQuicknode];
-  if (!qn?.healthy || isEndpointRateLimited(qn)) return false;
-  return isFasterAlternate(pref, qn);
+function recordSuccess(st: EndpointState, latencyMs: number): void {
+  st.successCount += 1;
+  st.consecutiveFailures = 0;
+  st.lastCheckedAt = Date.now();
+  st.lastError = undefined;
+  st.lastCallLatencyMs = latencyMs;
+  st.latencyMs =
+    st.latencyMs == null
+      ? latencyMs
+      : LATENCY_EWMA_ALPHA * latencyMs + (1 - LATENCY_EWMA_ALPHA) * st.latencyMs;
+  st.healthy = true;
+  st.unhealthySince = null;
+  if (st.hardFailUntil > 0 && Date.now() >= st.hardFailUntil) {
+    st.hardFailUntil = 0;
+    st.quarantineStreak = 0;
+  }
 }
 
-/** Accept a failover target if healthy / not rate-limited / (for latency) faster. */
-function acceptFailoverTarget(
+function recordFailure(st: EndpointState, message: string): void {
+  st.failureCount += 1;
+  st.consecutiveFailures += 1;
+  st.lastCheckedAt = Date.now();
+  st.lastError = message.slice(0, 240);
+  if (!st.unhealthySince) st.unhealthySince = Date.now();
+  if (st.consecutiveFailures >= 2) st.healthy = false;
+
+  if (is429(message)) {
+    st.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    st.healthy = false;
+  }
+  if (isHardError(message) && st.consecutiveFailures >= 2) {
+    st.quarantineStreak += 1;
+    const cool =
+      HARD_FAIL_COOLDOWN_MS * Math.min(4, Math.max(1, st.quarantineStreak));
+    st.hardFailUntil = Date.now() + cool;
+  }
+}
+
+function noteTradingOutcome(ok: boolean, message?: string): void {
+  if (ok) {
+    tradingHardFailStreak = 0;
+    if (tradingOnEmergency && trading && trading.healthy && !isHardFailed(trading) && !isRateLimited(trading)) {
+      if (!tradingRecoverAt) tradingRecoverAt = Date.now() + TRADING_RECOVER_MS;
+      if (Date.now() >= tradingRecoverAt) {
+        tradingOnEmergency = false;
+        tradingRecoverAt = 0;
+        console.log('[rpc] Trading recovered → Alchemy BACKUP');
+      }
+    }
+    return;
+  }
+  tradingRecoverAt = 0;
+  if (message && (is429(message) || isHardError(message))) {
+    tradingHardFailStreak += 1;
+  } else {
+    tradingHardFailStreak += 1;
+  }
+  if (
+    !tradingOnEmergency &&
+    (tradingHardFailStreak >= TRADING_HARD_FAIL_NEED || (message && is429(message)))
+  ) {
+    tradingOnEmergency = true;
+    tradingHardFailStreak = 0;
+    console.warn(
+      `[rpc] Trading hard-fail → Emergency (${emergency?.endpoint.label || 'public'})`
+    );
+  }
+}
+
+export async function runWithRpcRole<T>(
   role: RpcRole,
-  preferred: number,
-  pref: EndpointState | undefined,
-  altIdx: number,
-  latencySoft: boolean,
-  rateLimited: boolean,
-  downMs: number,
-  avoidPublicForCritical: boolean
-): boolean {
-  if (altIdx < 0 || altIdx === preferred || altIdx >= endpoints.length) return false;
-  const other = endpoints[altIdx];
-  if (!other?.healthy || isEndpointRateLimited(other) || isEndpointHardFailed(other))
-    return false;
-  if (avoidPublicForCritical && isPublicRpcUrl(other.endpoint.url)) return false;
-  // Multi-lane: emergency hosts are hard-fail / 429 only — never soft latency hops.
-  if (multiLaneActive && latencySoft && isEmergencyIndex(altIdx)) return false;
-  // Scanners must not soft-hop onto Critical preferred.
-  if (
-    multiLaneActive &&
-    latencySoft &&
-    (role === 'secondary' || role === 'scannersB' || role === 'metrics') &&
-    altIdx === preferredPrimary
-  ) {
-    return false;
-  }
-  if (latencySoft && pref && !isFasterAlternate(pref, other)) return false;
-  const active =
-    role === 'primary'
-      ? activePrimary
-      : role === 'secondary'
-        ? activeSecondary
-        : role === 'scannersB'
-          ? activeScannersB
-          : role === 'metrics'
-            ? activeMetrics
-            : activeUtility;
-  if (active !== altIdx) {
-    const reason = rateLimited
-      ? 'rate-limited'
-      : latencySoft
-        ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${LATENCY_STRESS_MS}ms for ${Math.round(latencyStressGraceMs(pref) / 1000)}s`
-        : `preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s`;
-    const now = Date.now();
-    if (
-      !latencySoft ||
-      now - (pref?.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS
-    ) {
-      if (pref && latencySoft) pref.lastLatencyFailoverLogAt = now;
-      console.warn(
-        `[rpc] ${role} lane piggybacking on ${other.endpoint.label} (${reason})`
-      );
-    }
-  }
-  setActiveForRole(role, altIdx);
-  return true;
+  fn: () => Promise<T>,
+  feature = 'rpc'
+): Promise<T> {
+  const norm = normalizeRole(role);
+  const depth = rpcGateDepthAls.getStore() ?? 0;
+  const run = () =>
+    rpcRoleAls.run(norm, () =>
+      rpcFeatureAls.run(feature, () =>
+        rpcGateDepthAls.run(depth + 1, fn)
+      )
+    );
+
+  if (depth > 0) return run();
+  return runWithRpcFeatureGate(feature, norm as RpcGateRole, run);
 }
 
-/**
- * Resolve which endpoint index should serve a lane.
- * Preferred stays sticky until unhealthy for failoverDownMs, then piggybacks
- * on other lanes (or any healthy fallback).
- * Rate-limited preferred endpoints skip grace and fail over immediately.
- * Critical (primary) prefers non-public piggybacks when Share load is on.
- */
-function resolveIndexForRole(role: RpcRole): number {
-  ensureEndpoints();
-  const preferred = preferredIndexFor(role);
-  const pref = endpoints[preferred];
-  const latencySoft = latencyFailoverReady(pref);
+export { getRpcGateSnapshot, isRpcGateSkipError };
+export type { RpcGateSnapshot, RpcLaneGateStats } from './rpcGate';
+export {
+  runDedupedRpcJob,
+  runThroughRpcGate,
+  RpcGateSkipError,
+} from './rpcGate';
 
-  // Utility: if preferred is weak public but a stronger non-public/rpc-url is healthy, prefer it.
-  // Multi-lane: do not soft-steal emergency or Critical seats for Favourites.
-  if (role === 'utility' && pref && isWeakPublicUtilityUrl(pref.endpoint.url)) {
-    for (let i = 0; i < endpoints.length; i++) {
-      if (i === preferred) continue;
-      if (multiLaneActive && isEmergencyIndex(i)) continue;
-      if (multiLaneActive && i === preferredPrimary) continue;
-      const e = endpoints[i];
-      if (!e?.healthy || !isStrongUtilityEndpoint(e)) continue;
-      setActiveForRole(role, i);
-      return i;
-    }
-  }
-
-  if (pref?.healthy && !isEndpointRateLimited(pref) && !latencySoft) {
-    setActiveForRole(role, preferred);
-    return preferred;
-  }
-
-  const downMs = downForMs(pref);
-  const rateLimited = isEndpointRateLimited(pref);
-  // Sticky grace for hard failures only — latency soft-failover skips this wait.
-  if (
-    !latencySoft &&
-    !rateLimited &&
-    downMs > 0 &&
-    downMs < failoverDownMs()
-  ) {
-    return preferred;
-  }
-
-  const shareLoad = Boolean(config.rpc?.shareLoad);
-  const avoidPublicForCritical = shareLoad && role === 'primary';
-
-  // Utility + public preferred is slow: try another public/fallback
-  // before burning Alchemy/Helius/QuickNode CU on wallet polls.
-  // Prefer stronger utility (rpc-url) over weak publicnode when both healthy.
-  if (latencySoft && role === 'utility' && pref) {
-    let bestIdx = -1;
-    let bestScore = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < endpoints.length; i++) {
-      if (i === preferred) continue;
-      const e = endpoints[i];
-      if (!e?.healthy || isEndpointRateLimited(e) || isEndpointHardFailed(e))
-        continue;
-      if (
-        e.endpoint.label === 'quicknode' ||
-        isQuicknodeRpcUrl(e.endpoint.url)
-      ) {
-        continue;
-      }
-      // Official mainnet-beta getSlot looks fast but wallet polls stay slow — never soft-pick it.
-      if (isOfficialMainnetBetaRpcUrl(e.endpoint.url)) {
-        continue;
-      }
-      const isAltPublic =
-        isPublicRpcUrl(e.endpoint.url) ||
-        e.role === 'fallback' ||
-        e.role === 'utility';
-      if (!isAltPublic) continue;
-      if (!isFasterAlternate(pref, e) && isWeakPublicUtilityUrl(e.endpoint.url))
-        continue;
-      const weakPenalty = isWeakPublicUtilityUrl(e.endpoint.url) ? 450 : 0;
-      const strongBonus = isStrongUtilityEndpoint(e) ? -300 : 0;
-      const score = (e.latencyMs ?? 2_000) + weakPenalty + strongBonus;
-      if (score < bestScore) {
-        bestScore = score;
-        bestIdx = i;
-      }
-    }
-    if (bestIdx >= 0) {
-      const other = endpoints[bestIdx]!;
-      const now = Date.now();
-      // Anti-thrash: stay on current weak failover instead of hopping publicnode↔mainnet-beta.
-      if (
-        isWeakPublicUtilityUrl(other.endpoint.url) &&
-        isWeakPublicUtilityUrl(endpoints[activeUtility]?.endpoint.url || '') &&
-        activeUtility !== preferred &&
-        activeUtility >= 0 &&
-        now - lastUtilityFailoverAt < UTILITY_FAILOVER_STICKY_MS
-      ) {
-        setActiveForRole(role, activeUtility);
-        return activeUtility;
-      }
-      if (now - (pref.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS) {
-        pref.lastLatencyFailoverLogAt = now;
-        console.warn(
-          `[rpc] utility lane failover → ${other.endpoint.label}` +
-            (isWeakPublicUtilityUrl(other.endpoint.url)
-              ? ' (weak public — Favourites/activity will slow)'
-              : isStrongUtilityEndpoint(other)
-                ? ' (strong utility preferred)'
-                : '') +
-            ` (from ${pref.endpoint.label} EWMA ${pref.latencyMs ?? '—'}ms)`
-        );
-      }
-      lastUtilityFailoverAt = now;
-      lastUtilityFailoverIdx = bestIdx;
-      setActiveForRole(role, bestIdx);
-      return bestIdx;
-    }
-    // No fast public: allow QuickNode only under severe load (~1000ms) when free.
-    if (utilityMayUseQuicknodeSoft(pref)) {
-      const qn = endpoints[preferredQuicknode]!;
-      const now = Date.now();
-      if (now - (pref.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS) {
-        pref.lastLatencyFailoverLogAt = now;
-        console.warn(
-          `[rpc] utility lane piggybacking on ${qn.endpoint.label} ` +
-            `(EWMA ${pref.latencyMs ?? '—'}ms ≥ ${UTILITY_QUICKNODE_STRESS_MS}ms — ` +
-            `QuickNode free of Critical/Scanners failover)`
-        );
-      }
-      setActiveForRole(role, preferredQuicknode);
-      return preferredQuicknode;
-    }
-    // Share ON: do NOT dump Utility soft-watch onto Helius/Alchemy — stay sticky
-    // on preferred (even slow) rather than choking Critical/Scanners.
-    if (shareLoad) {
-      setActiveForRole(role, preferred);
-      return preferred;
-    }
-  }
-
-  // 1) Other paid free lane (Helius ↔ Alchemy)
-  // Share+Utility: skip paid-lane piggyback (soft-watch must not burn Critical/Scanners).
-  if (!(shareLoad && role === 'utility')) {
-    for (const otherRole of piggybackOrder(role)) {
-      const otherPreferred = preferredIndexFor(otherRole);
-      if (
-        acceptFailoverTarget(
-          role,
-          preferred,
-          pref,
-          otherPreferred,
-          latencySoft,
-          rateLimited,
-          downMs,
-          avoidPublicForCritical
-        )
-      ) {
-        return otherPreferred;
-      }
-    }
-  }
-
-  // 2) QuickNode mid-tier (Critical + Scanners lanes; skip if unset/unhealthy)
-  if (
-    role === 'primary' ||
-    role === 'secondary' ||
-    role === 'scannersB' ||
-    role === 'metrics'
-  ) {
-    if (
-      acceptFailoverTarget(
-        role,
-        preferred,
-        pref,
-        preferredQuicknode,
-        latencySoft,
-        rateLimited,
-        downMs,
-        avoidPublicForCritical
-      )
-    ) {
-      return preferredQuicknode;
-    }
-    // 3) Utility / public before remaining fallbacks (Critical hard-fail only path)
-    if (
-      acceptFailoverTarget(
-        role,
-        preferred,
-        pref,
-        preferredUtility,
-        latencySoft,
-        rateLimited,
-        downMs,
-        avoidPublicForCritical
-      )
-    ) {
-      return preferredUtility;
-    }
-  }
-
-  for (let i = 0; i < endpoints.length; i++) {
-    if (!endpoints[i]?.healthy || isEndpointRateLimited(endpoints[i])) continue;
-    if (avoidPublicForCritical && isPublicRpcUrl(endpoints[i].endpoint.url)) {
-      continue;
-    }
-    // Multi-lane: emergency only on hard-fail / 429, never soft latency.
-    if (multiLaneActive && latencySoft && isEmergencyIndex(i)) continue;
-    if (
-      multiLaneActive &&
-      latencySoft &&
-      (role === 'secondary' || role === 'scannersB' || role === 'metrics') &&
-      i === preferredPrimary
-    ) {
-      continue;
-    }
-    // Share+Utility: only public/fallback/utility (or QN if severe) — never Helius/Alchemy.
-    if (shareLoad && role === 'utility') {
-      const e = endpoints[i]!;
-      const isQn =
-        e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url);
-      const isAltPublic =
-        isPublicRpcUrl(e.endpoint.url) ||
-        e.role === 'fallback' ||
-        e.role === 'utility';
-      if (!isAltPublic && !(isQn && pref && utilityMayUseQuicknodeSoft(pref))) {
-        continue;
-      }
-      if (multiLaneActive && isEmergencyIndex(i) && latencySoft) continue;
-    }
-    // Utility soft-failover: skip QuickNode unless severe stress and QN is free
-    if (
-      role === 'utility' &&
-      latencySoft &&
-      (endpoints[i]!.endpoint.label === 'quicknode' ||
-        isQuicknodeRpcUrl(endpoints[i]!.endpoint.url)) &&
-      !(pref && utilityMayUseQuicknodeSoft(pref))
-    ) {
-      continue;
-    }
-    if (latencySoft && pref && i !== preferred && !isFasterAlternate(pref, endpoints[i]!)) {
-      continue;
-    }
-    setActiveForRole(role, i);
-    return i;
-  }
-
-  // Last resort: any healthy endpoint (even public for critical)
-  // Share+Utility: prefer stay on preferred over dumping onto paid Critical/Scanners.
-  if (shareLoad && role === 'utility') {
-    setActiveForRole(role, preferred);
-    return preferred;
-  }
-  for (let i = 0; i < endpoints.length; i++) {
-    if (endpoints[i]?.healthy && !isEndpointRateLimited(endpoints[i])) {
-      setActiveForRole(role, i);
-      return i;
-    }
-  }
-
-  return preferred;
+export async function runWithRpcFeature<T>(
+  feature: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const role = normalizeRole(currentRole());
+  return runWithRpcRole(role, fn, feature);
 }
 
 export function getRpcUrl(role?: RpcRole): string {
   ensureEndpoints();
-  const r = role ?? currentRole();
-  const idx = resolveIndexForRole(r);
-  return endpoints[idx]?.endpoint.url || DEFAULT_RPC;
+  return laneState(normalizeRole(role ?? currentRole()))?.endpoint.url || '';
 }
 
 export function getConnection(role?: RpcRole): Connection {
   ensureEndpoints();
-  const r = role ?? currentRole();
-  const idx = resolveIndexForRole(r);
-  return endpoints[idx].connection;
+  const st = laneState(normalizeRole(role ?? currentRole()));
+  if (!st) throw new Error('No RPC endpoint configured');
+  const feature = rpcFeatureAls.getStore() || 'getConnection';
+  noteCallTraffic(st.endpoint.label, feature, normalizeRole(role ?? currentRole()));
+  return st.connection;
 }
 
 export function getActiveEndpointLabel(role?: RpcRole): string {
   ensureEndpoints();
-  const r = role ?? currentRole();
-  const idx = resolveIndexForRole(r);
-  return endpoints[idx]?.endpoint.label || 'unknown';
+  return laneState(normalizeRole(role ?? currentRole()))?.endpoint.label || 'none';
 }
 
-function recordSuccess(index: number, latencyMs: number): void {
-  const state = endpoints[index];
-  if (!state) return;
-  state.successCount += 1;
-  const sample = Math.max(0, latencyMs);
-  state.lastCallLatencyMs = sample;
-  // EWMA so a single slow getTransaction does not paint the whole endpoint as 800ms+.
-  state.latencyMs =
-    state.latencyMs == null
-      ? sample
-      : Math.round(
-          LATENCY_EWMA_ALPHA * sample + (1 - LATENCY_EWMA_ALPHA) * state.latencyMs
-        );
-  updateLatencyStress(state);
-  state.healthy = true;
-  state.consecutiveFailures = 0;
-  state.unhealthySince = null;
-  state.lastCheckedAt = Date.now();
-  state.lastError = undefined;
-  // Clear cooldowns after a real success (including mid-cooldown recovery).
-  state.rateLimitedUntil = 0;
-  if (state.hardFailUntil) {
-    const wasQ = state.hardFailUntil > 0;
-    if (wasQ) {
-      const now = Date.now();
-      if (now - state.lastQuarantineLogAt >= 5_000) {
-        state.lastQuarantineLogAt = now;
-        console.log(
-          `[rpc-quarantine] EXIT ${state.endpoint.label} — probe/call succeeded` +
-            (state.quarantineStreak
-              ? ` (streak was ${state.quarantineStreak})`
-              : '')
-        );
-      }
-    }
-    state.hardFailUntil = 0;
-    // Decay streak on success so temporary blips don't lock forever.
-    state.quarantineStreak = Math.max(0, (state.quarantineStreak || 0) - 1);
-  }
-}
-
-function updateLatencyStress(state: EndpointState): void {
-  const ewma = state.latencyMs;
-  if (ewma == null) {
-    state.latencyStressedSince = null;
-    return;
-  }
-  if (ewma < LATENCY_RECOVER_MS) {
-    state.latencyStressedSince = null;
-    return;
-  }
-  if (ewma >= LATENCY_STRESS_MS) {
-    if (state.latencyStressedSince == null) {
-      state.latencyStressedSince = Date.now();
-      console.warn(
-        `[rpc] ${state.endpoint.label} latency stressed (EWMA ${ewma}ms, last ${state.lastCallLatencyMs ?? '—'}ms) — soft failover in ${latencyStressGraceMs(state) / 1000}s if it stays high`
-      );
-    }
-  }
-}
-
-/** Preferred is OK on errors but EWMA has stayed hot long enough to piggyback. */
-function latencyFailoverReady(state: EndpointState | undefined): boolean {
-  if (!state?.latencyStressedSince) return false;
-  if (state.latencyMs == null || state.latencyMs < LATENCY_STRESS_MS) return false;
-  return Date.now() - state.latencyStressedSince >= latencyStressGraceMs(state);
-}
-
-function isFasterAlternate(
-  preferred: EndpointState,
-  other: EndpointState
-): boolean {
-  const prefMs = preferred.latencyMs;
-  const otherMs = other.latencyMs;
-  if (prefMs == null) return false;
-  if (otherMs == null) return other.healthy;
-  return otherMs <= LATENCY_RECOVER_MS || otherMs < prefMs * 0.65;
-}
-
-function recordFailure(index: number, error: string): void {
-  const state = endpoints[index];
-  if (!state) return;
-
-  const isRateLimit = isRpcRateLimitMessage(error);
-  const alreadyCooling = isEndpointRateLimited(state);
-
-  // Already in 429 cooldown — count quietly, never re-log / re-switch thrash.
-  if (isRateLimit && alreadyCooling) {
-    state.failureCount += 1;
-    state.consecutiveFailures += 1;
-    state.lastError = error;
-    state.lastCheckedAt = Date.now();
-    state.healthy = false;
-    return;
-  }
-
-  state.failureCount += 1;
-  state.consecutiveFailures += 1;
-  state.lastError = error;
-  state.lastCheckedAt = Date.now();
-
-  if (isRateLimit) {
-    state.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
-  } else if (
-    /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|probe timeout/i.test(
-      error
-    )
-  ) {
-    // Hard network/timeout failures — quarantine so health/withRpc stop hammering it.
-    if (state.consecutiveFailures >= 2) {
-      enterQuarantine(state, error.slice(0, 120));
-    }
-  } else if (state.consecutiveFailures >= (config.rpc?.failureThreshold ?? 3)) {
-    // Persistent hard failures (e.g. QuickNode 0% success) — quarantine too.
-    enterQuarantine(state, error.slice(0, 120));
-  }
-
-  const threshold = isRateLimit ? 1 : config.rpc?.failureThreshold ?? 3;
-  if (state.consecutiveFailures < threshold) return;
-
-  const wasHealthy = state.healthy;
-  if (wasHealthy) {
-    state.unhealthySince = Date.now();
-  }
-  state.healthy = false;
-
-  const now = Date.now();
-  const shouldLog =
-    wasHealthy || now - state.lastUnhealthyLogAt >= UNHEALTHY_LOG_THROTTLE_MS;
-  if (shouldLog) {
-    state.lastUnhealthyLogAt = now;
-    console.warn(
-      `[rpc] ${state.endpoint.label} marked unhealthy after ${state.consecutiveFailures} failures` +
-        (isRateLimit
-          ? ` (rate limited — cooling ${RATE_LIMIT_COOLDOWN_MS / 1000}s, failing over)`
-          : '')
-    );
-  }
-  void maybeSwitchEndpoints();
-}
-
-/**
- * Record a failure against the lane's active endpoint (e.g. migration parse 429).
- * Rate limits mark the endpoint unhealthy immediately so failover can kick in.
- */
 export function noteActiveRpcFailure(
-  error: unknown,
+  message: unknown,
   role: RpcRole = 'primary'
 ): void {
   ensureEndpoints();
-  const index = resolveIndexForRole(role);
-  const message = error instanceof Error ? error.message : String(error);
-  recordFailure(index, message);
+  const msg =
+    message instanceof Error
+      ? message.message
+      : typeof message === 'string'
+        ? message
+        : String(message);
+  const st = laneState(normalizeRole(role));
+  if (st) recordFailure(st, msg);
+  if (normalizeRole(role) === 'primary') noteTradingOutcome(false, msg);
 }
 
-async function maybeSwitchEndpoints(): Promise<void> {
-  ensureEndpoints();
-  if (endpoints.length <= 1) return;
-  resolveIndexForRole('primary');
-  resolveIndexForRole('secondary');
-  resolveIndexForRole('utility');
-}
-
-async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean> {
-  const state = endpoints[index];
-  if (!state) return false;
-
-  // Don't probe a rate-limited endpoint — burns CU and re-triggers 429 storms.
-  // Once the cooldown elapses, fall through so preferred lanes can recover.
-  if (isEndpointRateLimited(state)) {
-    state.healthy = false;
-    state.lastCheckedAt = Date.now();
+async function probeState(st: EndpointState, timeoutMs = 8_000): Promise<boolean> {
+  if (isRateLimited(st) || isHardFailed(st)) {
+    st.lastCheckedAt = Date.now();
     return false;
   }
-  if (state.rateLimitedUntil && Date.now() >= state.rateLimitedUntil) {
-    state.rateLimitedUntil = 0;
-  }
-  // Hard-fail cooldown — skip aggressive retries on dead QuickNode/fallbacks.
-  if (isEndpointHardFailed(state)) {
-    state.lastCheckedAt = Date.now();
+  const start = Date.now();
+  try {
+    await Promise.race([
+      st.connection.getSlot('confirmed'),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`RPC probe timeout after ${timeoutMs}ms`)),
+          timeoutMs
+        )
+      ),
+    ]);
+    recordSuccess(st, Date.now() - start);
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    recordFailure(st, message);
     return false;
   }
-
-  const gate = getRpcGateSnapshot();
-  // Unhealthy / recovering preferred needs a full budget — a 4s stress cap
-  // false-fails public RPCs and keeps "preferred DOWN" forever.
-  const recovering = !state.healthy || state.unhealthySince != null;
-  const effectiveTimeout =
-    recovering || !(gate.stressed || gate.backlog > 0)
-      ? timeoutMs
-      : Math.min(timeoutMs, 4_000);
-
-  return runWithRpcFeature('health_probe', async () => {
-    const start = Date.now();
-    try {
-      await Promise.race([
-        state.connection.getSlot('confirmed'),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`RPC probe timeout after ${effectiveTimeout}ms`)),
-            effectiveTimeout
-          )
-        ),
-      ]);
-      recordSuccess(index, Date.now() - start);
-      return true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      recordFailure(index, message);
-      return false;
-    }
-  });
 }
 
-/** Run a timed RPC call against the lane's active endpoint; failover on failure */
 export async function withRpc<T>(
   label: string,
   fn: (conn: Connection) => Promise<T>,
@@ -1546,115 +481,183 @@ async function withRpcInner<T>(
   role?: RpcRole
 ): Promise<T> {
   ensureEndpoints();
-  const r = role ?? currentRole();
-  const startIndex = resolveIndexForRole(r);
-  let lastError: unknown;
+  const r = normalizeRole(role ?? currentRole());
   const critical =
-    /trade|migrat|send|confirm|swap|buy|sell/i.test(label) ||
-    r === 'primary';
+    /trade|migrat|send|confirm|swap|buy|sell/i.test(label) || r === 'primary';
   const maxAttempts = critical
     ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
     : WITH_RPC_MAX_ATTEMPTS_OTHER;
 
-  // Build attempt order: preferred → other paid → QuickNode → utility → remaining
-  const order: number[] = [];
-  const pushUnique = (i: number) => {
-    if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
-  };
-  pushUnique(startIndex);
-  for (const other of piggybackOrder(r)) {
-    pushUnique(preferredIndexFor(other));
-  }
-  if (r === 'primary' || r === 'secondary') {
-    pushUnique(preferredQuicknode);
-    pushUnique(preferredUtility);
-  }
-  for (let i = 0; i < endpoints.length; i++) pushUnique(i);
-
-  logger.info('RPC', `start: ${label}`, {
-    role: r,
-    active: endpoints[startIndex]?.endpoint.label,
-    endpoints: endpoints.length,
-  });
-
-  let attempts = 0;
-  for (let oi = 0; oi < order.length && attempts < maxAttempts; oi++) {
-    const index = order[oi];
-    const state = endpoints[index];
-    if (!state) continue;
-
-    // Skip cooling 429 / hard-fail hosts when another endpoint can take the call.
-    if (
-      (isEndpointRateLimited(state) || isEndpointHardFailed(state)) &&
-      endpoints.some(
-        (e, i) =>
-          i !== index && !isEndpointRateLimited(e) && !isEndpointHardFailed(e)
-      )
-    ) {
-      continue;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Data never borrows Trading; Trading may use Emergency after hard-fail.
+    let st: EndpointState | null;
+    if (r === 'primary') {
+      if (attempt > 0 && trading && !tradingOnEmergency) {
+        // force check preferred before escalating
+        st = trading;
+      } else {
+        st = laneState('primary');
+      }
+      if (attempt >= 1 && tradingOnEmergency === false && emergency) {
+        // After first hard failure in this call, allow emergency for critical.
+        const pref = trading;
+        if (
+          pref &&
+          (!pref.healthy || isHardFailed(pref) || isRateLimited(pref))
+        ) {
+          tradingOnEmergency = true;
+          st = emergency;
+        }
+      }
+    } else {
+      st = data;
     }
 
-    const pref = preferredIndexFor(r);
-    const prefRateLimited = isEndpointRateLimited(endpoints[pref]);
-    // Sticky grace only for transient errors — not 429 cooldowns.
-    if (
-      !prefRateLimited &&
-      !state.healthy &&
-      attempts > 0 &&
-      downForMs(endpoints[pref]) < failoverDownMs()
-    ) {
-      if (index !== pref) continue;
+    if (!st) {
+      lastError = new Error(`No ${r} RPC endpoint`);
+      break;
     }
 
-    attempts += 1;
-    if (attempts > 1) {
-      // Exponential backoff between endpoint attempts (non-critical: longer).
-      const backoffMs = Math.min(
-        critical ? 400 * attempts : 700 * attempts,
-        critical ? 1_200 : 2_500
-      );
-      await new Promise((res) => setTimeout(res, backoffMs));
-    }
+    logger.info('RPC', `start: ${label}`, {
+      role: r,
+      active: st.endpoint.label,
+      attempt: attempt + 1,
+    });
 
-    const t0 = Date.now();
+    const start = Date.now();
     try {
-      setActiveForRole(r, index);
-      const result = await fn(state.connection);
-      const latencyMs = Date.now() - t0;
-      recordSuccess(index, latencyMs);
-      logger.info('RPC', `${label} ok`, {
-        role: r,
-        endpoint: state.endpoint.label,
-        latencyMs,
-        attempt: attempts,
-      });
+      noteCallTraffic(st.endpoint.label, label, r);
+      const result = await fn(st.connection);
+      recordSuccess(st, Date.now() - start);
+      if (r === 'primary') noteTradingOutcome(true);
       return result;
     } catch (err) {
-      lastError = err;
       const message = err instanceof Error ? err.message : String(err);
-      recordFailure(index, message);
-      logger.warn('RPC', `${label} failed`, {
-        role: r,
-        endpoint: state.endpoint.label,
-        attempt: attempts,
-        maxAttempts,
-        latencyMs: Date.now() - t0,
+      lastError = err;
+      recordFailure(st, message);
+      if (r === 'primary') noteTradingOutcome(false, message);
+      logger.warn('RPC', `fail: ${label}`, {
         ...errorToMeta(err),
+        endpoint: st.endpoint.label,
       });
+      if (!critical && attempt + 1 >= maxAttempts) break;
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     }
   }
-
-  logger.error('RPC', `${label} all endpoints failed`, errorToMeta(lastError));
   throw lastError instanceof Error
     ? lastError
-    : new Error(String(lastError ?? 'All RPC endpoints failed'));
+    : new Error(`RPC ${label} failed`);
+}
+
+function successRate(st: EndpointState | null): number {
+  if (!st) return 0;
+  const t = st.successCount + st.failureCount;
+  if (t === 0) return 100;
+  return Math.round((100 * st.successCount) / t);
+}
+
+function toEndpointStats(
+  st: EndpointState | null,
+  role: 'primary' | 'secondary' | 'utility',
+  isActive: boolean,
+  lane: RpcRole | null
+): RpcEndpointStats | null {
+  if (!st) return null;
+  return {
+    url: st.endpoint.url,
+    label: st.endpoint.label,
+    role,
+    healthy: st.healthy && !isRateLimited(st) && !isHardFailed(st),
+    latencyMs: st.latencyMs,
+    lastCallLatencyMs: st.lastCallLatencyMs,
+    successCount: st.successCount,
+    failureCount: st.failureCount,
+    successRate: successRate(st),
+    lastError: st.lastError,
+    lastCheckedAt: st.lastCheckedAt,
+    unhealthySince: st.unhealthySince,
+    isActive,
+    lane,
+    emergencyOnly: st.emergencyOnly,
+  };
+}
+
+function buildCongestion(
+  lane: LaneId,
+  st: EndpointState | null,
+  opts: {
+    onEmergency?: boolean;
+    recoverAt?: number;
+    gateRole?: RpcGateRole;
+  } = {}
+): LaneCongestion {
+  if (lane === 'emergency' && !opts.onEmergency) {
+    return { state: 'idle', cause: 'idle until Trading hard-fail', details: [] };
+  }
+  const details: string[] = [];
+  const gate = getRpcGateSnapshot();
+  const g = opts.gateRole ? gate.lanes[opts.gateRole] : null;
+  if (g) {
+    details.push(`gate ${g.inFlight}/${g.max} q=${g.queued} skips/min=${g.skipsPerMin}`);
+    if (g.topSkipReason) details.push(`top skip: ${g.topSkipReason}`);
+  }
+  if (st?.latencyMs != null) {
+    details.push(`ewma ${Math.round(st.latencyMs)}ms`);
+    if (
+      st.lastCallLatencyMs != null &&
+      st.latencyMs > 0 &&
+      st.lastCallLatencyMs > st.latencyMs * 2.5 &&
+      st.lastCallLatencyMs > 800
+    ) {
+      details.push(`spike ${Math.round(st.lastCallLatencyMs)}ms`);
+    }
+  }
+  if (opts.onEmergency) {
+    const left = opts.recoverAt ? Math.max(0, opts.recoverAt - Date.now()) : 0;
+    details.push(
+      left > 0
+        ? `failover; recover in ${Math.ceil(left / 1000)}s`
+        : 'failover active'
+    );
+    return {
+      state: 'failover',
+      cause: `Trading on Emergency (${st?.endpoint.label || 'public'})`,
+      details,
+    };
+  }
+  if (!st || (!st.healthy && st.consecutiveFailures >= 2)) {
+    return {
+      state: 'down',
+      cause: st?.lastError || 'lane down',
+      details,
+    };
+  }
+  if (g && (g.queued > g.max || g.skipsPerMin > 20)) {
+    return {
+      state: 'congested',
+      cause: g.topSkipReason || `queue ${g.queued}`,
+      details,
+    };
+  }
+  if (g && (g.queued > 4 || g.skipsPerMin > 8 || (st.latencyMs != null && st.latencyMs > 1500))) {
+    return {
+      state: 'busy',
+      cause:
+        st.latencyMs != null && st.latencyMs > 1500
+          ? `latency ${Math.round(st.latencyMs)}ms`
+          : `queue ${g.queued}`,
+      details,
+    };
+  }
+  return { state: 'ok', cause: 'healthy', details };
 }
 
 export function getRpcStats(): {
+  mode: 'simple';
+  multiLaneActive: false;
+  shareLoad: boolean;
   active: string;
-  activeUrl: string;
-  mode: 'classic' | 'multiLane';
-  multiLaneActive: boolean;
   primary: {
     label: string;
     url: string;
@@ -1669,20 +672,6 @@ export function getRpcStats(): {
     failover: boolean;
     downForMs: number;
   };
-  scannersB: {
-    label: string;
-    url: string;
-    healthy: boolean;
-    failover: boolean;
-    downForMs: number;
-  };
-  metrics: {
-    label: string;
-    url: string;
-    healthy: boolean;
-    failover: boolean;
-    downForMs: number;
-  };
   utility: {
     label: string;
     url: string;
@@ -1690,92 +679,98 @@ export function getRpcStats(): {
     failover: boolean;
     downForMs: number;
   };
-  emergency: Array<{ label: string; url: string; healthy: boolean }>;
-  shareLoad: boolean;
-  shareSupports: typeof RPC_SHARE_LOAD_SUPPORTS;
-  failoverDownMs: number;
-  /** True when primary and secondary prefer the same endpoint (Zion shares CU with copy). */
+  scannersB: null;
+  metrics: null;
   lanesShareEndpoint: boolean;
-  supports: typeof RPC_LANE_SUPPORTS;
-  endpoints: Array<
-    RpcEndpointStats & { emergencyOnly?: boolean }
-  >;
+  supports: {
+    classicShare: false;
+    multiLane: false;
+    simple2Lane: true;
+  };
+  endpoints: Array<RpcEndpointStats & { emergencyOnly?: boolean }>;
   jitoEnabled: boolean;
   priorityFeeLamports: number | null;
-  /** True when at least one endpoint is currently healthy */
   ok: boolean;
-  /** Human-readable warning when polling is likely broken */
   warning: string | null;
-  /** Real HTTP JSON-RPC call traffic (includes getConnection path). */
   callTraffic: ReturnType<typeof getRpcCallTraffic>;
-  /** Per-lane concurrency / rate-limit backlog (overload vs provider). */
   gate: ReturnType<typeof getRpcGateSnapshot>;
-  /** Quarantined (hard-failed) endpoints — not probed until cooldown ends. */
   quarantine: Array<{
     label: string;
     remainingMs: number;
     streak: number;
     lastError?: string;
   }>;
-  /** Adaptive scanner/utility backoff snapshot. */
   loadControl: ReturnType<
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null;
   utilityWeakPublic: boolean;
+  heliusDisabled: true;
+  lanes: {
+    trading: {
+      label: string;
+      url: string;
+      healthy: boolean;
+      latencyMs: number | null;
+      successRate: number;
+      active: boolean;
+      congestion: LaneCongestion;
+    };
+    data: {
+      label: string;
+      url: string;
+      healthy: boolean;
+      latencyMs: number | null;
+      successRate: number;
+      active: boolean;
+      congestion: LaneCongestion;
+    };
+    emergency: {
+      label: string;
+      url: string;
+      healthy: boolean;
+      latencyMs: number | null;
+      successRate: number;
+      active: boolean;
+      congestion: LaneCongestion;
+    };
+    helius: {
+      disabled: true;
+      congestion: LaneCongestion;
+    };
+  };
 } {
   ensureEndpoints();
-  const pIdx = resolveIndexForRole('primary');
-  const sIdx = resolveIndexForRole('secondary');
-  const uIdx = resolveIndexForRole('utility');
-  const pPref = endpoints[preferredPrimary];
-  const sPref = endpoints[preferredSecondary];
-  const uPref = endpoints[preferredUtility];
-  const sbIdx = resolveIndexForRole('scannersB');
-  const mIdx = resolveIndexForRole('metrics');
-  const sbPref = endpoints[preferredScannersB];
-  const mPref = endpoints[preferredMetrics];
-  const sbActive = endpoints[sbIdx];
-  const mActive = endpoints[mIdx];
-  const pActive = endpoints[pIdx];
-  const sActive = endpoints[sIdx];
-  const uActive = endpoints[uIdx];
-  const anyHealthy = endpoints.some(
-    (e) => e.healthy && !isEndpointRateLimited(e)
+  const tActive = laneState('primary');
+  const dActive = data;
+  const eState = emergency;
+  const tPref = trading;
+
+  const downFor = (st: EndpointState | null) =>
+    st?.unhealthySince ? Math.max(0, Date.now() - st.unhealthySince) : 0;
+
+  const anyHealthy = [tActive, dActive].some(
+    (s) => s && s.healthy && !isRateLimited(s) && !isHardFailed(s)
   );
-  const share = lanesShareEndpoint();
-  const shareLoad = Boolean(config.rpc?.shareLoad);
+
   let warning: string | null = null;
   if (!anyHealthy) {
     warning =
-      'All RPC endpoints unhealthy — wallet buy detection is paused until RPC recovers. ' +
-      'Set a real Helius/QuickNode RPC_URL on Render (not a placeholder).';
-  } else if (
-    /mainnet-beta\.solana\.com|publicnode\.com/i.test(pActive?.endpoint.url || '')
-  ) {
+      'Trading/Data RPC unhealthy — set ALCHEMY_API_KEY_BACKUP (Trading) and ALCHEMY_API_KEY (Data).';
+  } else if (tradingOnEmergency) {
+    warning = `Trading on Emergency (${eState?.endpoint.label || 'public'}) — Alchemy BACKUP recovering.`;
+  } else if (lanesShareEndpoint()) {
     warning =
-      'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Set HELIUS_API_KEY (+ ALCHEMY_API_KEY) for free faster failover.';
-  } else if (pIdx !== preferredPrimary) {
-    warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
-  } else if (
-    preferredSecondary !== preferredPrimary &&
-    sIdx !== preferredSecondary
-  ) {
-    warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
-  } else if (share) {
-    warning =
-      'Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. Set a distinct RPC_SECONDARY.';
+      'Trading and Data resolve to the same Alchemy endpoint — set distinct ALCHEMY_API_KEY_BACKUP vs ALCHEMY_API_KEY.';
   }
 
   const gate = getRpcGateSnapshot();
   if (!warning && gate.stressed) {
     warning =
-      'RPC lane gate stressed — background work is being queued/skipped to protect Critical. ' +
-      `Utility queue ${gate.lanes.utility.queued}, skipped ${gate.lanes.utility.skipped}.`;
+      'Data lane gate stressed — scanners/Favourites may be queued or skipped.';
   }
-  // Lifetime skip counter is diagnostic only — do not warn/slow from it.
 
-  const quarantine = endpoints
-    .filter((e) => isEndpointHardFailed(e))
+  const quarantine = [trading, data, emergency]
+    .filter((e): e is EndpointState => Boolean(e && isHardFailed(e)))
     .map((e) => ({
       label: e.endpoint.label,
       remainingMs: Math.max(0, e.hardFailUntil - Date.now()),
@@ -1792,169 +787,147 @@ export function getRpcStats(): {
       getRpcLoadControlSnapshot,
     } = require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     updateRpcLoadSignals({
-      primaryLatencyMs: pActive?.latencyMs ?? null,
-      secondaryLatencyMs: sActive?.latencyMs ?? null,
-      utilityLatencyMs: uActive?.latencyMs ?? null,
-      utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
-      utilityFailover: uIdx !== preferredUtility,
-      primaryQueued: gate.lanes.primary.queued,
-      secondaryIdle:
-        gate.lanes.secondary.inFlight === 0 &&
-        gate.lanes.secondary.queued === 0,
-      // Do NOT pass lifetime gate.skipped — it never resets and locked adaptive ×3.
+      primaryLatencyMs: tActive?.latencyMs ?? null,
+      secondaryLatencyMs: dActive?.latencyMs ?? null,
+      tradingOnEmergency,
+      dataHealthy: Boolean(dActive?.healthy),
     });
     loadControl = getRpcLoadControlSnapshot();
-    if (
-      !warning &&
-      loadControl &&
-      loadControl.scannerSlowFactor >= 3 &&
-      loadControl.secondarySkipsRecent >= 6
-    ) {
-      warning =
-        `Scanners lane high skips (${loadControl.secondarySkipsRecent}/60s) — Market/Alpha/Zion auto-slowed.`;
+    if (loadControl?.favouritesDeferred) {
+      // surface in data congestion via loadControl.cause
     }
   } catch {
-    /* */
+    /* optional */
   }
 
-  const maskUrl = (url: string) => {
-    try {
-      const u = new URL(url);
-      if (/api\.key|api-key|apikey/i.test(u.search)) u.search = '';
-      const path = u.pathname.replace(
-        /\/(v\d+\/)?[A-Za-z0-9_-]{20,}(\/|$)/g,
-        '/***$2'
-      );
-      return `${u.protocol}//${u.host}${path}`.slice(0, 72);
-    } catch {
-      return url
-        .replace(/\/\/.*@/, '//***@')
-        .replace(/\/[A-Za-z0-9_-]{20,}/g, '/***')
-        .slice(0, 72);
+  const tradingCong = buildCongestion('trading', tActive, {
+    onEmergency: tradingOnEmergency,
+    recoverAt: tradingRecoverAt || undefined,
+    gateRole: 'primary',
+  });
+  const dataCong = buildCongestion('data', dActive, { gateRole: 'secondary' });
+  if (loadControl?.level === 'shed' || loadControl?.favouritesDeferred) {
+    dataCong.details.push(
+      `shed: scanners×${loadControl.scannerMultiplier}` +
+        (loadControl.favouritesDeferred ? '; Favourites deferred' : '')
+    );
+    if (dataCong.state === 'ok') {
+      dataCong.state = loadControl.level === 'shed' ? 'congested' : 'busy';
+      dataCong.cause = loadControl.cause || dataCong.cause;
     }
-  };
+  }
+  const emergCong = buildCongestion('emergency', eState, {
+    onEmergency: tradingOnEmergency,
+  });
+
+  const endpoints: Array<RpcEndpointStats & { emergencyOnly?: boolean }> = [];
+  const tStats = toEndpointStats(
+    tPref,
+    'primary',
+    !tradingOnEmergency && tActive === tPref,
+    'primary'
+  );
+  if (tStats) endpoints.push(tStats);
+  const dStats = toEndpointStats(dActive, 'secondary', true, 'secondary');
+  if (dStats) endpoints.push(dStats);
+  const eStats = toEndpointStats(
+    eState,
+    'utility',
+    tradingOnEmergency,
+    'utility'
+  );
+  if (eStats) {
+    eStats.emergencyOnly = true;
+    endpoints.push(eStats);
+  }
 
   return {
-    active: getActiveEndpointLabel('primary'),
-    activeUrl: maskUrl(getRpcUrl('primary')),
-    mode: config.rpc?.mode === 'multiLane' ? 'multiLane' : 'classic',
-    multiLaneActive,
+    mode: 'simple',
+    multiLaneActive: false,
+    shareLoad: false,
+    active: tActive?.endpoint.label || 'none',
     primary: {
-      label: pActive?.endpoint.label || 'primary',
-      url: maskUrl(pActive?.endpoint.url || ''),
-      healthy: Boolean(pPref?.healthy),
-      failover: pIdx !== preferredPrimary,
-      downForMs: downForMs(pPref),
+      label: tActive?.endpoint.label || 'none',
+      url: tActive?.endpoint.url || '',
+      healthy: Boolean(tActive?.healthy),
+      failover: tradingOnEmergency,
+      downForMs: downFor(tPref),
     },
     secondary: {
-      label: sActive?.endpoint.label || 'secondary',
-      url: maskUrl(sActive?.endpoint.url || ''),
-      healthy: Boolean(sPref?.healthy),
-      failover: sIdx !== preferredSecondary,
-      downForMs: downForMs(sPref),
-    },
-    scannersB: {
-      label: sbActive?.endpoint.label || 'scannersB',
-      url: maskUrl(sbActive?.endpoint.url || ''),
-      healthy: Boolean(sbPref?.healthy),
-      failover: sbIdx !== preferredScannersB,
-      downForMs: downForMs(sbPref),
-    },
-    metrics: {
-      label: mActive?.endpoint.label || 'metrics',
-      url: maskUrl(mActive?.endpoint.url || ''),
-      healthy: Boolean(mPref?.healthy),
-      failover: mIdx !== preferredMetrics,
-      downForMs: downForMs(mPref),
+      label: dActive?.endpoint.label || 'none',
+      url: dActive?.endpoint.url || '',
+      healthy: Boolean(dActive?.healthy),
+      failover: false,
+      downForMs: downFor(dActive),
     },
     utility: {
-      label: uActive?.endpoint.label || 'utility',
-      url: maskUrl(uActive?.endpoint.url || ''),
-      healthy: Boolean(uPref?.healthy),
-      failover: uIdx !== preferredUtility,
-      downForMs: downForMs(uPref),
+      label: eState?.endpoint.label || 'none',
+      url: eState?.endpoint.url || '',
+      healthy: Boolean(eState?.healthy),
+      failover: tradingOnEmergency,
+      downForMs: 0,
     },
-    emergency: emergencyIndices.map((i) => ({
-      label: endpoints[i]?.endpoint.label || `emergency-${i}`,
-      url: maskUrl(endpoints[i]?.endpoint.url || ''),
-      healthy: Boolean(endpoints[i]?.healthy),
-    })),
-    shareLoad,
-    shareSupports: RPC_SHARE_LOAD_SUPPORTS,
-    failoverDownMs: failoverDownMs(),
-    lanesShareEndpoint: share,
-    supports: RPC_LANE_SUPPORTS,
-    endpoints: endpoints.map((s, i) => {
-      const total = s.successCount + s.failureCount;
-      let lane: RpcRole | null = null;
-      if (i === preferredPrimary) lane = 'primary';
-      else if (
-        i === preferredSecondary &&
-        preferredSecondary !== preferredPrimary
-      )
-        lane = 'secondary';
-      else if (
-        multiLaneActive &&
-        i === preferredScannersB &&
-        preferredScannersB !== preferredPrimary &&
-        preferredScannersB !== preferredSecondary
-      )
-        lane = 'scannersB';
-      else if (
-        multiLaneActive &&
-        i === preferredMetrics &&
-        preferredMetrics !== preferredPrimary &&
-        preferredMetrics !== preferredSecondary &&
-        preferredMetrics !== preferredScannersB
-      )
-        lane = 'metrics';
-      else if (
-        i === preferredUtility &&
-        preferredUtility !== preferredPrimary &&
-        preferredUtility !== preferredSecondary
-      )
-        lane = 'utility';
-      return {
-        url: maskUrl(s.endpoint.url),
-        label: s.endpoint.label,
-        role: s.role,
-        healthy: s.healthy,
-        latencyMs: s.latencyMs,
-        lastCallLatencyMs: s.lastCallLatencyMs,
-        successCount: s.successCount,
-        failureCount: s.failureCount,
-        successRate: total === 0 ? 100 : (s.successCount / total) * 100,
-        lastError: s.lastError,
-        lastCheckedAt: s.lastCheckedAt,
-        unhealthySince: s.unhealthySince,
-        isActive:
-          i === pIdx ||
-          i === sIdx ||
-          i === uIdx ||
-          i === sbIdx ||
-          i === mIdx,
-        lane,
-        emergencyOnly: isEmergencyIndex(i),
-      };
-    }),
+    scannersB: null,
+    metrics: null,
+    lanesShareEndpoint: lanesShareEndpoint(),
+    supports: {
+      classicShare: false,
+      multiLane: false,
+      simple2Lane: true,
+    },
+    endpoints,
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
     priorityFeeLamports: lastPriorityFeeLamports,
     ok: anyHealthy,
     warning,
-    callTraffic: getRpcCallTraffic(40),
+    callTraffic: getRpcCallTraffic(),
     gate,
     quarantine,
     loadControl,
-    utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
+    utilityWeakPublic: tradingOnEmergency,
+    heliusDisabled: true,
+    lanes: {
+      trading: {
+        label: tActive?.endpoint.label || 'none',
+        url: tActive?.endpoint.url || '',
+        healthy: Boolean(tActive?.healthy),
+        latencyMs: tActive?.latencyMs ?? null,
+        successRate: successRate(tActive),
+        active: true,
+        congestion: tradingCong,
+      },
+      data: {
+        label: dActive?.endpoint.label || 'none',
+        url: dActive?.endpoint.url || '',
+        healthy: Boolean(dActive?.healthy),
+        latencyMs: dActive?.latencyMs ?? null,
+        successRate: successRate(dActive),
+        active: true,
+        congestion: dataCong,
+      },
+      emergency: {
+        label: eState?.endpoint.label || 'none',
+        url: eState?.endpoint.url || '',
+        healthy: Boolean(eState?.healthy),
+        latencyMs: eState?.latencyMs ?? null,
+        successRate: successRate(eState),
+        active: tradingOnEmergency,
+        congestion: emergCong,
+      },
+      helius: {
+        disabled: true,
+        congestion: {
+          state: 'disabled',
+          cause: 'Helius disabled — never probed or routed',
+          details: [],
+        },
+      },
+    },
   };
 }
 
 let lastPriorityFeeLamports: number | null = null;
 
-/**
- * Dynamic priority fee based on recent prioritization fees for a sample account.
- * Falls back to config defaults.
- */
 export async function estimatePriorityFeeMicroLamports(
   sampleAccount?: PublicKey
 ): Promise<number> {
@@ -1963,11 +936,8 @@ export async function estimatePriorityFeeMicroLamports(
   const fallback = config.rpc?.priorityFee?.defaultMicroLamports ?? 50_000;
 
   try {
-    const feeRole: RpcRole = Boolean(config.rpc?.shareLoad)
-      ? 'utility'
-      : 'primary';
     return await runWithRpcRole(
-      feeRole,
+      'primary',
       async () => {
         const conn = getConnection();
         const account =
@@ -1975,7 +945,6 @@ export async function estimatePriorityFeeMicroLamports(
           getWalletPublicKey() ??
           new PublicKey('11111111111111111111111111111111');
 
-        // getRecentPrioritizationFees available on newer web3.js
         const fees = await (
           conn as Connection & {
             getRecentPrioritizationFees?: (args: {
@@ -1993,7 +962,6 @@ export async function estimatePriorityFeeMicroLamports(
             .sort((a, b) => a - b);
 
           if (sorted.length > 0) {
-            // Use ~75th percentile for competitive landing
             const idx = Math.min(
               sorted.length - 1,
               Math.floor(sorted.length * 0.75)
@@ -2002,7 +970,6 @@ export async function estimatePriorityFeeMicroLamports(
               min,
               Math.min(max, sorted[idx] || fallback)
             );
-            // Convert micro-lamports/CU → store approximate lamports for UI (assume 200k CU)
             lastPriorityFeeLamports = Math.ceil(
               (estimated * 200_000) / 1_000_000
             );
@@ -2028,7 +995,6 @@ export async function estimatePriorityFeeMicroLamports(
   return fallback;
 }
 
-/** Optimized send for versioned transactions with retries */
 export async function sendOptimizedTransaction(
   serialized: Uint8Array,
   options: SendOptions = {}
@@ -2041,7 +1007,7 @@ export async function sendOptimizedTransaction(
     });
     await conn.confirmTransaction(sig, 'confirmed');
     return sig;
-  });
+  }, 'primary');
 }
 
 export async function sendAndConfirmVersioned(
@@ -2051,25 +1017,25 @@ export async function sendAndConfirmVersioned(
 }
 
 export async function sendAndConfirmLegacyTx(tx: Transaction): Promise<string> {
-  return withRpc('sendLegacy', async (conn) => {
-    const { blockhash, lastValidBlockHeight } =
-      await conn.getLatestBlockhash('confirmed');
-    tx.recentBlockhash = blockhash;
-    tx.lastValidBlockHeight = lastValidBlockHeight;
-    const raw = tx.serialize();
-    const sig = await conn.sendRawTransaction(raw, {
-      skipPreflight: false,
-      maxRetries: 3,
-    });
-    await conn.confirmTransaction(sig, 'confirmed');
-    return sig;
-  });
+  return withRpc(
+    'sendLegacy',
+    async (conn) => {
+      const { blockhash, lastValidBlockHeight } =
+        await conn.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = blockhash;
+      tx.lastValidBlockHeight = lastValidBlockHeight;
+      const raw = tx.serialize();
+      const sig = await conn.sendRawTransaction(raw, {
+        skipPreflight: false,
+        maxRetries: 3,
+      });
+      await conn.confirmTransaction(sig, 'confirmed');
+      return sig;
+    },
+    'primary'
+  );
 }
 
-/**
- * Load keypair for the active trading wallet (or a specific slot id).
- * Secrets come only from env vars (TRADING_WALLET_* / PRIVATE_KEY) — never from API/disk.
- */
 export function getKeypair(walletId?: string): Keypair | null {
   const id =
     walletId ??
@@ -2120,7 +1086,6 @@ export function getKeypair(walletId?: string): Keypair | null {
   }
 }
 
-/** Drop cached keypairs (e.g. after switching active wallet or removing a slot) */
 export function clearKeypairCache(walletId?: string): void {
   if (walletId) {
     keypairCache.delete(walletId);
@@ -2133,7 +1098,6 @@ export function getWalletPublicKey(walletId?: string): PublicKey | null {
   return getKeypair(walletId)?.publicKey ?? null;
 }
 
-/** Derive public key for a slot without selecting it as active */
 export function peekTradingWalletPublicKey(walletId: string): string | null {
   try {
     return getKeypair(walletId)?.publicKey.toBase58() ?? null;
@@ -2149,8 +1113,10 @@ export async function getLiveBalanceSol(
   if (!pubkey) return null;
 
   try {
-    const lamports = await withRpc('getBalance', (conn) =>
-      conn.getBalance(pubkey)
+    const lamports = await withRpc(
+      'getBalance',
+      (conn) => conn.getBalance(pubkey),
+      'primary'
     );
     return lamports / LAMPORTS_PER_SOL;
   } catch (err) {
@@ -2159,7 +1125,6 @@ export async function getLiveBalanceSol(
   }
 }
 
-/** Public-safe list of trading wallets with pubkeys + balances (no secrets) */
 export async function getTradingWalletsStatus(): Promise<{
   activeId: string | null;
   wallets: Array<{
@@ -2204,186 +1169,101 @@ export async function getTradingWalletsStatus(): Promise<{
 export async function testConnection(): Promise<boolean> {
   ensureEndpoints();
   startRpcHealthMonitor();
-  const primaryIdx = resolveIndexForRole('primary');
-  const ok = await probeEndpoint(primaryIdx, 6_000);
+  const pref = preferredTrading();
+  if (!pref) {
+    console.error('[connection] No Trading RPC configured');
+    return false;
+  }
+  const ok = await probeState(pref, 6_000);
   if (ok) {
     console.log(
-      `[connection] RPC OK — ${getActiveEndpointLabel('primary')} latency ${endpoints[primaryIdx].latencyMs}ms`
+      `[connection] RPC OK — ${pref.endpoint.label} latency ${pref.latencyMs}ms`
     );
     return true;
   }
-
-  await maybeSwitchEndpoints();
-  const retryIdx = resolveIndexForRole('primary');
-  const retry = await probeEndpoint(retryIdx, 6_000);
-  if (retry) {
-    console.log(
-      `[connection] RPC OK after failover → ${getActiveEndpointLabel('primary')}`
-    );
-    return true;
+  if (emergency) {
+    const retry = await probeState(emergency, 6_000);
+    if (retry) {
+      tradingOnEmergency = true;
+      console.log(
+        `[connection] RPC OK after failover → ${emergency.endpoint.label}`
+      );
+      return true;
+    }
   }
-  console.error('[connection] RPC health check failed on all endpoints');
+  console.error('[connection] RPC health check failed');
   return false;
 }
 
-/**
- * Force-probe preferred (+ active) endpoints so sticky-DOWN lanes can recover
- * without waiting for the next health interval. Used by POST /api/rpc/probe.
- */
 export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>> {
   ensureEndpoints();
   startRpcHealthMonitor();
-  const order: number[] = [];
-  const push = (i: number) => {
-    if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
-  };
-  push(preferredPrimary);
-  push(preferredSecondary);
-  push(preferredUtility);
-  push(preferredQuicknode);
-  push(activePrimary);
-  push(activeSecondary);
-  push(activeUtility);
-  for (const i of order) {
-    await probeEndpoint(i, 8_000);
+  if (trading) await probeState(trading, 8_000);
+  await new Promise((r) => setTimeout(r, 200));
+  if (data) await probeState(data, 8_000);
+  if (tradingOnEmergency && emergency) {
     await new Promise((r) => setTimeout(r, 200));
+    await probeState(emergency, 8_000);
   }
-  await maybeSwitchEndpoints();
+  if (
+    tradingOnEmergency &&
+    trading &&
+    trading.healthy &&
+    !isHardFailed(trading) &&
+    !isRateLimited(trading)
+  ) {
+    tradingOnEmergency = false;
+    tradingRecoverAt = 0;
+    console.log('[rpc] Trading recovered via probe → Alchemy BACKUP');
+  }
   return getRpcStats();
 }
 
-/** Periodic health probes + auto-switch */
 export function startRpcHealthMonitor(): void {
   if (started) return;
   started = true;
   ensureEndpoints();
 
-  const interval = Math.max(
-    45_000,
-    config.rpc?.healthIntervalMs ?? 45_000
-  );
+  const interval = Math.max(45_000, config.rpc?.healthIntervalMs ?? 45_000);
   let healthCycle = 0;
 
-  /** Share load: keep public/utility hot for diagnostics; probe paid lanes sparsely. */
-  function shouldProbeIndex(index: number, cycle: number): boolean {
-    if (!Boolean(config.rpc?.shareLoad)) {
-      // Non-share: never probe while quarantined (window must elapse first).
-      const st = endpoints[index];
-      if (st && isEndpointHardFailed(st)) return false;
-      return true;
-    }
-    const state = endpoints[index];
-    if (!state) return false;
-    // Quarantine: no probes until cooldown elapses (prevents retry storms).
-    if (isEndpointHardFailed(state)) return false;
-    const isPublic = isPublicRpcUrl(state.endpoint.url);
-    const isUtil = index === preferredUtility;
-    const isPrimary = index === preferredPrimary;
-    const isSecondary =
-      index === preferredSecondary && preferredSecondary !== preferredPrimary;
-    // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
-    // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
-    if (isUtil || index === activeUtility) {
-      // Preferred Utility already soft-failed elsewhere: probe it rarely so slow
-      // Triton/rpc-url getSlot samples do not keep painting the Multi-RPC row.
-      if (
-        isUtil &&
-        index !== activeUtility &&
-        state.latencyStressedSince != null &&
-        state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
-      ) {
-        return cycle % 4 === 0;
+  const tick = async () => {
+    healthCycle += 1;
+    try {
+      if (trading && !isHardFailed(trading)) {
+        await probeState(trading, 8_000);
+      }
+      if (data && !isHardFailed(data)) {
+        await probeState(data, 8_000);
+      }
+      // Emergency only when active or recovering from failover
+      if (emergency && (tradingOnEmergency || healthCycle % 6 === 0)) {
+        await probeState(emergency, 8_000);
       }
       if (
-        state.latencyStressedSince != null &&
-        state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
+        tradingOnEmergency &&
+        trading &&
+        trading.healthy &&
+        !isHardFailed(trading) &&
+        !isRateLimited(trading)
       ) {
-        return cycle % 2 === 0;
-      }
-      return true;
-    }
-    if (isPublic) {
-      return cycle % 5 === 0;
-    }
-    // Helius (critical): every 3rd cycle (~135s at 45s interval)
-    if (isPrimary) return cycle % 3 === 0;
-    // Alchemy (scanners): every 2nd cycle (~90s)
-    if (isSecondary) return cycle % 2 === 0;
-    // QuickNode: rare when failing; otherwise every 4th (~180s) — avoid retry storms
-    if (
-      index === preferredQuicknode ||
-      state.endpoint.label === 'quicknode' ||
-      isQuicknodeRpcUrl(state.endpoint.url)
-    ) {
-      if (!state.healthy) return cycle % 8 === 0;
-      return cycle % 4 === 0;
-    }
-    // Inactive fallback: rare
-    return cycle % 5 === 0;
-  }
-
-  // Boot: probe utility/public first, then preferred paid lanes once (not all fallbacks).
-  void (async () => {
-    const order: number[] = [];
-    const push = (i: number) => {
-      if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
-    };
-    if (Boolean(config.rpc?.shareLoad)) {
-      push(preferredUtility);
-      for (let i = 0; i < endpoints.length; i++) {
-        if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) push(i);
-      }
-      push(preferredPrimary);
-      push(preferredSecondary);
-      push(preferredQuicknode);
-    } else {
-      for (let i = 0; i < endpoints.length; i++) push(i);
-    }
-    for (const i of order) {
-      await probeEndpoint(i);
-      await new Promise((r) => setTimeout(r, 400));
-    }
-  })();
-
-  healthTimer = setInterval(() => {
-    void (async () => {
-      healthCycle += 1;
-      const gateSnap = getRpcGateSnapshot();
-      // During overload, skip inactive fallbacks — but ALWAYS keep probing
-      // preferred lane endpoints so a failed-over preferred can recover.
-      // (Previously preferred stayed sticky-DOWN for hours while stressed.)
-      for (let i = 0; i < endpoints.length; i++) {
-        if (!shouldProbeIndex(i, healthCycle)) continue;
-        const isActive =
-          i === activePrimary ||
-          i === activeSecondary ||
-          i === activeUtility;
-        const isPreferred =
-          i === preferredPrimary ||
-          i === preferredSecondary ||
-          i === preferredUtility ||
-          i === preferredQuicknode;
-        if (gateSnap.stressed && !isActive && !isPreferred) {
-          continue;
+        if (!tradingRecoverAt) tradingRecoverAt = Date.now() + TRADING_RECOVER_MS;
+        if (Date.now() >= tradingRecoverAt) {
+          tradingOnEmergency = false;
+          tradingRecoverAt = 0;
+          console.log('[rpc] Trading healthy again → leave Emergency');
         }
-        await probeEndpoint(i);
-        await new Promise((r) => setTimeout(r, gateSnap.stressed ? 400 : 250));
       }
-      await maybeSwitchEndpoints();
-    })();
-  }, interval);
+    } catch (err) {
+      console.warn(
+        '[rpc] health tick error:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  };
 
-  console.log(
-    `[rpc] Health monitor started (every ${interval}ms` +
-      (Boolean(config.rpc?.shareLoad)
-        ? '; share-load: public/utility every tick, helius~3x, alchemy/quicknode~2x'
-        : '') +
-      `) — endpoints: ` +
-      endpoints.map((e) => `${e.endpoint.label}[${e.role}]`).join(', ') +
-      ` · active primary=${getActiveEndpointLabel('primary')} secondary=${getActiveEndpointLabel('secondary')}`
-  );
+  void tick();
+  healthTimer = setInterval(() => void tick(), interval);
 }
 
 export function stopRpcHealthMonitor(): void {

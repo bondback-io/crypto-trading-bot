@@ -132,8 +132,8 @@ export interface PersistedBotSettings {
   pollIntervalMs?: number;
   /** Share RPC load across Helius / Alchemy / public */
   rpcShareLoad?: boolean;
-  /** classic | multiLane — opt-in typed sticky pool */
-  rpcMode?: 'classic' | 'multiLane';
+  /** classic | multiLane | simple — routing always simple since 1.2.320 */
+  rpcMode?: 'classic' | 'multiLane' | 'simple';
   /** Favourites soft-watch wallet cap (0 = pause) */
   rpcSoftWatchCap?: number | null;
   /** Micro-bot Learning Mode (global gate overlays + fairness) */

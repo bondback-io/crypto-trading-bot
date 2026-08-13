@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.320',
+    title: 'Wipe RPC to Alchemy Trading / Data + public Emergency',
+    sections: ['execution', 'overview'],
+    items: [
+      'Replaced classic Share + Multi-lane with one sticky router: Trading=ALCHEMY_API_KEY_BACKUP, Data=ALCHEMY_API_KEY, Emergency=public (idle until Trading hard-fail). Helius disabled — never probed or routed.',
+      'Data never borrows Trading CU. Health UI shows Trading/Data/Emergency/Helius-disabled plus per-lane congestion (state, cause, gate, latency spike, failover, Favourites shed).',
+      'Soft-watch cap remains the Favourites volume knob on Data. Share/mode toggles are no-ops for routing.',
+    ],
+  },
+  {
     version: '1.2.319',
     title: 'Opt-in Multi-lane RPC pool (typed sticky)',
     sections: ['execution', 'overview'],

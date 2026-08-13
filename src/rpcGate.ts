@@ -1,301 +1,66 @@
 /**
- * Per-lane RPC concurrency + rate limits + in-flight job dedupe.
- * Prevents unbounded parallel calls that choke providers a few minutes after boot.
+ * 2-lane RPC concurrency / RPS gate (Trading + Data).
  */
 
-/** Mirrors connection.RpcRole — kept local to avoid circular imports. */
-export type RpcGateRole =
-  | 'primary'
-  | 'secondary'
-  | 'utility'
-  | 'scannersB'
-  | 'metrics';
-
-export type RpcGateDecision = 'run' | 'queued' | 'skipped_rate' | 'skipped_busy' | 'deduped';
+export type RpcGateRole = 'primary' | 'secondary';
 
 export type RpcLaneGateStats = {
-  role: RpcGateRole;
   inFlight: number;
-  maxConcurrent: number;
+  max: number;
   queued: number;
-  maxQueue: number;
-  tokens: number;
-  maxRps: number;
-  hitConcurrency: number;
-  hitRateLimit: number;
   skipped: number;
-  deduped: number;
+  skipsPerMin: number;
+  topSkipReason: string | null;
+  rps: number;
+  maxRps: number;
 };
 
 export type RpcGateSnapshot = {
-  lanes: Record<RpcGateRole, RpcLaneGateStats>;
-  backlog: number;
   stressed: boolean;
-};
-
-type Waiter = {
-  resolve: () => void;
-  reject: (err: Error) => void;
-  feature: string;
-  enqueuedAt: number;
+  backlog: number;
+  lanes: {
+    primary: RpcLaneGateStats;
+    secondary: RpcLaneGateStats;
+  };
 };
 
 type LaneState = {
   inFlight: number;
-  waiters: Waiter[];
-  /** Token-bucket tokens (refill to maxRps each second). */
-  tokens: number;
-  lastRefillAt: number;
-  hitConcurrency: number;
-  hitRateLimit: number;
+  queued: number;
   skipped: number;
-  deduped: number;
-  lastLogAt: number;
+  skipReasons: Map<string, number>;
+  skipTimestamps: number[];
+  recentStarts: number[];
+  waiters: Array<{
+    resolve: () => void;
+    reject: (e: Error) => void;
+    priority: number;
+    reason: string;
+  }>;
 };
 
-const CRITICAL_FEATURES = new Set([
-  'trade_entry',
-  'migration',
-  'mev_sandwich',
-  'send_tx',
-  'confirm_tx',
-]);
-
-function envInt(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name];
-  if (raw == null || raw === '') return fallback;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.round(n)));
-}
-
-function laneLimits(role: RpcGateRole): {
-  maxConcurrent: number;
-  maxRps: number;
-  maxQueue: number;
-  /** Non-critical wait budget before skip (ms). Critical waits longer. */
-  maxWaitMs: number;
-} {
-  if (role === 'primary') {
-    return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_PRIMARY', 8, 1, 32),
-      maxRps: envInt('RPC_LANE_RPS_PRIMARY', 20, 1, 120),
-      maxQueue: envInt('RPC_LANE_QUEUE_PRIMARY', 24, 0, 200),
-      maxWaitMs: 8_000,
-    };
-  }
-  if (role === 'secondary') {
-    return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
-      maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
-      maxWaitMs: 3_000,
-    };
-  }
-  if (role === 'scannersB') {
-    return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SCANNERS_B', 3, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_SCANNERS_B', 5, 1, 80),
-      maxQueue: envInt('RPC_LANE_QUEUE_SCANNERS_B', 6, 0, 100),
-      maxWaitMs: 3_000,
-    };
-  }
-  if (role === 'metrics') {
-    return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_METRICS', 2, 1, 16),
-      maxRps: envInt('RPC_LANE_RPS_METRICS', 4, 1, 60),
-      maxQueue: envInt('RPC_LANE_QUEUE_METRICS', 4, 0, 80),
-      maxWaitMs: 2_500,
-    };
-  }
-  return {
-    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
-    maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
-    maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
-    maxWaitMs: 2_000,
-  };
-}
+const PRIMARY_MAX = 8;
+const PRIMARY_RPS = 40;
+const SECONDARY_MAX = 12;
+const SECONDARY_RPS = 60;
+const SECONDARY_QUEUE_CAP = 48;
+const PRIMARY_QUEUE_CAP = 24;
 
 const lanes: Record<RpcGateRole, LaneState> = {
   primary: emptyLane(),
   secondary: emptyLane(),
-  utility: emptyLane(),
-  scannersB: emptyLane(),
-  metrics: emptyLane(),
 };
 
 function emptyLane(): LaneState {
   return {
     inFlight: 0,
-    waiters: [],
-    tokens: 100, // full bucket until first refill caps to maxRps
-    lastRefillAt: Date.now(),
-    hitConcurrency: 0,
-    hitRateLimit: 0,
+    queued: 0,
     skipped: 0,
-    deduped: 0,
-    lastLogAt: 0,
+    skipReasons: new Map(),
+    skipTimestamps: [],
+    recentStarts: [],
+    waiters: [],
   };
-}
-
-function refill(lane: LaneState, role: RpcGateRole): void {
-  const { maxRps } = laneLimits(role);
-  const now = Date.now();
-  const elapsed = Math.max(0, now - lane.lastRefillAt);
-  if (elapsed <= 0) return;
-  lane.tokens = Math.min(maxRps, lane.tokens + (elapsed / 1000) * maxRps);
-  lane.lastRefillAt = now;
-}
-
-function isCritical(feature?: string): boolean {
-  if (!feature) return false;
-  return CRITICAL_FEATURES.has(feature) || feature.startsWith('trade_');
-}
-
-function logGate(
-  role: RpcGateRole,
-  message: string,
-  data: Record<string, unknown>
-): void {
-  const lane = lanes[role];
-  const now = Date.now();
-  if (now - lane.lastLogAt < 8_000) return;
-  lane.lastLogAt = now;
-  console.warn(`[rpc-gate] ${role}: ${message}`, data);
-}
-
-/**
- * Acquire a lane slot (concurrency + rate). Critical work waits; non-critical
- * may skip when the lane is saturated so background polls cannot pile up.
- */
-export async function acquireRpcLane(
-  role: RpcGateRole,
-  feature?: string
-): Promise<{ release: () => void; decision: RpcGateDecision }> {
-  const limits = laneLimits(role);
-  const lane = lanes[role];
-  const critical = isCritical(feature);
-
-  refill(lane, role);
-
-  // Rate limit: critical waits briefly for a token; non-critical may skip.
-  if (lane.tokens < 1) {
-    lane.hitRateLimit += 1;
-    if (!critical) {
-      lane.skipped += 1;
-      try {
-        const { noteBackgroundRpcSkip } =
-          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-        noteBackgroundRpcSkip(role, feature);
-      } catch {
-        /* */
-      }
-      logGate(role, 'background delayed (rate limit / load protection)', {
-        feature: feature || 'ungated',
-        inFlight: lane.inFlight,
-        queued: lane.waiters.length,
-        tokens: Number(lane.tokens.toFixed(2)),
-        maxRps: limits.maxRps,
-        lifetimeSkipped: lane.skipped,
-      });
-      throw new RpcGateSkipError('rate', role, feature);
-    }
-    const waitForTokenMs = Math.min(1_500, limits.maxWaitMs);
-    const deadline = Date.now() + waitForTokenMs;
-    while (lane.tokens < 1 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 40));
-      refill(lane, role);
-    }
-    if (lane.tokens < 1) {
-      // Allow critical through anyway — trade path must not die on token starvation.
-      lane.tokens = 1;
-    }
-  }
-
-  // Concurrency: wait in queue or skip.
-  if (lane.inFlight >= limits.maxConcurrent) {
-    lane.hitConcurrency += 1;
-    if (!critical && lane.waiters.length >= limits.maxQueue) {
-      lane.skipped += 1;
-      try {
-        const { noteBackgroundRpcSkip } =
-          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-        noteBackgroundRpcSkip(role, feature);
-      } catch {
-        /* */
-      }
-      logGate(role, 'background delayed (concurrency / load protection)', {
-        feature: feature || 'ungated',
-        inFlight: lane.inFlight,
-        queued: lane.waiters.length,
-        maxConcurrent: limits.maxConcurrent,
-      });
-      throw new RpcGateSkipError('busy', role, feature);
-    }
-    if (!critical && limits.maxQueue <= 0) {
-      lane.skipped += 1;
-      try {
-        const { noteBackgroundRpcSkip } =
-          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-        noteBackgroundRpcSkip(role, feature);
-      } catch {
-        /* */
-      }
-      throw new RpcGateSkipError('busy', role, feature);
-    }
-
-    const maxWait = critical ? Math.max(limits.maxWaitMs, 12_000) : limits.maxWaitMs;
-    await new Promise<void>((resolve, reject) => {
-      const waiter: Waiter = {
-        resolve,
-        reject,
-        feature: feature || 'ungated',
-        enqueuedAt: Date.now(),
-      };
-      lane.waiters.push(waiter);
-      logGate(role, 'queued', {
-        feature: waiter.feature,
-        inFlight: lane.inFlight,
-        queued: lane.waiters.length,
-        maxConcurrent: limits.maxConcurrent,
-      });
-      const timer = setTimeout(() => {
-        const idx = lane.waiters.indexOf(waiter);
-        if (idx >= 0) lane.waiters.splice(idx, 1);
-        if (critical) {
-          // Critical: proceed anyway (may briefly exceed cap) rather than fail entry.
-          resolve();
-        } else {
-          lane.skipped += 1;
-          reject(new RpcGateSkipError('busy', role, feature));
-        }
-      }, maxWait);
-      const origResolve = waiter.resolve;
-      const origReject = waiter.reject;
-      waiter.resolve = () => {
-        clearTimeout(timer);
-        origResolve();
-      };
-      waiter.reject = (err) => {
-        clearTimeout(timer);
-        origReject(err);
-      };
-    });
-  }
-
-  lane.tokens -= 1;
-  lane.inFlight += 1;
-
-  let released = false;
-  const release = () => {
-    if (released) return;
-    released = true;
-    lane.inFlight = Math.max(0, lane.inFlight - 1);
-    const next = lane.waiters.shift();
-    if (next) next.resolve();
-  };
-
-  return { release, decision: 'run' };
 }
 
 export class RpcGateSkipError extends Error {
@@ -304,7 +69,9 @@ export class RpcGateSkipError extends Error {
   readonly feature?: string;
 
   constructor(kind: 'rate' | 'busy', role: RpcGateRole, feature?: string) {
-    super(`RPC ${role} lane ${kind === 'rate' ? 'rate-limited' : 'busy'} — skipped ${feature || 'work'}`);
+    super(
+      `RPC ${role} lane ${kind === 'rate' ? 'rate-limited' : 'busy'} — skipped ${feature || 'work'}`
+    );
     this.name = 'RpcGateSkipError';
     this.kind = kind;
     this.role = role;
@@ -313,141 +80,222 @@ export class RpcGateSkipError extends Error {
 }
 
 export function isRpcGateSkipError(err: unknown): err is RpcGateSkipError {
-  return err instanceof RpcGateSkipError;
+  return (
+    err instanceof RpcGateSkipError ||
+    (err instanceof Error && err.name === 'RpcGateSkipError')
+  );
 }
 
-/** In-flight dedupe: same key shares one promise; later callers await or skip. */
-const inflightJobs = new Map<string, Promise<unknown>>();
+function pruneTimestamps(arr: number[], windowMs: number): void {
+  const cutoff = Date.now() - windowMs;
+  while (arr.length && arr[0]! < cutoff) arr.shift();
+}
 
+function laneStats(role: RpcGateRole): RpcLaneGateStats {
+  const L = lanes[role];
+  pruneTimestamps(L.skipTimestamps, 60_000);
+  pruneTimestamps(L.recentStarts, 1_000);
+  let topSkipReason: string | null = null;
+  let topN = 0;
+  for (const [k, v] of L.skipReasons) {
+    if (v > topN) {
+      topN = v;
+      topSkipReason = k;
+    }
+  }
+  return {
+    inFlight: L.inFlight,
+    max: role === 'primary' ? PRIMARY_MAX : SECONDARY_MAX,
+    queued: L.queued,
+    skipped: L.skipped,
+    skipsPerMin: L.skipTimestamps.length,
+    topSkipReason,
+    rps: L.recentStarts.length,
+    maxRps: role === 'primary' ? PRIMARY_RPS : SECONDARY_RPS,
+  };
+}
+
+export function getRpcGateSnapshot(): RpcGateSnapshot {
+  const primary = laneStats('primary');
+  const secondary = laneStats('secondary');
+  const backlog = primary.queued + secondary.queued;
+  const stressed =
+    secondary.queued > SECONDARY_MAX ||
+    secondary.skipsPerMin > 20 ||
+    primary.queued > PRIMARY_MAX / 2;
+  return {
+    stressed,
+    backlog,
+    lanes: { primary, secondary },
+  };
+}
+
+function noteSkip(role: RpcGateRole, reason: string): void {
+  const L = lanes[role];
+  L.skipped += 1;
+  L.skipTimestamps.push(Date.now());
+  L.skipReasons.set(reason, (L.skipReasons.get(reason) || 0) + 1);
+}
+
+function tryAcquire(role: RpcGateRole): boolean {
+  const L = lanes[role];
+  const max = role === 'primary' ? PRIMARY_MAX : SECONDARY_MAX;
+  const maxRps = role === 'primary' ? PRIMARY_RPS : SECONDARY_RPS;
+  pruneTimestamps(L.recentStarts, 1_000);
+  if (L.inFlight >= max) return false;
+  if (L.recentStarts.length >= maxRps) return false;
+  L.inFlight += 1;
+  L.recentStarts.push(Date.now());
+  return true;
+}
+
+function release(role: RpcGateRole): void {
+  const L = lanes[role];
+  L.inFlight = Math.max(0, L.inFlight - 1);
+  // Drain highest priority waiter
+  L.waiters.sort((a, b) => b.priority - a.priority);
+  while (L.waiters.length && tryAcquire(role)) {
+    const w = L.waiters.shift()!;
+    L.queued = Math.max(0, L.queued - 1);
+    w.resolve();
+    return;
+  }
+}
+
+async function acquire(
+  role: RpcGateRole,
+  opts: { priority?: number; reason?: string; skippable?: boolean } = {}
+): Promise<void> {
+  const priority = opts.priority ?? 0;
+  const reason = opts.reason || 'rpc';
+  const skippable = opts.skippable ?? false;
+  if (tryAcquire(role)) return;
+
+  const L = lanes[role];
+  const cap = role === 'primary' ? PRIMARY_QUEUE_CAP : SECONDARY_QUEUE_CAP;
+  if (L.queued >= cap) {
+    noteSkip(role, reason);
+    if (skippable) {
+      throw new RpcGateSkipError('busy', role, reason);
+    }
+    // Critical: wait briefly then retry once
+  }
+
+  if (skippable && L.queued > cap / 2) {
+    noteSkip(role, reason);
+    throw new RpcGateSkipError('busy', role, reason);
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    L.queued += 1;
+    L.waiters.push({ resolve, reject, priority, reason });
+  });
+}
+
+/**
+ * Run work under the lane gate.
+ * Favourites / activity: lowest priority, skippable on Data.
+ */
+export async function runThroughRpcGate<T>(
+  role: RpcGateRole,
+  fn: () => Promise<T>,
+  opts: {
+    priority?: number;
+    reason?: string;
+    skippable?: boolean;
+  } = {}
+): Promise<T> {
+  await acquire(role, opts);
+  try {
+    return await fn();
+  } finally {
+    release(role);
+  }
+}
+
+/** Feature-named entry used by connection / scanners. */
+export async function runWithRpcFeatureGate<T>(
+  feature: string,
+  role: RpcGateRole,
+  fn: () => Promise<T>
+): Promise<T> {
+  const favouritesLike = /favourit|activity|wallet_poll|wallet_import|soft.?watch/i.test(
+    feature
+  );
+  const scannerLike = /scanner|alpha|zion|health_probe|bonding|metrics|anti.?rug/i.test(
+    feature
+  );
+  return runThroughRpcGate(role, fn, {
+    priority: role === 'primary' ? 100 : favouritesLike ? 0 : scannerLike ? 40 : 50,
+    reason: feature,
+    skippable: favouritesLike || (role === 'secondary' && scannerLike),
+  });
+}
+
+const dedupeInflight = new Map<string, Promise<unknown>>();
+
+/** Dedupe safe read-only jobs only (same key coalesces). */
 export async function runDedupedRpcJob<T>(
   key: string,
   fn: () => Promise<T>,
   opts?: { /** If true, join the in-flight job; else skip with undefined */ join?: boolean }
 ): Promise<T | undefined> {
-  const existing = inflightJobs.get(key);
+  const existing = dedupeInflight.get(key);
   if (existing) {
-    const roleHint = key.split(':')[0];
-    if (
-      roleHint === 'primary' ||
-      roleHint === 'secondary' ||
-      roleHint === 'utility' ||
-      roleHint === 'scannersB' ||
-      roleHint === 'metrics'
-    ) {
-      lanes[roleHint].deduped += 1;
-    } else {
-      lanes.utility.deduped += 1;
-    }
     if (opts?.join === false) return undefined;
-    return (await existing) as T;
+    return existing as Promise<T>;
   }
-  const promise = (async () => {
-    try {
-      return await fn();
-    } finally {
-      inflightJobs.delete(key);
-    }
-  })();
-  inflightJobs.set(key, promise);
-  return promise;
+  const p = fn().finally(() => {
+    if (dedupeInflight.get(key) === p) dedupeInflight.delete(key);
+  });
+  dedupeInflight.set(key, p);
+  return p;
 }
 
-export function getRpcGateSnapshot(): RpcGateSnapshot {
-  const roles: RpcGateRole[] = [
-    'primary',
-    'secondary',
-    'scannersB',
-    'metrics',
-    'utility',
-  ];
-  const out = {} as Record<RpcGateRole, RpcLaneGateStats>;
-  let backlog = 0;
-  for (const role of roles) {
-    const lane = lanes[role];
-    const limits = laneLimits(role);
-    refill(lane, role);
-    backlog += lane.waiters.length + Math.max(0, lane.inFlight - Math.floor(limits.maxConcurrent * 0.75));
-    out[role] = {
-      role,
-      inFlight: lane.inFlight,
-      maxConcurrent: limits.maxConcurrent,
-      queued: lane.waiters.length,
-      maxQueue: limits.maxQueue,
-      tokens: Number(lane.tokens.toFixed(2)),
-      maxRps: limits.maxRps,
-      hitConcurrency: lane.hitConcurrency,
-      hitRateLimit: lane.hitRateLimit,
-      skipped: lane.skipped,
-      deduped: lane.deduped,
-    };
-  }
-  const stressed =
-    out.utility.queued > 0 ||
-    out.utility.skipped > 0 ||
-    out.secondary.queued > 2 ||
-    out.scannersB.queued > 2 ||
-    out.primary.hitConcurrency > 0 ||
-    out.primary.queued > 0;
-  return { lanes: out, backlog, stressed };
-}
-
-/**
- * True when Critical (primary) is busy — scanners / Favourites should yield
- * so trade entry keeps RPC headroom.
- */
-export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = 'scanner'): {
-  defer: boolean;
-  reason: string | null;
-} {
+/** Yield scanners/Favourites when Trading busy or Data saturated. */
+export function shouldDeferBackgroundForCritical(
+  kind: 'scanner' | 'utility' = 'scanner'
+): { defer: boolean; reason: string | null } {
   const snap = getRpcGateSnapshot();
   const p = snap.lanes.primary;
   const s = snap.lanes.secondary;
-  const u = snap.lanes.utility;
 
   try {
     const { getRpcLoadControlSnapshot } =
       require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     const load = getRpcLoadControlSnapshot();
-    // Only full shed (Critical latency / queue) hard-skips. Mild scanner×2
-  // uses probabilistic skip in shouldSkipScannerTick — do not hard-block here
-  // or scanners go quiet for the whole process once factor hits 3 once.
-  if (load.shedBackground && kind === 'scanner' && load.scannerSlowFactor >= 3) {
-    return {
-      defer: true,
-      reason: load.reasons[0] || 'adaptive shed for Critical',
-    };
-  }
-  if (kind === 'utility' && load.utilitySlowFactor >= 3) {
-    return {
-      defer: true,
-      reason: `utility adaptive×${load.utilitySlowFactor}`,
-    };
-  }
+    if (load.shedBackground && kind === 'scanner' && load.scannerSlowFactor >= 3) {
+      return {
+        defer: true,
+        reason: load.reasons[0] || 'adaptive shed for Trading',
+      };
+    }
+    if (kind === 'utility' && load.utilitySlowFactor >= 3) {
+      return {
+        defer: true,
+        reason: `data adaptive×${load.utilitySlowFactor}`,
+      };
+    }
   } catch {
     /* */
   }
 
-  if (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1)) {
+  if (p.queued > 0 || p.inFlight >= Math.max(1, p.max - 1)) {
     return {
       defer: true,
-      reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
+      reason: `Trading lane busy (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`,
     };
   }
-  // Use in-flight/queue only — lane.skipped is a lifetime counter and must NOT
-  // permanently disable scanners after a few early gate skips.
-  if (
-    kind === 'scanner' &&
-    (s.queued >= 2 || s.inFlight >= s.maxConcurrent)
-  ) {
+  if (kind === 'scanner' && (s.queued >= 2 || s.inFlight >= s.max)) {
     return {
       defer: true,
-      reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
+      reason: `Data lane saturated (inFlight ${s.inFlight}/${s.max}, queue ${s.queued})`,
     };
   }
-  if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
+  if (kind === 'utility' && (s.queued >= 2 || snap.stressed)) {
     return {
       defer: true,
-      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued}, skipped ${u.skipped})`,
+      reason: `Data lane stressed (inFlight ${s.inFlight}/${s.max}, queue ${s.queued})`,
     };
   }
   return { defer: false, reason: null };
@@ -455,7 +303,6 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
 
 const deferLogAt = new Map<string, number>();
 
-/** Throttled operator-visible log when background work yields to load protection. */
 export function logBackgroundDeferred(
   subsystem: string,
   reason: string,
@@ -468,8 +315,12 @@ export function logBackgroundDeferred(
   deferLogAt.set(key, now);
   console.warn(
     `[rpc-load] ${subsystem} delayed — load protection: ${reason}` +
-      (extra && Object.keys(extra).length
-        ? ` ${JSON.stringify(extra)}`
-        : '')
+      (extra && Object.keys(extra).length ? ` ${JSON.stringify(extra)}` : '')
   );
+}
+
+export function resetRpcGatesForTests(): void {
+  lanes.primary = emptyLane();
+  lanes.secondary = emptyLane();
+  dedupeInflight.clear();
 }

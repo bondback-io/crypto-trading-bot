@@ -48,7 +48,7 @@ function checkRpc(): HealthIssue[] {
       require('./connection') as typeof import('./connection');
     const rpc = getRpcLoadDiagnostic();
     const stats = getRpcStats();
-    const lanes = [rpc.primary, rpc.secondary, rpc.utility];
+    const lanes = [rpc.primary, rpc.secondary];
     const badLanes = lanes.filter(
       (l) => !l.healthy && !isShortLatencySpike(l)
     );
@@ -61,7 +61,7 @@ function checkRpc(): HealthIssue[] {
         title: `${badLanes.length} RPC lanes unhealthy (sustained)`,
         detail: badLanes.map((l) => l.label).join(', '),
         recommendation:
-          'Check Stats → RPC endpoints and failover. Pause entries until primary recovers if needed.',
+          'Check Stats → RPC endpoints. Pause entries until Trading recovers if needed.',
         sustainedHint: true,
       });
     } else if (badLanes.length === 1) {
@@ -72,7 +72,7 @@ function checkRpc(): HealthIssue[] {
         title: `RPC lane "${badLanes[0]!.label}" degraded`,
         detail: `downForMs=${badLanes[0]!.downForMs}`,
         recommendation:
-          'Watch the RPC diagnostic card; if it persists >5–10 min, review that endpoint.',
+          'Watch the RPC diagnostic card; if it persists >5–10 min, review Alchemy keys.',
       });
     }
 
@@ -92,8 +92,22 @@ function checkRpc(): HealthIssue[] {
           )
           .join('; '),
         recommendation:
-          'Dead endpoints are auto-quarantined — verify provider keys/URLs; avoid thrashing by letting cooldown finish.',
+          'Dead endpoints are auto-quarantined — verify Alchemy keys; let cooldown finish.',
         sustainedHint: (top.streak || 0) >= 3,
+      });
+    }
+
+    const cong = stats.lanes;
+    if (cong?.trading?.congestion?.state === 'failover') {
+      out.push({
+        key: 'rpc_trading_emergency',
+        area: 'rpc',
+        severity: 'action',
+        title: 'Trading on Emergency public RPC',
+        detail: cong.trading.congestion.cause,
+        recommendation:
+          'Check ALCHEMY_API_KEY_BACKUP — Trading should recover automatically when healthy.',
+        sustainedHint: true,
       });
     }
 
@@ -103,9 +117,9 @@ function checkRpc(): HealthIssue[] {
         area: 'rpc',
         severity: 'watch',
         title: 'RPC gate stressed (backlog / concurrency)',
-        detail: `utility queued=${stats.gate.lanes?.utility?.queued ?? '?'}`,
+        detail: `data queued=${stats.gate.lanes?.secondary?.queued ?? '?'}`,
         recommendation:
-          'Raise Poll intervals slightly or enable share-load; utility/scanner backlog is growing.',
+          'Raise Poll intervals slightly or lower soft-watch cap; Data backlog is growing.',
       });
     }
 
@@ -119,10 +133,10 @@ function checkRpc(): HealthIssue[] {
         key: 'rpc_scanner_slowdown',
         area: 'rpc',
         severity: 'watch',
-        title: 'Scanner/utility auto-slowed (high skips)',
-        detail: `slowFactor=${lc.scannerSlowFactor} secondarySkips=${lc.secondarySkipsRecent}/60s`,
+        title: 'Scanner/Favourites auto-slowed (high skips)',
+        detail: `slowFactor=${lc.scannerSlowFactor} dataSkips=${lc.secondarySkipsRecent}/min`,
         recommendation:
-          'Normal under congestion — if sustained, check Critical/Scanners RPC health.',
+          'Normal under congestion — if sustained, check Trading/Data RPC health.',
       });
     }
   } catch {

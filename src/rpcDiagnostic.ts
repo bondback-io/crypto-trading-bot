@@ -196,10 +196,10 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     /* optional */
   }
 
-  const shareLoad = Boolean(config.rpc?.shareLoad);
-  const scannerLane = shareLoad ? 'secondary' : 'primary';
-  const activityLane = shareLoad ? 'utility' : 'secondary';
-  const walletPollLane = shareLoad ? 'utility' : 'primary';
+  const shareLoad = false;
+  const scannerLane: 'secondary' = 'secondary';
+  const activityLane: 'secondary' = 'secondary';
+  const walletPollLane: 'secondary' = 'secondary';
   const softCapNote = softWatch
     ? softWatch.softWatchPaused
       ? 'Favourites soft-watch PAUSED (cap 0)'
@@ -211,15 +211,13 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       id: 'wallet_poll',
       lane: walletPollLane,
       intervalMs: walletPoll,
-      note: shareLoad
-        ? `Copy / wallet buy detection on public utility (${softCapNote})`
-        : `Copy / wallet buy detection (${softCapNote})`,
+      note: `Favourites / wallet buy detection on Data lane (${softCapNote})`,
     },
     {
       id: 'migration',
       lane: 'primary',
       intervalMs: migrationPoll,
-      note: 'Migration listener poll (hardcoded 12s; WS off on public RPC)',
+      note: 'Migration listener poll (Trading lane)',
     },
     {
       id: 'market_scanner',
@@ -249,17 +247,13 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       id: 'activity',
       lane: activityLane,
       intervalMs: Math.max(walletPoll * 4, 60_000),
-      note: shareLoad
-        ? 'Wallet activity refresh (utility / public when Share ON)'
-        : 'Wallet activity refresh (secondary)',
+      note: 'Wallet activity refresh (Data lane)',
     },
     {
       id: 'health',
       lane: 'all',
       intervalMs: healthPoll,
-      note: Boolean(config.rpc?.shareLoad)
-        ? 'RPC health getSlot — public/utility every tick; Helius ~1/3; Alchemy ~1/2; fallback rare'
-        : 'RPC health getSlot probes (all registered endpoints)',
+      note: 'RPC health getSlot — Trading + Data; Emergency only when active',
     },
   ];
 
@@ -273,48 +267,57 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
 
   const primaryStressed = laneStressed(primary);
   const secondaryStressed = laneStressed(secondary);
-  const utilityStressed = laneStressed(utility);
-  const walletPollStressed = shareLoad
-    ? utilityStressed || lastPollRateLimited
-    : primaryStressed || lastPollRateLimited || primary.public;
+  const walletPollStressed =
+    secondaryStressed || lastPollRateLimited;
 
-  if (shareLoad && softWatch && !softWatch.softWatchPaused) {
-    if (utilityStressed || lastPollRateLimited) {
+  if (!process.env.ALCHEMY_API_KEY_BACKUP?.trim() && !process.env.ALCHEMY_RPC_URL_BACKUP?.trim()) {
+    chokeHints.push(
+      'Missing ALCHEMY_API_KEY_BACKUP — Trading lane has no dedicated Alchemy BACKUP key.'
+    );
+  }
+  if (!process.env.ALCHEMY_API_KEY?.trim() && !process.env.ALCHEMY_RPC_URL?.trim()) {
+    chokeHints.push(
+      'Missing ALCHEMY_API_KEY — Data lane has no dedicated Alchemy key.'
+    );
+  }
+
+  if (softWatch && !softWatch.softWatchPaused) {
+    if (secondaryStressed || lastPollRateLimited) {
       chokeHints.push(
-        `Utility soft-watch under pressure (cap ${softWatch.softWatchCap}, pool ${softWatch.watchPool}/${softWatch.enabledWallets}, last poll ${softWatch.lastPollElapsedMs ?? '—'}ms). Lower Soft watch cap in Config → MEV/RPC (try 8–12, or 0 to pause Favourites watch).`
+        `Data soft-watch under pressure (cap ${softWatch.softWatchCap}, pool ${softWatch.watchPool}/${softWatch.enabledWallets}, last poll ${softWatch.lastPollElapsedMs ?? '—'}ms). Lower Soft watch cap (try 8–12, or 0 to pause Favourites).`
       );
     } else if (softWatch.softWatchCap >= 25 && softWatch.enabledWallets > softWatch.softWatchCap) {
       chokeHints.push(
-        `Soft watch cap ${softWatch.softWatchCap} still large vs ${softWatch.enabledWallets} enabled wallets — consider 8–12 to ease Utility.`
+        `Soft watch cap ${softWatch.softWatchCap} still large vs ${softWatch.enabledWallets} enabled wallets — consider 8–12 to ease Data.`
       );
     }
   }
   if (softWatch?.softWatchPaused) {
     chokeHints.push(
-      'Favourites soft-watch is PAUSED (cap 0) — Utility wallet_poll idle; copy buys from Favourites will not fire until you raise the cap.'
+      'Favourites soft-watch is PAUSED (cap 0) — Data wallet_poll idle; copy buys from Favourites will not fire until you raise the cap.'
     );
   }
 
   if (!primary.healthy) {
     chokeHints.push(
-      `Primary preferred DOWN (${primary.label}${primary.downForMs ? `, down ${Math.round(primary.downForMs / 1000)}s` : ''}).`
+      `Trading preferred DOWN (${primary.label}${primary.downForMs ? `, down ${Math.round(primary.downForMs / 1000)}s` : ''}).`
     );
   } else if (primary.successRate != null && primary.successRate < 50) {
     chokeHints.push(
-      `Primary success rate low (${primary.successRate.toFixed(0)}% on ${primary.label}).`
+      `Trading success rate low (${primary.successRate.toFixed(0)}% on ${primary.label}).`
     );
   } else if (primary.latencyMs != null && primary.latencyMs > 500) {
     chokeHints.push(
-      `Primary latency high (${primary.latencyMs}ms on ${primary.label}).`
+      `Trading latency high (${primary.latencyMs}ms on ${primary.label}).`
     );
   }
 
   if (primary.failover) {
-    chokeHints.push('Primary lane is piggybacking (failover active).');
+    chokeHints.push('Trading lane is on Emergency public (failover active).');
   }
-  if (primary.public && !shareLoad) {
+  if (primary.public) {
     chokeHints.push(
-      'Primary is a public/free RPC — rate limits commonly choke wallet poll + migration + scanner.'
+      'Trading is on a public RPC — set ALCHEMY_API_KEY_BACKUP for dedicated Trading CU.'
     );
   }
   if (lastPollRateLimited) {
@@ -322,7 +325,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   }
   if (rpc.lanesShareEndpoint) {
     chokeHints.push(
-      'Primary and secondary share one URL — Zion steals CU from copy/signals. Set distinct RPC_SECONDARY.'
+      'Trading and Data share one URL — set distinct ALCHEMY_API_KEY_BACKUP vs ALCHEMY_API_KEY.'
     );
   }
   if (rpc.warning) {
@@ -349,35 +352,32 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       currentMs: walletPoll,
       suggestedMs: bumpMs(
         walletPoll,
-        lastPollRateLimited || (shareLoad ? !utility.healthy : !primary.healthy)
-          ? 20_000
-          : 15_000,
+        lastPollRateLimited || !secondary.healthy ? 20_000 : 15_000,
         60_000
       ),
-      reason: shareLoad
-        ? 'Utility/public carries Favourites wallet watch — longer interval eases public RPC pressure.'
-        : 'Primary carries copy wallet polling — longer interval reduces getSignatures pressure.',
+      reason:
+        'Data lane carries Favourites wallet watch — longer interval eases Alchemy Data pressure.',
     });
   }
-  if (primaryStressed || lastPollRateLimited || (primary.public && !shareLoad)) {
-    if (scannerOn && !shareLoad) {
+  if (secondaryStressed || lastPollRateLimited) {
+    if (scannerOn) {
       addRec({
         target: 'market_scanner',
         fieldLabel: 'Market Scanner Poll interval (ms)',
         currentMs: scannerPoll,
         suggestedMs: bumpMs(scannerPoll, 25_000, 90_000),
         reason:
-          'Scanner curve enrich stacks on primary with wallet + migration polls.',
+          'Scanner curve enrich stacks on Data with Favourites + Zion polls.',
       });
     }
-    if (alphaOn && !shareLoad) {
+    if (alphaOn) {
       addRec({
         target: 'alpha_scan',
         fieldLabel: 'AlphaScan Poll (ms)',
         currentMs: alphaPoll,
         suggestedMs: bumpMs(alphaPoll, 60_000, 180_000),
         reason:
-          'AlphaScan bonding-curve enrich hits primary; raise Poll or leave AlphaScan off when primary is stressed.',
+          'AlphaScan bonding-curve enrich hits Data; raise Poll or leave AlphaScan off when Data is stressed.',
       });
     }
   }
@@ -391,14 +391,14 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
         suggestedMs: bumpMs(zionPoll, zionRpcCooldown ? 60_000 : 45_000, 180_000),
         reason: zionRpcCooldown
           ? 'Zion is rate-limited — slower KOL poll yields CU.'
-          : 'Secondary lane stress — slow Zion poll so Place Trade / KOL share CU better.',
+          : 'Data lane stress — slow Zion poll so Place Trade / KOL share CU better.',
       });
     }
   }
 
   if (chokeHints.length === 0 && recommendations.length === 0) {
     chokeHints.push(
-      'No abnormal RPC choke detected — lanes look healthy for current load.'
+      'No abnormal RPC choke detected — Trading/Data look healthy for current load.'
     );
   }
 
@@ -408,7 +408,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     primary,
     secondary,
     utility,
-    shareLoad: Boolean(config.rpc?.shareLoad),
+    shareLoad: false,
     softWatch,
     chokeHints,
     loaders,
