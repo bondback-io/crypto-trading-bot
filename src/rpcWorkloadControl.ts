@@ -12,6 +12,9 @@ export type RpcWorkloadId =
   | 'mev'
   | 'priority_fee'
   | 'market_scanner'
+  | 'dip_setup_watch'
+  | 'trend_setup_watch'
+  | 'majors_armed_watch'
   | 'alpha_scan'
   | 'zion_scanner'
   | 'zion_place_trade'
@@ -98,6 +101,30 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     laneLabel: 'Data (Helius)',
     intensity: 'HEAVY',
     note: 'Launch enrich / curve polls',
+  },
+  {
+    id: 'dip_setup_watch',
+    label: 'Dip/Steady setup watches',
+    lane: 'data',
+    laneLabel: 'Data (HTTP fanout)',
+    intensity: 'VERY HEAVY',
+    note: 'A/B: OFF = no Dip/Steady token fanout, structure refresh, or eager recheck (Dex/Gecko). Entry rules unchanged.',
+  },
+  {
+    id: 'trend_setup_watch',
+    label: 'Trend Rider setup watches',
+    lane: 'data',
+    laneLabel: 'Data (HTTP fanout)',
+    intensity: 'HEAVY',
+    note: 'A/B: OFF = no Trend Rider watch ticks / Dex refreshes. Entry rules unchanged.',
+  },
+  {
+    id: 'majors_armed_watch',
+    label: 'Medium/Majors armed-watch feed',
+    lane: 'data',
+    laneLabel: 'Data (HTTP fanout)',
+    intensity: 'HEAVY',
+    note: 'A/B: OFF = no Jupiter majors universe pass into Dip/Steady parks.',
   },
   {
     id: 'alpha_scan',
@@ -203,6 +230,9 @@ const FEATURE_TO_WORKLOAD: Record<string, RpcWorkloadId> = {
   priority_fee: 'priority_fee',
   zion_place_trade: 'zion_place_trade',
   market_scanner: 'market_scanner',
+  dip_setup_watch: 'dip_setup_watch',
+  trend_setup_watch: 'trend_setup_watch',
+  majors_armed_watch: 'majors_armed_watch',
   alpha_scan: 'alpha_scan',
   zion: 'zion_scanner',
   token_metrics: 'token_metrics',

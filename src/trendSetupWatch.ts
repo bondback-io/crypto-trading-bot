@@ -11,11 +11,13 @@ import {
   handOffScannerCandidate,
   type ScannerCandidate,
 } from './marketScanner';
+import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
 import { isStrategyEnabledGlobal } from './strategies';
 import {
   isSmartBotProfilesEnabled,
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
+import { noteWatcherPoll } from './watcherPollMetrics';
 
 export type TrendWatchStatus =
   | 'watching'
@@ -510,9 +512,11 @@ function buildHandoff(
 }
 
 async function refreshWatchMarket(w: TrendWatchEntry, now: number): Promise<void> {
+  if (!isRpcWorkloadEnabled('trend_setup_watch')) return;
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
   if (now - last < MC_REFRESH_MIN_MS) return;
   lastMcRefreshAt.set(w.mint, now);
+  noteWatcherPoll('trend');
   try {
     const snap = await fetchLiveTokenSnapshot(w.mint);
     if (snap) {
@@ -540,6 +544,7 @@ async function refreshWatchMarket(w: TrendWatchEntry, now: number): Promise<void
 export async function tickTrendSetupWatches(opts?: {
   priceByMint?: Map<string, number>;
 }): Promise<number> {
+  if (!isRpcWorkloadEnabled('trend_setup_watch')) return 0;
   if (!isTrendProfileEnabled()) return 0;
   pruneTerminal();
   const now = Date.now();
@@ -779,6 +784,7 @@ export function offerTrendWatchFromCandidate(c: {
   chartPatternIds?: string[];
   volumeDecayState?: string | null;
 }): boolean {
+  if (!isRpcWorkloadEnabled('trend_setup_watch')) return false;
   const row = considerTrendWatchSetup({
     mint: c.mint,
     symbol: c.symbol,

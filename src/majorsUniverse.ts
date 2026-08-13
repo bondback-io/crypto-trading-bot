@@ -21,8 +21,10 @@ import {
 import {
   classifyQualityParkNameExclusion,
 } from './qualityParkNameExclusions';
+import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
 import { isStrategyEnabledGlobal } from './strategies';
 import { isSmartBotProfilesEnabled } from './tradeProfiles';
+import { noteWatcherPoll } from './watcherPollMetrics';
 
 /** UI / watch source band */
 export type UniverseWatchBand = 'medium' | 'majors';
@@ -785,6 +787,7 @@ export function clearMajorsNoLevelsStreak(mint: string): void {
  * Does not hand to Scalper Mode B. Returns number offered this cycle.
  */
 export async function runMajorsUniversePass(): Promise<number> {
+  if (!isRpcWorkloadEnabled('majors_armed_watch')) return 0;
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (!isSmartBotProfilesEnabled()) return 0;
   if (config.tradeProfiles?.enabled === false) return 0;
@@ -796,6 +799,7 @@ export async function runMajorsUniversePass(): Promise<number> {
     return 0;
   }
 
+  noteWatcherPoll('majors');
   const list = await refreshMajorsUniverse();
   if (!list.length) {
     lastPassAt = Date.now();

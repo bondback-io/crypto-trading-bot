@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.326',
+    title: 'A/B kill-switches for Dip/Steady + Trend Rider watchers',
+    sections: ['execution', 'overview'],
+    items: [
+      'Stats → RPC toggles: Dip/Steady setup watches, Trend Rider watches, Medium/Majors armed-watch feed — OFF stops fanout/structure refresh/recheck (entry rules unchanged).',
+      'Control-plane line shows watcher polls/min (dip/trend/majors) beside Trading/Data latency and RPC feature calls for before/after comparison.',
+    ],
+  },
+  {
     version: '1.2.325',
     title: 'Simple 2+2 RPC: Alchemy Trading, Helius Data, dual public',
     sections: ['execution', 'overview'],

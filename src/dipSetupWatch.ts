@@ -9,6 +9,7 @@ import {
   handOffScannerCandidate,
   type ScannerCandidate,
 } from './marketScanner';
+import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
 import { isStrategyEnabledGlobal } from './strategies';
 import {
   isSmartBotProfilesEnabled,
@@ -16,6 +17,7 @@ import {
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
 import { analyzeSrConfluenceFromCandles } from './technicalLevels';
+import { noteWatcherPoll } from './watcherPollMetrics';
 
 export type DipWatchStatus =
   | 'watching'
@@ -967,6 +969,7 @@ function maybeArmQualityPark(
 
 /** Eager Fib/S seed after parking so near-arm (minors) / quality playbook arm can happen ASAP. */
 function scheduleEagerLevelSeed(w: DipWatchEntry): void {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return;
   void (async () => {
     try {
       await refreshWatchMarket(w, Date.now(), { force: true });
@@ -1053,6 +1056,7 @@ async function refreshWatchMarket(
   now: number,
   opts?: { force?: boolean; allowOhlcv?: boolean }
 ): Promise<void> {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return;
   const isQuality = isQualityBandSource(w.source);
   const minGap = isQuality ? QUALITY_MC_REFRESH_MIN_MS : MC_REFRESH_MIN_MS;
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
@@ -1063,6 +1067,7 @@ async function refreshWatchMarket(
     if (fullRefreshBudget <= 0) return;
     fullRefreshBudget -= 1;
   }
+  noteWatcherPoll('dip');
 
   lastMcRefreshAt.set(w.mint, now);
   let h1Change: number | null = null;
@@ -1909,6 +1914,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
 export async function tickDipSetupWatches(opts?: {
   priceByMint?: Map<string, number>;
 }): Promise<number> {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return 0;
   if (!isDipProfileEnabled()) return 0;
   pruneTerminal();
   const m = dipMatch();
@@ -2387,6 +2393,7 @@ export function offerDipWatchFromCandidate(c: {
   tokenAgeHours?: number;
   isPumpFun?: boolean;
 }): void {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return;
   if (
     c.preferredProfileId &&
     c.preferredProfileId !== 'dip_buyer' &&

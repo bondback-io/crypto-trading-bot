@@ -26911,17 +26911,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const thrash = rpcObj.controlPlaneThrash
             ? ' · THRASH: ' + rpcObj.controlPlaneThrash
             : '';
+          const wPoll =
+            rpcObj.watcher_polls_per_min != null ? rpcObj.watcher_polls_per_min : '—';
+          const wParts =
+            'dip=' +
+            (rpcObj.dip_watcher_polls_per_min != null ? rpcObj.dip_watcher_polls_per_min : '—') +
+            '/trend=' +
+            (rpcObj.trend_watcher_polls_per_min != null
+              ? rpcObj.trend_watcher_polls_per_min
+              : '—') +
+            '/majors=' +
+            (rpcObj.majors_watcher_polls_per_min != null
+              ? rpcObj.majors_watcher_polls_per_min
+              : '—');
           cp.textContent =
             'control-plane: probes/min=' +
             (rpcObj.probe_calls_per_min != null ? rpcObj.probe_calls_per_min : '—') +
             ' · features/min=' +
             (rpcObj.feature_calls_per_min != null ? rpcObj.feature_calls_per_min : '—') +
+            ' · watchers/min=' +
+            wPoll +
+            ' (' +
+            wParts +
+            ')' +
             ' · health-refresh/min=' +
             (rpcObj.health_page_refresh_calls_per_min != null
               ? rpcObj.health_page_refresh_calls_per_min
               : '—') +
             ' · hot=' +
             (rpcObj.active_endpoints_count != null ? rpcObj.active_endpoints_count : '—') +
+            ' · Trading ' +
+            (t && t.latencyMs != null ? Math.round(t.latencyMs) + 'ms' : '—') +
+            ' · Data ' +
+            (d && d.latencyMs != null ? Math.round(d.latencyMs) + 'ms' : '—') +
             (rpcObj.background_idle_when_workloads_off ? ' · bg idle' : '') +
             thrash;
           cp.style.color = thrash ? '#fbbf24' : '#94a3b8';

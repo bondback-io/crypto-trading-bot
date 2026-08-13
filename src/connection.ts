@@ -885,6 +885,14 @@ export function getRpcStats() {
   const probeCallsPerMin = perMin(probeCallAts);
   const featureCallsPerMin = perMin(featureCallAts);
   const healthPageRefreshCallsPerMin = perMin(healthPageRefreshAts);
+  let watcherPolls = { dip: 0, trend: 0, majors: 0, total: 0 };
+  try {
+    const { getWatcherPollsPerMin } =
+      require('./watcherPollMetrics') as typeof import('./watcherPollMetrics');
+    watcherPolls = getWatcherPollsPerMin();
+  } catch {
+    /* optional */
+  }
   const hotStates = [
     tradingPref,
     dataPref,
@@ -1101,6 +1109,10 @@ export function getRpcStats() {
     probe_calls_per_min: probeCallsPerMin,
     feature_calls_per_min: featureCallsPerMin,
     health_page_refresh_calls_per_min: healthPageRefreshCallsPerMin,
+    watcher_polls_per_min: watcherPolls.total,
+    dip_watcher_polls_per_min: watcherPolls.dip,
+    trend_watcher_polls_per_min: watcherPolls.trend,
+    majors_watcher_polls_per_min: watcherPolls.majors,
     active_endpoints_count: activeEndpointsCount,
     background_idle_when_workloads_off: backgroundIdleWhenWorkloadsOff,
     controlPlaneThrash,
