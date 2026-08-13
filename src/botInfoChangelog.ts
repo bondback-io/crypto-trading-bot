@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.331',
+    title: 'Migration logsSubscribe OFF by default — kill WS reconnect storms',
+    sections: ['execution', 'overview'],
+    items: [
+      'Migration WebSocket is opt-in only (MIGRATION_WS=1). Default poll-only stops logsSubscribe -32601 storms and Alchemy 429 thrash on Render.',
+      'On method-not-found: destroy the dedicated WS client (max_reconnects=0, close 1000, stub _updateSubscriptions) so web3.js cannot retry forever.',
+    ],
+  },
+  {
     version: '1.2.330',
     title: 'Restore unrestricted Market signal intake + Baseline v235',
     sections: ['execution', 'overview', 'scanners'],
