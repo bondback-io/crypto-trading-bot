@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.325',
+    title: 'Simple 2+2 RPC: Alchemy Trading, Helius Data, dual public',
+    sections: ['execution', 'overview'],
+    items: [
+      'Trading = ALCHEMY_API_KEY; Data = HELIUS_API_KEY; Background = PUBLICNODE (or RPC_URL); Emergency = the other public.',
+      'Backup Alchemy/Helius keys are unused — keep the pool to two paid + two public endpoints.',
+    ],
+  },
+  {
     version: '1.2.324',
     title: 'Stop RPC control-plane thrash — Alchemy Trading, rare probes',
     sections: ['execution', 'overview'],

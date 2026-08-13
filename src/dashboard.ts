@@ -10868,7 +10868,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card rpc-health-panel" id="rpc-health-panel">
-          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="6 paid + 3 public: Trading=Helius, Data=Alchemy, Background=Alchemy BACKUP2→publics, Emergency=Helius BACKUP2→publics. Hosts only — API keys never shown."></span></div>
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="2 paid + 2 public: Trading=Alchemy, Data=Helius, Background=publicnode (or RPC_URL), Emergency=the other public. Hosts only — API keys never shown."></span></div>
           <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
             <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
             <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
@@ -10879,25 +10879,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="rpc-prov-row" data-lane="trading">
               <span class="rpc-prov-name">Trading</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-trading-pill">—</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-trading-meta">Helius</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-trading-meta">Alchemy</span>
               <span class="mint text-xs rpc-prov-cong" id="rpc-lane-trading-cong">—</span>
             </div>
             <div class="rpc-prov-row" data-lane="data">
               <span class="rpc-prov-name">Data</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-data-pill">—</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-data-meta">Alchemy</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-data-meta">Helius</span>
               <span class="mint text-xs rpc-prov-cong" id="rpc-lane-data-cong">—</span>
             </div>
             <div class="rpc-prov-row" data-lane="background">
               <span class="rpc-prov-name">Background</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-background-pill">—</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-background-meta">Alchemy BACKUP2</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-background-meta">publicnode / RPC_URL</span>
               <span class="mint text-xs rpc-prov-cong" id="rpc-lane-background-cong">—</span>
             </div>
             <div class="rpc-prov-row" data-lane="emergency">
               <span class="rpc-prov-name">Emergency</span>
               <div class="rpc-prov-pills"><span class="rpc-ep-pill" id="rpc-lane-emergency-pill">—</span></div>
-              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">Helius BACKUP2 / public idle</span>
+              <span class="mint text-xs rpc-prov-meta" id="rpc-lane-emergency-meta">other public · idle</span>
               <span class="mint text-xs rpc-prov-cong" id="rpc-lane-emergency-cong">—</span>
             </div>
           </div>
@@ -10905,7 +10905,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
 
         <div class="card" id="rpc-status-card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Trading=Alchemy BACKUP. Data=Alchemy. Background=Alchemy BACKUP2 only when background workloads ON. Emergency=public after Trading hard-fail. Helius cold/unprobed. Soft watch caps Favourites on Background."></span></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Trading=Alchemy. Data=Helius. Background=publicnode (or RPC_URL). Emergency=the other public. Soft watch caps Favourites on Background."></span></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Background soft-watch. Lower = less Background RPC. 0 = pause Favourites watch. Default 12.">
               <span>Soft watch cap</span>
@@ -10915,17 +10915,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
           <div id="rpc-simple-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8">
-            <div class="mb-1"><strong style="color:#34d399">Trading → Alchemy BACKUP</strong> — hard-fail → Emergency public</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Data → Alchemy</strong> — scanners, signals, market/alpha/zion, metrics/anti-rug</div>
-            <div class="mb-1"><strong style="color:#a78bfa">Background → Alchemy BACKUP2</strong> — only when Favourites/activity/holdings/zion-read ON; else idle</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Emergency → public</strong> — Trading hard-fail only; Helius cold / unprobed</div>
+            <div class="mb-1"><strong style="color:#34d399">Trading → Alchemy</strong> — hard-fail → Emergency public</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Data → Helius</strong> — scanners, signals, market/alpha/zion, metrics/anti-rug</div>
+            <div class="mb-1"><strong style="color:#a78bfa">Background → publicnode / RPC_URL</strong> — only when Favourites/activity/holdings/zion-read ON; else idle</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Emergency → the other public</strong> — Trading hard-fail only</div>
           </div>
           <div class="section-title text-sm mt-3 mb-1">RPC workload toggles <span class="tip" tabindex="0" data-tip="Turn OFF subsystems that call Solana RPC to isolate thrashing / latency. Lane assignment shown per row. Persists in settings."></span></div>
           <p class="mint text-xs mb-2" style="color:#64748b;line-height:1.4">Test kill-switches — OFF skips that work (no RPC). Does not change strategy profiles.</p>
           <div id="rpc-workload-toggles" class="text-xs mb-3" style="display:flex;flex-direction:column;gap:0.35rem"></div>
           <span class="mint text-xs" id="rpc-workload-status">—</span>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Slim hot pool</strong> — Trading + Data + Emergency public (Background only when its feature workloads are ON). Probes are rare (120s; 300s when all features OFF).</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">2+2 pool</strong> — Alchemy Trading + Helius Data + two publics (Background / Emergency). Probes rare (120s; 300s when all features OFF).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener/Jupiter).</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
@@ -26849,7 +26849,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (plain) {
           plain.textContent =
             (rpcObj && rpcObj.warning) ||
-            (ok ? 'Trading/Data healthy (slim pool)' : 'RPC unhealthy') ||
+            (ok ? 'Trading/Data healthy (2+2 pool)' : 'RPC unhealthy') ||
             '—';
         }
         function hostOf(url) {
@@ -26902,10 +26902,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               details;
           }
         }
-        paintLane('trading', t, 'set ALCHEMY_API_KEY_BACKUP');
-        paintLane('data', d, 'set ALCHEMY_API_KEY');
-        paintLane('background', b, 'set ALCHEMY_API_KEY_BACKUP2');
-        paintLane('emergency', e, 'public emergency');
+        paintLane('trading', t, 'set ALCHEMY_API_KEY');
+        paintLane('data', d, 'set HELIUS_API_KEY');
+        paintLane('background', b, 'set PUBLICNODE / RPC_URL');
+        paintLane('emergency', e, 'other public');
         const cp = document.getElementById('rpc-control-plane');
         if (cp && rpcObj) {
           const thrash = rpcObj.controlPlaneThrash

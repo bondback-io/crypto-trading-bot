@@ -106,7 +106,7 @@ function checkRpc(): HealthIssue[] {
         title: 'Trading on Emergency public RPC',
         detail: cong.trading.congestion.cause,
         recommendation:
-          'Check ALCHEMY_API_KEY_BACKUP (Trading) / ALCHEMY_API_KEY (Data) — Trading should recover automatically when healthy.',
+          'Check ALCHEMY_API_KEY (Trading) / HELIUS_API_KEY (Data) — Trading should recover automatically when healthy.',
         sustainedHint: true,
       });
     }

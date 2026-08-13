@@ -5911,7 +5911,7 @@ export function setRpcMode(_mode: RpcOperatingMode): RpcOperatingMode {
   } catch {
     /* connection may not be loaded yet at boot */
   }
-  console.log('[rpc] Mode → simple (Trading Alchemy BACKUP / Data Alchemy / Emergency public)');
+  console.log('[rpc] Mode → simple 2+2 (Trading Alchemy / Data Helius / Background+Emergency publics)');
   return 'simple';
 }
 
