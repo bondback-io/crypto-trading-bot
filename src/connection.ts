@@ -438,6 +438,14 @@ function ensureEndpoints(): void {
   if (!dataPref) {
     console.warn('[rpc] Data Main unassigned — soft-fail until assigned in Stats → RPC');
   }
+  // Scanners (secondary) burn CU on Data — Alchemy as Data Main regularly 429s.
+  const dataLabel = (dataPref?.endpoint.label || '').toLowerCase();
+  if (dataLabel.includes('alchemy')) {
+    console.warn(
+      '[rpc] Data Main is Alchemy — Market/Alpha/Zion bonding_curve CU hits Alchemy. ' +
+        'Prefer Data=Helius + Trading=Alchemy (or assign Data Emergency) in Stats → RPC.'
+    );
+  }
 }
 
 /** Rematerialize Background hot slot when feature workloads toggle. */
@@ -531,8 +539,23 @@ export function shouldDeferHeavyRpc(): boolean {
 
 export function isLaneRateLimited(role: RpcRole = 'primary'): boolean {
   ensureEndpoints();
-  const st = laneState(normalizeRole(role));
-  return Boolean(st && st.rateLimitedUntil > Date.now());
+  const norm = normalizeRole(role);
+  // Check preferred endpoints directly — active may be null while rate-limited.
+  if (norm === 'primary') {
+    if (tradingPref && isRateLimited(tradingPref)) return true;
+    if (emergencyPublic && isRateLimited(emergencyPublic)) {
+      return Boolean(!tradingPref || isRateLimited(tradingPref));
+    }
+    return false;
+  }
+  if (norm === 'secondary') {
+    if (dataOnFailover && dataFailover) {
+      return isRateLimited(dataFailover);
+    }
+    return Boolean(dataPref && isRateLimited(dataPref));
+  }
+  const bg = backgroundPref || backgroundEmergency;
+  return Boolean(bg && isRateLimited(bg));
 }
 
 export function lanesShareEndpoint(): boolean {
@@ -565,31 +588,52 @@ function tradingActive(): EndpointState | null {
   // 0 Main → 1 Emergency (assigned only)
   if (tradingHop <= 0) {
     if (!tradingPref) {
-      return usable(emergencyPublic) ? emergencyPublic : emergencyPublic;
+      return usable(emergencyPublic) ? emergencyPublic : null;
     }
     if (usable(tradingPref)) return tradingPref;
-    if (!isHardFailed(tradingPref) && !isRateLimited(tradingPref)) {
+    if (isRateLimited(tradingPref) || isHardFailed(tradingPref)) {
+      // Fall through to emergency — never re-hit CU-limited Main.
+    } else {
       return tradingPref;
     }
   }
-  const chain = emergencyChain();
-  const idx = Math.max(0, tradingHop - 1);
-  return chain[idx] || chain[0] || tradingPref;
+  const chain = emergencyChain().filter((e) => usable(e));
+  if (chain.length) {
+    const idx = Math.min(Math.max(0, tradingHop - 1), chain.length - 1);
+    return chain[idx]!;
+  }
+  // No usable emergency — refuse rate-limited Main (fail closed).
+  return null;
 }
 
 function dataActive(): EndpointState | null {
   ensureEndpoints();
   if (!dataPref && !dataFailover) return null;
-  if (dataOnFailover && dataFailover) return dataFailover;
+  if (dataOnFailover && dataFailover) {
+    if (usable(dataFailover)) return dataFailover;
+    if (usable(dataPref)) {
+      dataOnFailover = false;
+      return dataPref;
+    }
+    return null;
+  }
   if (usable(dataPref)) return dataPref;
-  if (dataPref && !isHardFailed(dataPref) && !isRateLimited(dataPref)) {
+  if (dataPref && isRateLimited(dataPref)) {
+    if (dataFailover && usable(dataFailover)) {
+      dataOnFailover = true;
+      return dataFailover;
+    }
+    // No Data Emergency — refuse Alchemy re-hit during CU cooldown.
+    return null;
+  }
+  if (dataPref && !isHardFailed(dataPref)) {
     return dataPref;
   }
-  if (dataFailover) {
+  if (dataFailover && usable(dataFailover)) {
     dataOnFailover = true;
     return dataFailover;
   }
-  return dataPref;
+  return null;
 }
 
 function backgroundActive(): EndpointState | null {
@@ -607,16 +651,16 @@ function backgroundActive(): EndpointState | null {
     chain.push(backgroundEmergency);
   }
   if (!chain.length) return null;
-  const idx = Math.min(backgroundIdx, chain.length - 1);
-  const preferred = chain[idx]!;
-  if (usable(preferred)) return preferred;
   for (let i = 0; i < chain.length; i++) {
-    if (usable(chain[i]!)) {
-      backgroundIdx = i;
-      return chain[i]!;
+    const idx = (backgroundIdx + i) % chain.length;
+    const candidate = chain[idx]!;
+    if (usable(candidate)) {
+      backgroundIdx = idx;
+      return candidate;
     }
   }
-  return preferred;
+  // Prefer non-rate-limited hard-failed? No — refuse CU storms.
+  return null;
 }
 
 function laneState(role: NormalizedRpcRole): EndpointState | null {
@@ -806,13 +850,25 @@ export function getRpcUrl(role?: RpcRole): string {
 
 export function getConnection(role?: RpcRole): Connection {
   ensureEndpoints();
-  const st = laneState(normalizeRole(role ?? currentRole()));
-  if (!st) throw new Error('No RPC endpoint configured');
+  const norm = normalizeRole(role ?? currentRole());
+  const st = laneState(norm);
+  if (!st) {
+    if (norm === 'secondary' && isLaneRateLimited('secondary')) {
+      throw new Error('rpc_data_rate_limited');
+    }
+    if (norm === 'primary' && isLaneRateLimited('primary')) {
+      throw new Error('rpc_trading_rate_limited');
+    }
+    if (norm === 'background' && isLaneRateLimited('background')) {
+      throw new Error('rpc_background_rate_limited');
+    }
+    throw new Error('No RPC endpoint configured');
+  }
   const feature = rpcFeatureAls.getStore() || 'getConnection';
   noteCallTraffic(
     st.endpoint.label,
     feature,
-    normalizeRole(role ?? currentRole())
+    norm
   );
   return st.connection;
 }

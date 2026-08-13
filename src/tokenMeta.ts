@@ -71,6 +71,13 @@ async function fetchJson(url: string, timeoutMs = 8_000): Promise<unknown | null
 }
 
 async function fromDexScreener(mint: string): Promise<TokenMeta | null> {
+  try {
+    const { assertDexScreenerAllowed } =
+      require('./marketData') as typeof import('./marketData');
+    assertDexScreenerAllowed();
+  } catch {
+    return null;
+  }
   const data = await fetchJson(
     `https://api.dexscreener.com/latest/dex/tokens/${mint}`
   );

@@ -118,7 +118,10 @@ function isRpcRateLimitError(err: unknown): boolean {
   return (
     /\b429\b/i.test(msg) ||
     /too many requests/i.test(msg) ||
-    /rate.?limit/i.test(msg)
+    /rate.?limit/i.test(msg) ||
+    /compute units per second/i.test(msg) ||
+    /-32429/.test(msg) ||
+    /rpc_data_rate_limited/i.test(msg)
   );
 }
 
@@ -259,6 +262,13 @@ async function fetchDexMetrics(mint: string): Promise<{
   holders?: number;
 }> {
   try {
+    const { assertDexScreenerAllowed } =
+      require('./marketData') as typeof import('./marketData');
+    assertDexScreenerAllowed();
+  } catch {
+    return {};
+  }
+  try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 6_000);
     const res = await fetch(
@@ -266,6 +276,16 @@ async function fetchDexMetrics(mint: string): Promise<{
       { signal: ctrl.signal }
     );
     clearTimeout(t);
+    if (res.status === 429) {
+      try {
+        const { noteDexScreenerHttpStatus } =
+          require('./marketData') as typeof import('./marketData');
+        noteDexScreenerHttpStatus(429, 'zionKol');
+      } catch {
+        /* */
+      }
+      return {};
+    }
     if (!res.ok) return {};
     const data = (await res.json()) as {
       pairs?: Array<Record<string, unknown>>;
@@ -748,6 +768,17 @@ export async function runZionScannerPollOnce(): Promise<void> {
   if (Date.now() < rpcCooldownUntil) {
     lastError = `RPC cooldown until ${new Date(rpcCooldownUntil).toISOString()}`;
     return;
+  }
+  try {
+    const { isLaneRateLimited } =
+      require('./connection') as typeof import('./connection');
+    if (isLaneRateLimited('secondary')) {
+      lastError = 'Data lane rate-limited — Zion poll aborted';
+      noteRpcRateLimit(new Error('rpc_data_rate_limited'));
+      return;
+    }
+  } catch {
+    /* */
   }
   const share = lanesShareEndpoint();
   const configured = Math.max(

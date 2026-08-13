@@ -674,7 +674,8 @@ function getGmgnBaseUrls(): string[] {
   ).replace(/\/$/, '');
   const list = getGmgnApiKey()
     ? [openApi, primary, GMGN_OPENAPI_HOST]
-    : [primary, openApi, GMGN_OPENAPI_HOST, 'https://gmgn.ai'];
+    : [primary, openApi, GMGN_OPENAPI_HOST];
+  // Never fall back to https://gmgn.ai web (Cloudflare 403/1015 spam).
   const seen = new Set<string>();
   return list.filter((u) => {
     if (seen.has(u)) return false;

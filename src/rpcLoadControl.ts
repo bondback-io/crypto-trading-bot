@@ -72,10 +72,10 @@ export function noteBackgroundRpcSkip(_role: RpcGateRole, _feature?: string): vo
 export function isSignalsRpcHealthy(
   secondaryLatencyMs: number | null = lastSignals.dataLatencyMs
 ): boolean {
-  // Hard-down blocks intake; brief 429 cooldown must not (routing already backs off).
-  if (!lastSignals.dataHealthy && !lastSignals.dataRateLimited) return false;
+  // CU/s cooldown wins over EWMA — do not keep hammering Alchemy during 429.
+  if (lastSignals.dataRateLimited) return false;
+  if (!lastSignals.dataHealthy) return false;
   if (secondaryLatencyMs == null || !Number.isFinite(secondaryLatencyMs)) {
-    // Unknown latency but usable / rate-limited → allow intake (do not starve on missing EWMA).
     return true;
   }
   return secondaryLatencyMs < SIGNALS_RPC_HEALTHY_MS;
@@ -121,31 +121,36 @@ function recompute(): void {
   }
 
   // Scanner slowdown only from Data-lane pressure (own lane).
-  // Rate-limit cooldown alone is soft (×2), not whole-tick ×3 starve.
-  const dataHardDown =
-    !lastSignals.dataHealthy && !lastSignals.dataRateLimited;
-  if (dataHardDown || dataSkips > 40 || dataQ > 32 || latSpike) {
+  // CU rate-limit → hard ×3 (pause scanners); hard-down / queue / latency same.
+  const dataHardDown = !lastSignals.dataHealthy && !lastSignals.dataRateLimited;
+  if (
+    lastSignals.dataRateLimited ||
+    dataHardDown ||
+    dataSkips > 40 ||
+    dataQ > 32 ||
+    latSpike
+  ) {
     level = 'shed';
-    cause = dataHardDown
-      ? 'data lane unhealthy'
-      : latSpike
-        ? `data latency ${Math.round(dataLat!)}ms`
-        : dataSkips > 40
-          ? `data skips/min ${dataSkips}`
-          : `data queue ${dataQ}`;
+    cause = lastSignals.dataRateLimited
+      ? 'data lane rate-limited (CU cooldown)'
+      : dataHardDown
+        ? 'data lane unhealthy'
+        : latSpike
+          ? `data latency ${Math.round(dataLat!)}ms`
+          : dataSkips > 40
+            ? `data skips/min ${dataSkips}`
+            : `data queue ${dataQ}`;
     scannerSlowFactor = Math.max(scannerSlowFactor, 3);
     scannerReasons.push(cause);
     reasons.push(cause);
   } else if (
-    lastSignals.dataRateLimited ||
     dataQ > 16 ||
     dataSkips > 20 ||
     (dataLat != null && dataLat >= 1_800)
   ) {
     level = 'busy';
-    cause = lastSignals.dataRateLimited
-      ? 'data lane rate-limited (soft)'
-      : dataQ > 16
+    cause =
+      dataQ > 16
         ? `data queue ${dataQ}`
         : dataSkips > 20
           ? `data skips/min ${dataSkips}`
@@ -298,6 +303,13 @@ export function shouldSkipScannerTick(subsystem: string): {
   reason: string | null;
 } {
   const snap = getRpcLoadControlSnapshot();
+  // CU cooldown: always hard-skip — never bypass via stale healthy EWMA.
+  if (lastSignals.dataRateLimited) {
+    return {
+      skip: true,
+      reason: `data rate-limited (CU cooldown) (${subsystem})`,
+    };
+  }
   // Healthy Data RPC: never whole-tick skip — keep signal intake flowing.
   if (snap.signalsRpcHealthy || isSignalsRpcHealthy()) {
     if (snap.scannerSlowFactor >= 2) {

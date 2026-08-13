@@ -198,7 +198,7 @@ function baseScannerCfg() {
       jupiterCategory: 'toptraded' as const,
       jupiterPumpFunOnly: true,
       jupiterLimit: 100,
-      jupiterMergeIntervals: true,
+      jupiterMergeIntervals: false,
       minVolumeM5Usd: 1000,
       minVolumeH1Usd: 2500,
       minVolumeH6Usd: 10000,
@@ -944,6 +944,15 @@ async function enrichCurve(event: LaunchEvent): Promise<{
   progressPct: number | null;
 }> {
   try {
+    const { isLaneRateLimited } =
+      require('./connection') as typeof import('./connection');
+    if (isLaneRateLimited('secondary')) {
+      return { bonus: 0, nearMigration: false, progressPct: null };
+    }
+  } catch {
+    /* */
+  }
+  try {
     const curve = await runWithRpcRole(
       getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
       () => fetchBondingCurve(event.mint),
@@ -992,7 +1001,7 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
         category: cfg.jupiterCategory ?? 'toptraded',
         limit: jupLimit,
         pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
-        mergeIntervals: cfg.jupiterMergeIntervals !== false,
+        mergeIntervals: cfg.jupiterMergeIntervals === true,
         preferOrganicVolume: cfg.preferOrganicVolume !== false,
         solUsd,
       });
@@ -1051,8 +1060,8 @@ export async function selectScannerCandidates(
   const cfg = scannerCfg();
   const now = Date.now();
   const maxOut = Math.max(1, cfg.maxCandidatesPerPoll);
-  // Enrich budget: keep Secondary (Alchemy ~6 RPS) breathing room
-  const enrichBudget = Math.min(16, Math.max(maxOut * 2, maxOut));
+  // Enrich budget: keep Secondary CU breathing room (was 16 → Alchemy CU storms).
+  const enrichBudget = Math.min(6, Math.max(maxOut, Math.min(maxOut * 2, 6)));
   const enrichConcurrency = 2;
 
   // Prefetch regime (cached)
@@ -1474,7 +1483,24 @@ export async function runScannerPollOnce(): Promise<number> {
     /* */
   }
   const cfg = scannerCfg();
-  const baseInterval = Math.max(22_000, Number(cfg.pollIntervalMs) || 22_000);
+  let baseInterval = Math.max(22_000, Number(cfg.pollIntervalMs) || 22_000);
+  // Stretch floor when Data is slow or CU-cooling (keep ≥22s when healthy).
+  try {
+    const { isLaneRateLimited } =
+      require('./connection') as typeof import('./connection');
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    const snap = getRpcLoadControlSnapshot();
+    if (
+      isLaneRateLimited('secondary') ||
+      !isSignalsRpcHealthy() ||
+      (snap.secondarySkipsRecent ?? 0) > 5
+    ) {
+      baseInterval = Math.max(35_000, baseInterval);
+    }
+  } catch {
+    /* */
+  }
   const interval = adaptiveScannerIntervalMs(baseInterval);
   if (lastPollAt != null && Date.now() - lastPollAt < interval * 0.85) {
     return 0;

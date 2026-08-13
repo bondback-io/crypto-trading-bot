@@ -1664,6 +1664,13 @@ async function inferLpLockFromDex(
   mint: string
 ): Promise<{ lockedOrBurned: boolean; lpLockedPct: number | null } | null> {
   try {
+    const { assertDexScreenerAllowed } =
+      require('./marketData') as typeof import('./marketData');
+    assertDexScreenerAllowed();
+  } catch {
+    return null;
+  }
+  try {
     const res = await loggedFetch(
       `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
       {
@@ -1673,6 +1680,16 @@ async function inferLpLockFromDex(
         headers: { Accept: 'application/json' },
       }
     );
+    if (res.status === 429) {
+      try {
+        const { noteDexScreenerHttpStatus } =
+          require('./marketData') as typeof import('./marketData');
+        noteDexScreenerHttpStatus(429, 'antiRug');
+      } catch {
+        /* */
+      }
+      return null;
+    }
     if (!res.ok) return null;
     const data = (await res.json()) as {
       pairs?: Array<{

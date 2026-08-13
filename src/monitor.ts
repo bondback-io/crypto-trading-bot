@@ -1528,7 +1528,9 @@ function isRpcRateLimitError(err: unknown): boolean {
     /\b429\b/i.test(msg) ||
     /too many requests/i.test(msg) ||
     /rate.?limit/i.test(msg) ||
-    /-32429/.test(msg)
+    /compute units per second/i.test(msg) ||
+    /-32429/.test(msg) ||
+    /rpc_data_rate_limited|rpc_trading_rate_limited/i.test(msg)
   );
 }
 

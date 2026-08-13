@@ -111,7 +111,7 @@ const QUALITY_MC_REFRESH_MIN_MS = 45_000;
 /** Full multi-TF OHLCV for quality parks at most this often (levels persist) */
 const QUALITY_OHLCV_REFRESH_MIN_MS = 3 * 60_000;
 /** Cap full market refreshes per tick to protect event loop / HTTP pools */
-const MAX_FULL_REFRESH_PER_TICK = 10;
+const MAX_FULL_REFRESH_PER_TICK = 4;
 /** Ignore single-tick peak→price moves larger than this as feed glitches */
 const PEAK_GLITCH_DROP_PCT = 70;
 const PEAK_GLITCH_JUMP_MULT = 2.5;

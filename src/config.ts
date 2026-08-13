@@ -2106,7 +2106,7 @@ export interface BotConfig {
     healthCheckIntervalMsHealthy: number;
     healthCheckIntervalMsWatch: number;
     healthCheckIntervalMsAction: number;
-    /** Ambient chat nudges (market / trending / weather). Defaults ON. */
+    /** Ambient chat nudges (market / trending / weather). Hard-off 1.2.335 — CF thrash. */
     ambientNudges: {
       marketUpdatesEnabled: boolean;
       trendingNudgesEnabled: boolean;
@@ -2406,9 +2406,9 @@ export const config: BotConfig = {
     healthCheckIntervalMsWatch: 600_000,
     healthCheckIntervalMsAction: 300_000,
     ambientNudges: {
-      marketUpdatesEnabled: true,
-      trendingNudgesEnabled: true,
-      weatherNudgesEnabled: true,
+      marketUpdatesEnabled: false,
+      trendingNudgesEnabled: false,
+      weatherNudgesEnabled: false,
     },
   },
 
@@ -2794,7 +2794,7 @@ export const config: BotConfig = {
     jupiterCategory: 'toptraded',
     jupiterPumpFunOnly: true,
     jupiterLimit: 100,
-    jupiterMergeIntervals: true,
+    jupiterMergeIntervals: false,
     minVolumeM5Usd: 1000,
     minVolumeH1Usd: 2500,
     minVolumeH6Usd: 10000,
@@ -3198,12 +3198,9 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       healthCheckIntervalMsAction:
         Number(config.zionAgent?.healthCheckIntervalMsAction) || 300_000,
       ambientNudges: {
-        marketUpdatesEnabled:
-          config.zionAgent?.ambientNudges?.marketUpdatesEnabled !== false,
-        trendingNudgesEnabled:
-          config.zionAgent?.ambientNudges?.trendingNudgesEnabled !== false,
-        weatherNudgesEnabled:
-          config.zionAgent?.ambientNudges?.weatherNudgesEnabled !== false,
+        marketUpdatesEnabled: false,
+        trendingNudgesEnabled: false,
+        weatherNudgesEnabled: false,
       },
     },
     admissionBaseline:
@@ -3843,6 +3840,8 @@ function applySettingsSnapshot(
         config.marketScanner,
         saved.marketScanner as typeof config.marketScanner
       );
+      // 1.2.335: Jupiter 4-interval merge thrashes CF — force off unless re-enabled later.
+      config.marketScanner.jupiterMergeIntervals = false;
     }
     if (saved.alphaScan) {
       config.alphaScan = deepMerge(
@@ -4160,8 +4159,6 @@ function applySettingsSnapshot(
   }
   if (saved.zionAgent && typeof saved.zionAgent === 'object') {
     const s = saved.zionAgent;
-    const ambient = (s as { ambientNudges?: Record<string, unknown> })
-      .ambientNudges;
     config.zionAgent = {
       semiAutonomous: s.semiAutonomous === true,
       personalityEnabled: s.personalityEnabled !== false,
@@ -4181,12 +4178,10 @@ function applySettingsSnapshot(
         Number(s.healthCheckIntervalMsAction) || 300_000
       ),
       ambientNudges: {
-        marketUpdatesEnabled:
-          ambient?.marketUpdatesEnabled !== false,
-        trendingNudgesEnabled:
-          ambient?.trendingNudgesEnabled !== false,
-        weatherNudgesEnabled:
-          ambient?.weatherNudgesEnabled !== false,
+        // 1.2.335: permanently off — Dex/Jupiter ambient CF thrash.
+        marketUpdatesEnabled: false,
+        trendingNudgesEnabled: false,
+        weatherNudgesEnabled: false,
       },
     };
     try {
@@ -4908,7 +4903,7 @@ export function applyPersistedSettings(opts?: {
           jupiterCategory: 'toptraded',
           jupiterPumpFunOnly: true,
           jupiterLimit: 100,
-          jupiterMergeIntervals: true,
+          jupiterMergeIntervals: false,
           minVolumeM5Usd: 1000,
           minVolumeH1Usd: 2500,
           minVolumeH6Usd: 10000,

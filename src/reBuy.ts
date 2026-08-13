@@ -812,6 +812,13 @@ export async function refreshCandidateMarketData(
 
 async function fetchTokenVolumeUsd(mint: string): Promise<number | null> {
   try {
+    const { assertDexScreenerAllowed } =
+      require('./marketData') as typeof import('./marketData');
+    assertDexScreenerAllowed();
+  } catch {
+    return null;
+  }
+  try {
     const res = await loggedFetch(
       `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
       {
@@ -820,6 +827,16 @@ async function fetchTokenVolumeUsd(mint: string): Promise<number | null> {
         timeoutMs: 8_000,
       }
     );
+    if (res.status === 429) {
+      try {
+        const { noteDexScreenerHttpStatus } =
+          require('./marketData') as typeof import('./marketData');
+        noteDexScreenerHttpStatus(429, 'reBuy');
+      } catch {
+        /* */
+      }
+      return null;
+    }
     if (!res.ok) {
       logger.warn('DexScreener', 'reentry volume HTTP', {
         mint: mint.slice(0, 12),

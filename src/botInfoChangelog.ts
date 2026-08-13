@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.335',
+    title: 'Kill Alchemy CU + Cloudflare thrash sources',
+    sections: ['execution', 'overview', 'scanners'],
+    items: [
+      'Data/Trading/Background refuse rate-limited endpoints (no Alchemy re-hit during CU cooldown); getConnection throws rpc_data_rate_limited; boot warns when Data Main is Alchemy.',
+      'While Data is rate-limited: signalsRpcHealthy=false and scanners hard-skip (undo soft-429 bypass that kept hammering).',
+      'Market enrichBudget 16→6; skip enrichCurve when Data RL; poll floor ≥35s when Data stressed; Jupiter merge-intervals default OFF; Zion detects CU/s + aborts on Data RL.',
+      'CF thrash kills: Zion ambient nudges hard-off; remove gmgn.ai web fallback; WalletDiscovery Dex fan-out disabled; Birdeye 1-shot + cooldown; all Dex bypass callers gate via assertDexScreenerAllowed; dip full-refresh 10→4.',
+      'Note: health-refresh/min and dip watchers/min are not Solana RPC; Render free spin-down is hosting-only.',
+    ],
+  },
+  {
     version: '1.2.334',
     title: 'Unstall Market signal intake (Data-lane gates)',
     sections: ['execution', 'overview', 'scanners'],

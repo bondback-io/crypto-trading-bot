@@ -125,7 +125,9 @@ let lastTimeoutLogAt = 0;
 /** True 429 / provider rate-limit only — timeouts must not mark Helius unhealthy. */
 function isRpcRateLimitError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return /429|rate.?limit|-32429|too many requests/i.test(msg);
+  return /429|rate.?limit|-32429|too many requests|compute units per second|rpc_data_rate_limited/i.test(
+    msg
+  );
 }
 
 function isRpcTimeoutOrFetchError(err: unknown): boolean {

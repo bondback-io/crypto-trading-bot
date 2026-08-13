@@ -63,11 +63,11 @@ function ambientCfg(): {
   trendingNudgesEnabled: boolean;
   weatherNudgesEnabled: boolean;
 } {
-  const a = config.zionAgent?.ambientNudges;
+  // 1.2.335: hard-kill ambient Dex/Jupiter nudges (CF thrash; chat-only).
   return {
-    marketUpdatesEnabled: a?.marketUpdatesEnabled !== false,
-    trendingNudgesEnabled: a?.trendingNudgesEnabled !== false,
-    weatherNudgesEnabled: a?.weatherNudgesEnabled !== false,
+    marketUpdatesEnabled: false,
+    trendingNudgesEnabled: false,
+    weatherNudgesEnabled: false,
   };
 }
 

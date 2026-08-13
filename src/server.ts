@@ -2842,7 +2842,7 @@ export function createServer(): express.Application {
         jupiterCategory: 'toptraded',
         jupiterPumpFunOnly: true,
         jupiterLimit: 100,
-        jupiterMergeIntervals: true,
+        jupiterMergeIntervals: false,
         minVolumeM5Usd: 1000,
         minVolumeH1Usd: 2500,
         minVolumeH6Usd: 10000,

@@ -489,6 +489,14 @@ export async function fetchTokenMetrics(
 
 async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
   try {
+    const { assertDexScreenerAllowed } =
+      require('./marketData') as typeof import('./marketData');
+    assertDexScreenerAllowed();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/dexscreener_cooldown/i.test(msg)) return {};
+  }
+  try {
     const res = await loggedFetch(
       `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
       {
@@ -505,6 +513,13 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
       });
       // On rate-limit, prefer stale cache over empty (caller merges)
       if (res.status === 429) {
+        try {
+          const { noteDexScreenerHttpStatus } =
+            require('./marketData') as typeof import('./marketData');
+          noteDexScreenerHttpStatus(429, 'tokenMetrics');
+        } catch {
+          /* */
+        }
         const stale = getCachedTokenMetrics(mint, { allowStale: true });
         if (stale) {
           return {
@@ -651,6 +666,15 @@ async function resolvePoolVaultExcludeOwners(
   }
 
   try {
+    const { assertDexScreenerAllowed, isDexScreenerInCooldown } =
+      require('./marketData') as typeof import('./marketData');
+    // Never double-hit Dex for vaults while cooling or in same job path.
+    if (isDexScreenerInCooldown()) return exclude;
+    assertDexScreenerAllowed();
+  } catch {
+    return exclude;
+  }
+  try {
     const res = await loggedFetch(
       `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
       {
@@ -660,6 +684,15 @@ async function resolvePoolVaultExcludeOwners(
         headers: { Accept: 'application/json' },
       }
     );
+    if (res.status === 429) {
+      try {
+        const { noteDexScreenerHttpStatus } =
+          require('./marketData') as typeof import('./marketData');
+        noteDexScreenerHttpStatus(429, 'tokenMetricsVaults');
+      } catch {
+        /* */
+      }
+    }
     if (res.ok) {
       const data = (await res.json()) as {
         pairs?: Array<{ chainId?: string; pairAddress?: string }>;

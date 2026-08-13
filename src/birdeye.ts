@@ -6,6 +6,12 @@
 import { config } from './config';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
+/** Shared Birdeye 429 cooldown — no tight retries. */
+let birdeyeRateLimitedUntil = 0;
+let birdeyeCooldownStreak = 0;
+const BIRDEYE_COOLDOWN_BASE_MS = 20_000;
+const BIRDEYE_COOLDOWN_CAP_MS = 3 * 60_000;
+
 export interface BirdeyeTokenOverview {
   mint: string;
   symbol: string | null;
@@ -158,7 +164,16 @@ export async function birdeyeRequest(
   }
 
   const url = `${getBirdeyeBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
-  const maxAttempts = 3;
+  if (Date.now() < birdeyeRateLimitedUntil) {
+    return {
+      ok: false,
+      status: 429,
+      data: null,
+      error: `Birdeye cooldown ${Math.round((birdeyeRateLimitedUntil - Date.now()) / 1000)}s`,
+    };
+  }
+
+  const maxAttempts = 1;
   let lastError = 'Unknown error';
   let lastStatus = 0;
 
@@ -177,12 +192,25 @@ export async function birdeyeRequest(
           'x-chain': 'solana',
         },
       });
-      if (res.status === 429 || res.status >= 500) {
+      if (res.status === 429) {
+        lastStatus = 429;
+        lastError = 'HTTP 429';
+        birdeyeCooldownStreak = Math.min(6, birdeyeCooldownStreak + 1);
+        const cool = Math.min(
+          BIRDEYE_COOLDOWN_CAP_MS,
+          BIRDEYE_COOLDOWN_BASE_MS * Math.pow(2, birdeyeCooldownStreak - 1)
+        );
+        birdeyeRateLimitedUntil = Date.now() + cool;
+        console.warn(
+          `[birdeye] ${label} 429 — cooldown ${Math.round(cool / 1000)}s (no retry)`
+        );
+        return { ok: false, status: 429, data: null, error: lastError };
+      }
+      if (res.status >= 500) {
         lastStatus = res.status;
         lastError = `HTTP ${res.status}`;
-        console.warn(`[birdeye] ${label} ${lastError} — retrying`);
-        await new Promise((r) => setTimeout(r, 400 * attempt));
-        continue;
+        console.warn(`[birdeye] ${label} ${lastError}`);
+        return { ok: false, status: res.status, data: null, error: lastError };
       }
       if (!res.ok) {
         const body = await res.text().catch(() => '');
@@ -192,13 +220,13 @@ export async function birdeyeRequest(
         return { ok: false, status: res.status, data: null, error: lastError };
       }
       const data = await res.json();
+      birdeyeCooldownStreak = 0;
       console.log(`[birdeye] ${label} OK`);
       return { ok: true, status: res.status, data };
     } catch (err) {
       lastStatus = 0;
       lastError = err instanceof Error ? err.message : String(err);
       console.error(`[birdeye] ${label} fetch failed:`, lastError);
-      await new Promise((r) => setTimeout(r, 300 * attempt));
     }
   }
 

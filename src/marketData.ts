@@ -1188,6 +1188,24 @@ export function isDexScreenerInCooldown(): boolean {
   return Date.now() < dexRateLimitedUntil;
 }
 
+/** Throw if Dex is in shared cooldown — bypass callers must respect this. */
+export function assertDexScreenerAllowed(): void {
+  if (isDexScreenerInCooldown()) {
+    const rem = Math.round(getDexScreenerCooldownRemainingMs() / 1000);
+    throw new Error(`dexscreener_cooldown_${rem}s`);
+  }
+}
+
+/** Let bypass callers feed 429/1015 into the shared Dex cooldown. */
+export function noteDexScreenerHttpStatus(
+  status: number,
+  reason = 'external'
+): void {
+  if (status === 429 || status === 1015) {
+    enterDexCooldown(`${reason}:${status}`);
+  }
+}
+
 export function getDexScreenerCooldownRemainingMs(): number {
   return Math.max(0, dexRateLimitedUntil - Date.now());
 }
