@@ -1,8 +1,8 @@
 /**
  * Feature → RPC lane map (3-lane + legacy aliases).
- * primary = Trading (Helius)
+ * primary = Trading (Alchemy BACKUP)
  * secondary = Data (Alchemy)
- * background = Background (Alchemy BACKUP2 → publics)
+ * background = Background (Alchemy BACKUP2 → public) when feature workloads ON
  */
 
 export type RpcFeature =

@@ -1,9 +1,9 @@
 /**
- * 6 paid + 3 public RPC pool:
- * Trading (Helius → Helius BACKUP → Emergency)
- * Data (Alchemy → Alchemy BACKUP)
- * Background (Alchemy BACKUP2 → publics)
- * Emergency (Helius BACKUP2 → publics) — Trading hard-fail only
+ * Slim RPC pool:
+ * Trading (Alchemy BACKUP → Emergency public)
+ * Data (Alchemy)
+ * Background (Alchemy BACKUP2 / public) — only when background feature workloads ON
+ * Helius cold / emergency-only — never hot or probed while idle
  */
 
 import { AsyncLocalStorage } from 'async_hooks';
@@ -38,7 +38,11 @@ import {
   type RpcGateRole,
 } from './rpcGate';
 import { normalizeRpcRole, type NormalizedRpcRole } from './rpcRouting';
-import { assertRpcWorkloadEnabled } from './rpcWorkloadControl';
+import {
+  assertRpcWorkloadEnabled,
+  anyBackgroundFeatureWorkloadEnabled,
+  allFeatureWorkloadsOff,
+} from './rpcWorkloadControl';
 
 dotenv.config();
 
@@ -110,21 +114,30 @@ let healthTimer: ReturnType<typeof setInterval> | null = null;
 let started = false;
 
 let simple: SimpleRpcEndpoints | null = null;
+let poolBuilt = false;
+let hotIncludesBackground = false;
 let tradingPref: EndpointState | null = null;
+/** @deprecated mid-hops removed */
 let tradingAlchemyFailover: EndpointState | null = null;
+/** @deprecated mid-hops removed */
 let tradingFailover: EndpointState | null = null;
 let dataPref: EndpointState | null = null;
 let dataFailover: EndpointState | null = null;
 let backgroundPref: EndpointState | null = null;
+/** Hot emergency public only. */
+let emergencyPublic: EndpointState | null = null;
+/** @deprecated — Helius not hot */
 let emergencyPaid: EndpointState | null = null;
 let publics: EndpointState[] = [];
+let heliusCold: RpcEndpointRef[] = [];
 
-/** Trading: 0=helius, 1=alchemy-backup, 2=helius-backup, 3+=emergency */
+/** Trading: 0=alchemy-backup primary, 1+=emergency public */
 let tradingHop = 0;
 let dataOnFailover = false;
 let backgroundIdx = 0;
 let tradingHardFailStreak = 0;
 let tradingRecoverAt = 0;
+let lastHealthProbeAt = 0;
 
 const TRADING_HARD_FAIL_NEED = 3;
 const TRADING_RECOVER_MS = 45_000;
@@ -133,6 +146,34 @@ const HARD_FAIL_COOLDOWN_MS = 120_000;
 const LATENCY_EWMA_ALPHA = 0.25;
 const WITH_RPC_MAX_ATTEMPTS_CRITICAL = 4;
 const WITH_RPC_MAX_ATTEMPTS_OTHER = 2;
+const HEALTH_PROBE_NORMAL_MS = 120_000;
+const HEALTH_PROBE_FEATURES_OFF_MS = 300_000;
+const HEALTH_TICK_CHECK_MS = 30_000;
+
+/** Rolling 60s timestamps for control-plane diagnostics. */
+const probeCallAts: number[] = [];
+const featureCallAts: number[] = [];
+const healthPageRefreshAts: number[] = [];
+
+function notePerMin(bucket: number[]): void {
+  const now = Date.now();
+  bucket.push(now);
+  while (bucket.length && bucket[0]! < now - 60_000) bucket.shift();
+}
+
+function perMin(bucket: number[]): number {
+  const now = Date.now();
+  while (bucket.length && bucket[0]! < now - 60_000) bucket.shift();
+  return bucket.length;
+}
+
+function wantBackgroundHot(): boolean {
+  try {
+    return anyBackgroundFeatureWorkloadEnabled();
+  } catch {
+    return true;
+  }
+}
 
 export type RpcCallTrafficRow = {
   endpoint: string;
@@ -202,38 +243,37 @@ function makeState(ep: RpcEndpointRef, emergencyOnly = false): EndpointState {
 }
 
 function emergencyChain(): EndpointState[] {
-  const out: EndpointState[] = [];
-  if (emergencyPaid) out.push(emergencyPaid);
-  for (const p of publics) out.push(p);
-  return out;
+  return emergencyPublic ? [emergencyPublic] : [];
 }
 
 function ensureEndpoints(): void {
-  if (tradingPref || dataPref || backgroundPref || publics.length) return;
+  if (poolBuilt) return;
   simple = rpcEndpointsSimple();
-  if (simple.trading) tradingPref = makeState(simple.trading);
-  if (simple.tradingAlchemyFailover) {
-    tradingAlchemyFailover = makeState(simple.tradingAlchemyFailover);
-  }
-  if (simple.tradingFailover) tradingFailover = makeState(simple.tradingFailover);
-  if (simple.data) dataPref = makeState(simple.data);
-  if (simple.dataFailover) dataFailover = makeState(simple.dataFailover);
-  if (simple.background) backgroundPref = makeState(simple.background);
-  if (simple.emergencyPaid) emergencyPaid = makeState(simple.emergencyPaid, true);
-  publics = simple.publics.map((p) => makeState(p, true));
+  heliusCold = simple.heliusCold.slice();
+  tradingAlchemyFailover = null;
+  tradingFailover = null;
+  dataFailover = null;
+  emergencyPaid = null;
 
-  // Fallbacks so lanes always resolve
-  if (!tradingPref && tradingAlchemyFailover) tradingPref = tradingAlchemyFailover;
-  if (!tradingPref && tradingFailover) tradingPref = tradingFailover;
+  if (simple.trading) tradingPref = makeState(simple.trading);
+  if (simple.data) dataPref = makeState(simple.data);
+  if (simple.emergencyPublic) {
+    emergencyPublic = makeState(simple.emergencyPublic, true);
+    publics = [emergencyPublic];
+  } else {
+    emergencyPublic = null;
+    publics = [];
+  }
+
   if (!tradingPref && dataPref) {
     tradingPref = makeState({
       url: dataPref.endpoint.url,
       label: dataPref.endpoint.label + '-as-trading',
     });
   }
-  if (!tradingPref && publics[0]) tradingPref = makeState(publics[0].endpoint as RpcEndpointRef);
-
-  if (!dataPref && dataFailover) dataPref = dataFailover;
+  if (!tradingPref && emergencyPublic) {
+    tradingPref = makeState(emergencyPublic.endpoint as RpcEndpointRef);
+  }
   if (!dataPref && tradingPref) {
     dataPref = makeState({
       url: tradingPref.endpoint.url,
@@ -241,19 +281,52 @@ function ensureEndpoints(): void {
     });
   }
 
-  if (!backgroundPref && publics[0]) {
-    backgroundPref = makeState(publics[0].endpoint as RpcEndpointRef);
+  hotIncludesBackground = wantBackgroundHot();
+  if (hotIncludesBackground) {
+    if (simple.background) backgroundPref = makeState(simple.background);
+    else if (emergencyPublic) {
+      backgroundPref = makeState(emergencyPublic.endpoint as RpcEndpointRef);
+    }
+  } else {
+    backgroundPref = null;
   }
 
+  poolBuilt = true;
   console.log(
-    `[rpc] 6+3 lanes: trading=${simple.trading?.label || tradingPref?.endpoint.label || 'none'}` +
-      ` (failover1=${simple.tradingAlchemyFailover?.label || 'none'}` +
-      ` failover2=${simple.tradingFailover?.label || 'none'})` +
-      ` data=${simple.data?.label || dataPref?.endpoint.label || 'none'}` +
-      ` (failover=${simple.dataFailover?.label || 'none'})` +
-      ` background=${simple.background?.label || 'publics'}` +
-      ` emergency=${simple.emergencyPaid?.label || 'publics'} (idle until Trading hard-fail)` +
-      ` publics=${publics.map((p) => p.endpoint.label).join(',')}`
+    `[rpc] slim pool: trading=${tradingPref?.endpoint.label || 'none'}` +
+      ` data=${dataPref?.endpoint.label || 'none'}` +
+      ` emergency=${emergencyPublic?.endpoint.label || 'none'}` +
+      ` background=${hotIncludesBackground ? backgroundPref?.endpoint.label || 'on' : 'idle'}` +
+      ` heliusCold=${heliusCold.map((h) => h.label).join(',') || 'none'} (unprobed)`
+  );
+}
+
+/** Rematerialize Background hot slot when feature workloads toggle. */
+export function refreshRpcHotPool(): void {
+  if (!poolBuilt) {
+    ensureEndpoints();
+    return;
+  }
+  simple = simple || rpcEndpointsSimple();
+  const wantBg = wantBackgroundHot();
+  if (wantBg === hotIncludesBackground) {
+    if (!wantBg) backgroundPref = null;
+    return;
+  }
+  if (!wantBg) {
+    backgroundPref = null;
+    backgroundIdx = 0;
+    hotIncludesBackground = false;
+    console.log('[rpc] Background → idle (feature workloads OFF)');
+    return;
+  }
+  if (simple.background) backgroundPref = makeState(simple.background);
+  else if (emergencyPublic) {
+    backgroundPref = makeState(emergencyPublic.endpoint as RpcEndpointRef);
+  }
+  hotIncludesBackground = Boolean(backgroundPref);
+  console.log(
+    `[rpc] Background → hot (${backgroundPref?.endpoint.label || 'none'})`
   );
 }
 
@@ -265,14 +338,22 @@ export function resetRpcEndpointPool(): void {
   dataFailover = null;
   backgroundPref = null;
   emergencyPaid = null;
+  emergencyPublic = null;
   publics = [];
+  heliusCold = [];
   simple = null;
+  poolBuilt = false;
+  hotIncludesBackground = false;
   tradingHop = 0;
   dataOnFailover = false;
   backgroundIdx = 0;
   tradingHardFailStreak = 0;
   tradingRecoverAt = 0;
+  lastHealthProbeAt = 0;
   callTraffic.clear();
+  probeCallAts.length = 0;
+  featureCallAts.length = 0;
+  healthPageRefreshAts.length = 0;
   ensureEndpoints();
 }
 
@@ -282,6 +363,7 @@ export function isWeakPublicUtilityUrl(url: string | null | undefined): boolean 
 
 export function isUtilityOnWeakPublic(): boolean {
   ensureEndpoints();
+  if (!wantBackgroundHot()) return false;
   const st = laneState('background');
   return isPublicRpcUrl(st?.endpoint.url);
 }
@@ -328,23 +410,15 @@ function usable(st: EndpointState | null): boolean {
 
 function tradingActive(): EndpointState | null {
   ensureEndpoints();
-  // 0 Helius → 1 Alchemy BACKUP → 2 Helius BACKUP → 3+ Emergency
+  // 0 Alchemy BACKUP → 1+ Emergency public
   if (tradingHop <= 0) {
     if (usable(tradingPref)) return tradingPref;
     if (tradingPref && !isHardFailed(tradingPref) && !isRateLimited(tradingPref)) {
       return tradingPref;
     }
   }
-  if (tradingHop <= 1) {
-    if (usable(tradingAlchemyFailover)) return tradingAlchemyFailover;
-    if (tradingAlchemyFailover) return tradingAlchemyFailover;
-  }
-  if (tradingHop <= 2) {
-    if (usable(tradingFailover)) return tradingFailover;
-    if (tradingFailover) return tradingFailover;
-  }
   const chain = emergencyChain();
-  const idx = Math.max(0, tradingHop - 3);
+  const idx = Math.max(0, tradingHop - 1);
   return chain[idx] || chain[0] || tradingPref;
 }
 
@@ -361,9 +435,16 @@ function dataActive(): EndpointState | null {
 
 function backgroundActive(): EndpointState | null {
   ensureEndpoints();
+  if (!wantBackgroundHot()) return null;
+  if (!backgroundPref && emergencyPublic) {
+    // lazy materialize if toggle raced
+    refreshRpcHotPool();
+  }
   const chain: EndpointState[] = [];
   if (backgroundPref) chain.push(backgroundPref);
-  for (const p of publics) chain.push(p);
+  if (emergencyPublic && emergencyPublic !== backgroundPref) {
+    chain.push(emergencyPublic);
+  }
   if (!chain.length) return null;
   const idx = Math.min(backgroundIdx, chain.length - 1);
   const preferred = chain[idx]!;
@@ -449,7 +530,7 @@ function noteTradingOutcome(ok: boolean, message?: string): void {
       if (Date.now() >= tradingRecoverAt) {
         tradingHop = 0;
         tradingRecoverAt = 0;
-        console.log('[rpc] Trading recovered → Helius');
+        console.log('[rpc] Trading recovered → Alchemy BACKUP');
       }
     }
     return;
@@ -460,7 +541,7 @@ function noteTradingOutcome(ok: boolean, message?: string): void {
     tradingHardFailStreak >= TRADING_HARD_FAIL_NEED ||
     (message && is429(message))
   ) {
-    const maxHop = 2 + emergencyChain().length;
+    const maxHop = emergencyChain().length;
     if (tradingHop < maxHop) {
       tradingHop += 1;
       tradingHardFailStreak = 0;
@@ -501,6 +582,7 @@ export async function runWithRpcRole<T>(
   feature = 'rpc'
 ): Promise<T> {
   assertRpcWorkloadEnabled(feature);
+  if (feature !== 'health_probe') notePerMin(featureCallAts);
   const norm = normalizeRole(role);
   const depth = rpcGateDepthAls.getStore() ?? 0;
   const run = () =>
@@ -576,6 +658,7 @@ async function probeState(
   st: EndpointState,
   timeoutMs = 8_000
 ): Promise<boolean> {
+  notePerMin(probeCallAts);
   if (isRateLimited(st) || isHardFailed(st)) {
     st.lastCheckedAt = Date.now();
     return false;
@@ -772,32 +855,58 @@ function buildCongestion(
 
 export function getRpcStats() {
   ensureEndpoints();
+  notePerMin(healthPageRefreshAts);
   const tActive = laneState('primary');
   const dActive = laneState('secondary');
-  const bActive = laneState('background');
-  const eActive = emergencyChain()[0] || publics[0] || null;
-  const tradingOnEmergency = tradingHop >= 3;
+  const bgFeatureOn = wantBackgroundHot();
+  const bActive = bgFeatureOn ? laneState('background') : null;
+  const eActive = emergencyPublic || null;
+  const tradingOnEmergency = tradingHop >= 1;
+  const backgroundIdleWhenWorkloadsOff = !bgFeatureOn;
+  const probeCallsPerMin = perMin(probeCallAts);
+  const featureCallsPerMin = perMin(featureCallAts);
+  const healthPageRefreshCallsPerMin = perMin(healthPageRefreshAts);
+  const hotStates = [
+    tradingPref,
+    dataPref,
+    emergencyPublic,
+    bgFeatureOn ? backgroundPref : null,
+  ].filter((e): e is EndpointState => Boolean(e));
+  // Deduplicate by URL for count
+  const activeEndpointsCount = new Set(
+    hotStates.map((s) => s.endpoint.url.toLowerCase())
+  ).size;
+  const featuresOff = (() => {
+    try {
+      return allFeatureWorkloadsOff();
+    } catch {
+      return false;
+    }
+  })();
+  let controlPlaneThrash: string | null = null;
+  if (featuresOff && probeCallsPerMin >= 2) {
+    controlPlaneThrash = 'probes_while_features_off';
+  }
 
   const downFor = (st: EndpointState | null) =>
     st?.unhealthySince ? Math.max(0, Date.now() - st.unhealthySince) : 0;
 
-  const anyHealthy = [tActive, dActive, bActive].some(
+  const anyHealthy = [tActive, dActive].some(
     (s) => s && s.healthy && !isRateLimited(s) && !isHardFailed(s)
   );
 
   let warning: string | null = null;
   if (!anyHealthy) {
     warning =
-      'Trading/Data/Background unhealthy — set HELIUS_API_KEY, ALCHEMY_API_KEY, ALCHEMY_API_KEY_BACKUP2.';
+      'Trading/Data unhealthy — set ALCHEMY_API_KEY_BACKUP (Trading) and ALCHEMY_API_KEY (Data).';
   } else if (tradingOnEmergency) {
-    warning = `Trading on Emergency (${tActive?.endpoint.label || 'public'}) — Helius recovering.`;
-  } else if (tradingHop === 1) {
-    warning = `Trading on Alchemy BACKUP failover (${tActive?.endpoint.label}).`;
-  } else if (tradingHop === 2) {
-    warning = `Trading on Helius BACKUP (${tActive?.endpoint.label}).`;
+    warning = `Trading on Emergency (${tActive?.endpoint.label || 'public'}) — Alchemy BACKUP recovering.`;
   } else if (lanesShareEndpoint()) {
     warning =
-      'Trading and Data share a URL — set distinct HELIUS_API_KEY vs ALCHEMY_API_KEY.';
+      'Trading and Data share a URL — set distinct ALCHEMY_API_KEY_BACKUP vs ALCHEMY_API_KEY.';
+  } else if (controlPlaneThrash) {
+    warning =
+      'Control-plane thrash: feature workloads OFF but probes still high — check health_probe rate.';
   }
 
   const gate = getRpcGateSnapshot();
@@ -806,16 +915,7 @@ export function getRpcStats() {
       'RPC gate stressed — Data scanners or Background Favourites may be queued/skipped.';
   }
 
-  const allStates = [
-    tradingPref,
-    tradingAlchemyFailover,
-    tradingFailover,
-    dataPref,
-    dataFailover,
-    backgroundPref,
-    emergencyPaid,
-    ...publics,
-  ].filter((e): e is EndpointState => Boolean(e));
+  const allStates = hotStates;
 
   const quarantine = allStates
     .filter((e) => isHardFailed(e))
@@ -837,10 +937,15 @@ export function getRpcStats() {
     updateRpcLoadSignals({
       primaryLatencyMs: tActive?.latencyMs ?? null,
       secondaryLatencyMs: dActive?.latencyMs ?? null,
-      backgroundLatencyMs: bActive?.latencyMs ?? null,
+      backgroundLatencyMs: backgroundIdleWhenWorkloadsOff
+        ? null
+        : bActive?.latencyMs ?? null,
       tradingOnEmergency,
       dataHealthy: Boolean(dActive?.healthy),
-      backgroundHealthy: Boolean(bActive?.healthy),
+      // Idle Background (workloads OFF) is not unhealthy — do not trigger shed.
+      backgroundHealthy: backgroundIdleWhenWorkloadsOff
+        ? true
+        : Boolean(bActive?.healthy),
       primaryQueued: gate.lanes.primary.queued,
     });
     loadControl = getRpcLoadControlSnapshot();
@@ -854,10 +959,16 @@ export function getRpcStats() {
     gateRole: 'primary',
   });
   const dataCong = buildCongestion('data', dActive, { gateRole: 'secondary' });
-  const bgCong = buildCongestion('background', bActive, {
+  let bgCong = buildCongestion('background', bActive, {
     gateRole: 'background',
   });
-  if (loadControl?.favouritesDeferred) {
+  if (backgroundIdleWhenWorkloadsOff) {
+    bgCong = {
+      state: 'idle',
+      cause: 'background feature workloads OFF',
+      details: ['no polling', 'no Background probe'],
+    };
+  } else if (loadControl?.favouritesDeferred) {
     bgCong.details.push(
       `Favourites deferred; scanners×${loadControl.scannerMultiplier}`
     );
@@ -889,42 +1000,35 @@ export function getRpcStats() {
   };
   pushEp(tradingPref, 'primary', tActive === tradingPref, 'primary');
   pushEp(
-    tradingAlchemyFailover,
-    'primary',
-    tActive === tradingAlchemyFailover,
-    'primary'
-  );
-  pushEp(
-    tradingFailover,
-    'primary',
-    tActive === tradingFailover,
-    'primary'
-  );
-  pushEp(dataPref, 'secondary', tActive !== dataPref && dActive === dataPref, 'secondary');
-  pushEp(
-    dataFailover,
+    dataPref,
     'secondary',
-    dActive === dataFailover,
+    tActive !== dataPref && dActive === dataPref,
     'secondary'
   );
-  pushEp(
-    backgroundPref,
-    'background',
-    bActive === backgroundPref,
-    'background'
-  );
-  pushEp(emergencyPaid, 'utility', tActive === emergencyPaid, 'utility');
-  for (const p of publics) {
+  if (bgFeatureOn) {
     pushEp(
-      p,
-      'utility',
-      tActive === p || bActive === p,
-      bActive === p ? 'background' : 'utility'
+      backgroundPref,
+      'background',
+      bActive === backgroundPref,
+      'background'
     );
   }
+  pushEp(
+    emergencyPublic,
+    'utility',
+    tActive === emergencyPublic,
+    'utility'
+  );
+
+  const idleBackups = heliusCold.map((h) => ({
+    label: h.label,
+    url: h.url,
+    probed: false as const,
+    role: 'cold-helius' as const,
+  }));
 
   return {
-    mode: 'sixThree' as const,
+    mode: 'slim3' as const,
     multiLaneActive: false as const,
     shareLoad: false,
     active: tActive?.endpoint.label || 'none',
@@ -943,9 +1047,13 @@ export function getRpcStats() {
       downForMs: downFor(dataPref),
     },
     utility: {
-      label: bActive?.endpoint.label || 'none',
-      url: bActive?.endpoint.url || '',
-      healthy: Boolean(bActive?.healthy),
+      label: backgroundIdleWhenWorkloadsOff
+        ? 'idle'
+        : bActive?.endpoint.label || 'none',
+      url: backgroundIdleWhenWorkloadsOff ? '' : bActive?.endpoint.url || '',
+      healthy: backgroundIdleWhenWorkloadsOff
+        ? true
+        : Boolean(bActive?.healthy),
       failover: backgroundIdx > 0,
       downForMs: downFor(backgroundPref),
     },
@@ -956,9 +1064,11 @@ export function getRpcStats() {
       classicShare: false as const,
       multiLane: false as const,
       simple2Lane: false as const,
-      sixThree: true as const,
+      sixThree: false as const,
+      slim3: true as const,
     },
     endpoints,
+    idleBackups,
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
     priorityFeeLamports: lastPriorityFeeLamports,
     ok: anyHealthy,
@@ -968,7 +1078,13 @@ export function getRpcStats() {
     quarantine,
     loadControl,
     utilityWeakPublic: isUtilityOnWeakPublic(),
-    heliusDisabled: false as const,
+    heliusDisabled: true as const,
+    probe_calls_per_min: probeCallsPerMin,
+    feature_calls_per_min: featureCallsPerMin,
+    health_page_refresh_calls_per_min: healthPageRefreshCallsPerMin,
+    active_endpoints_count: activeEndpointsCount,
+    background_idle_when_workloads_off: backgroundIdleWhenWorkloadsOff,
+    controlPlaneThrash,
     lanes: {
       trading: {
         label: tActive?.endpoint.label || 'none',
@@ -989,12 +1105,20 @@ export function getRpcStats() {
         congestion: dataCong,
       },
       background: {
-        label: bActive?.endpoint.label || 'none',
-        url: bActive?.endpoint.url || '',
-        healthy: Boolean(bActive?.healthy),
-        latencyMs: bActive?.latencyMs ?? null,
-        successRate: successRate(bActive),
-        active: true,
+        label: backgroundIdleWhenWorkloadsOff
+          ? 'idle'
+          : bActive?.endpoint.label || 'none',
+        url: backgroundIdleWhenWorkloadsOff ? '' : bActive?.endpoint.url || '',
+        healthy: backgroundIdleWhenWorkloadsOff
+          ? true
+          : Boolean(bActive?.healthy),
+        latencyMs: backgroundIdleWhenWorkloadsOff
+          ? null
+          : bActive?.latencyMs ?? null,
+        successRate: backgroundIdleWhenWorkloadsOff
+          ? 100
+          : successRate(bActive),
+        active: bgFeatureOn,
         congestion: bgCong,
       },
       emergency: {
@@ -1007,17 +1131,12 @@ export function getRpcStats() {
         congestion: emergCong,
       },
       helius: {
-        disabled: false as const,
-        label: tradingPref?.endpoint.label || 'helius',
+        disabled: true as const,
+        label: 'helius (cold)',
         congestion: {
-          state: 'ok' as const,
-          cause: 'Trading: Helius → Alchemy BACKUP → Helius BACKUP → Emergency',
-          details: [
-            tradingPref?.endpoint.label || 'helius',
-            tradingAlchemyFailover?.endpoint.label || 'alchemy-backup',
-            tradingFailover?.endpoint.label || 'helius-backup',
-            emergencyPaid?.endpoint.label || 'helius-backup2',
-          ].filter(Boolean),
+          state: 'disabled' as const,
+          cause: 'Helius cold / emergency-only — not hot, not probed',
+          details: heliusCold.map((h) => h.label),
         },
       },
     },
@@ -1287,17 +1406,10 @@ export async function testConnection(): Promise<boolean> {
     );
     return true;
   }
-  const failoverOrder = [
-    tradingAlchemyFailover,
-    tradingFailover,
-    ...emergencyChain(),
-  ];
-  for (let i = 0; i < failoverOrder.length; i++) {
-    const st = failoverOrder[i];
-    if (!st) continue;
+  for (const st of emergencyChain()) {
     const retry = await probeState(st, 6_000);
     if (retry) {
-      tradingHop = i + 1;
+      tradingHop = 1;
       console.log(
         `[connection] RPC OK after failover → ${st.endpoint.label}`
       );
@@ -1311,19 +1423,21 @@ export async function testConnection(): Promise<boolean> {
 export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>> {
   ensureEndpoints();
   startRpcHealthMonitor();
-  // Prefer Background lane for probe CU; still recover Trading when down.
+  try {
+    const { isRpcWorkloadEnabled } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (!isRpcWorkloadEnabled('health_probe')) {
+      console.warn('[rpc] probeRpcRecovery skipped — health_probe OFF');
+      return getRpcStats();
+    }
+  } catch {
+    /* */
+  }
   const probeList: EndpointState[] = [];
-  if (backgroundPref) probeList.push(backgroundPref);
   if (tradingPref) probeList.push(tradingPref);
   if (dataPref) probeList.push(dataPref);
-  if (tradingHop >= 1 && tradingAlchemyFailover) {
-    probeList.push(tradingAlchemyFailover);
-  }
-  if (tradingHop >= 2 && tradingFailover) probeList.push(tradingFailover);
-  if (dataOnFailover && dataFailover) probeList.push(dataFailover);
-  if (tradingHop >= 2) {
-    for (const e of emergencyChain()) probeList.push(e);
-  }
+  if (wantBackgroundHot() && backgroundPref) probeList.push(backgroundPref);
+  if (tradingHop >= 1 && emergencyPublic) probeList.push(emergencyPublic);
   for (const st of probeList) {
     await probeState(st, 8_000);
     await new Promise((r) => setTimeout(r, 150));
@@ -1331,9 +1445,21 @@ export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>
   if (tradingHop > 0 && usable(tradingPref)) {
     tradingHop = 0;
     tradingRecoverAt = 0;
-    console.log('[rpc] Trading recovered via probe → Helius');
+    console.log('[rpc] Trading recovered via probe → Alchemy BACKUP');
   }
   return getRpcStats();
+}
+
+function healthProbeDueMs(): number {
+  try {
+    if (allFeatureWorkloadsOff()) return HEALTH_PROBE_FEATURES_OFF_MS;
+  } catch {
+    /* */
+  }
+  return Math.max(
+    HEALTH_PROBE_NORMAL_MS,
+    config.rpc?.healthIntervalMs ?? HEALTH_PROBE_NORMAL_MS
+  );
 }
 
 export function startRpcHealthMonitor(): void {
@@ -1341,11 +1467,7 @@ export function startRpcHealthMonitor(): void {
   started = true;
   ensureEndpoints();
 
-  const interval = Math.max(45_000, config.rpc?.healthIntervalMs ?? 45_000);
-  let healthCycle = 0;
-
   const tick = async () => {
-    healthCycle += 1;
     try {
       try {
         const { isRpcWorkloadEnabled } =
@@ -1354,42 +1476,31 @@ export function startRpcHealthMonitor(): void {
       } catch {
         /* */
       }
-      // Probe CU via Background preference: background + data each tick;
-      // Trading preferred every tick; Emergency only when active / sparse.
-      if (backgroundPref && !isHardFailed(backgroundPref)) {
-        await probeState(backgroundPref, 8_000);
-      } else if (publics[0] && healthCycle % 2 === 0) {
-        await probeState(publics[0], 8_000);
-      }
+      const due = healthProbeDueMs();
+      const now = Date.now();
+      if (lastHealthProbeAt && now - lastHealthProbeAt < due) return;
+      lastHealthProbeAt = now;
+
+      // One lightweight getSlot per active lane only.
       if (tradingPref && !isHardFailed(tradingPref)) {
         await probeState(tradingPref, 8_000);
       }
       if (dataPref && !isHardFailed(dataPref)) {
         await probeState(dataPref, 8_000);
       }
-      if (tradingHop >= 1 && tradingFailover && !isHardFailed(tradingFailover)) {
-        await probeState(tradingFailover, 8_000);
+      if (wantBackgroundHot() && backgroundPref && !isHardFailed(backgroundPref)) {
+        await probeState(backgroundPref, 8_000);
       }
-      if (dataOnFailover && dataFailover && !isHardFailed(dataFailover)) {
-        await probeState(dataFailover, 8_000);
-      }
-      if (tradingHop >= 1 && tradingAlchemyFailover && !isHardFailed(tradingAlchemyFailover)) {
-        await probeState(tradingAlchemyFailover, 8_000);
-      }
-      if (tradingHop >= 2 && tradingFailover && !isHardFailed(tradingFailover)) {
-        await probeState(tradingFailover, 8_000);
-      }
-      if (tradingHop >= 3 || healthCycle % 6 === 0) {
-        for (const e of emergencyChain().slice(0, 2)) {
-          await probeState(e, 6_000);
-        }
+      // Emergency only when Trading already failed over onto it.
+      if (tradingHop >= 1 && emergencyPublic && !isHardFailed(emergencyPublic)) {
+        await probeState(emergencyPublic, 6_000);
       }
       if (tradingHop > 0 && usable(tradingPref)) {
         if (!tradingRecoverAt) tradingRecoverAt = Date.now() + TRADING_RECOVER_MS;
         if (Date.now() >= tradingRecoverAt) {
           tradingHop = 0;
           tradingRecoverAt = 0;
-          console.log('[rpc] Trading healthy again → Helius');
+          console.log('[rpc] Trading healthy again → Alchemy BACKUP');
         }
       }
     } catch (err) {
@@ -1401,7 +1512,7 @@ export function startRpcHealthMonitor(): void {
   };
 
   void tick();
-  healthTimer = setInterval(() => void tick(), interval);
+  healthTimer = setInterval(() => void tick(), HEALTH_TICK_CHECK_MS);
 }
 
 export function stopRpcHealthMonitor(): void {

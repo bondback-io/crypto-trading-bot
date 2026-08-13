@@ -1,7 +1,8 @@
 /**
- * 6 paid + 3 public Solana RPC builders.
- * Trading=Helius, Data=Alchemy, Background=Alchemy BACKUP2→publics,
- * Emergency=Helius BACKUP2→publics.
+ * Slim RPC pool builders.
+ * Trading = Alchemy BACKUP, Data = Alchemy, Emergency = public.
+ * Background = Alchemy BACKUP2 (or public) only when background workloads are ON.
+ * Helius keys stay cold / emergency-only — never hot or probed while idle.
  */
 
 function stripTrailingSlash(url: string): string {
@@ -50,7 +51,6 @@ export function resolveKeyedEndpoint(
   if (urlRaw && looksLikeFullHttpUrl(urlRaw)) {
     if (keyRaw && !urlAlreadyHasKeyPath(urlRaw) && !/[?&]api-key=/i.test(urlRaw)) {
       const sep = urlRaw.includes('?') ? '&' : '?';
-      // Helius-style query key append only when URL looks like helius host
       if (/helius/i.test(urlRaw)) {
         return {
           url: stripTrailingSlash(`${urlRaw}${sep}api-key=${keyRaw}`),
@@ -98,17 +98,23 @@ export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
 export type RpcEndpointRef = { url: string; label: string };
 
 export type SimpleRpcEndpoints = {
+  /** Trading primary — Alchemy BACKUP. */
   trading: RpcEndpointRef | null;
-  /** First Trading failover — Alchemy BACKUP (not Helius-only). */
+  /** @deprecated mid-hop removed; always null. */
   tradingAlchemyFailover: RpcEndpointRef | null;
-  /** Second Trading failover — Helius BACKUP. */
+  /** @deprecated mid-hop removed; always null. */
   tradingFailover: RpcEndpointRef | null;
   data: RpcEndpointRef | null;
   dataFailover: RpcEndpointRef | null;
   background: RpcEndpointRef | null;
+  /** Cold Helius paid — never in hot pool / never probed while idle. */
   emergencyPaid: RpcEndpointRef | null;
+  /** Single hot emergency public (prefer publicnode). */
+  emergencyPublic: RpcEndpointRef | null;
   publics: RpcEndpointRef[];
-  heliusDisabled: false;
+  /** Cold Helius refs for diagnostics only. */
+  heliusCold: RpcEndpointRef[];
+  heliusDisabled: true;
 };
 
 function resolvePublic(label: string, url: string): RpcEndpointRef {
@@ -116,55 +122,55 @@ function resolvePublic(label: string, url: string): RpcEndpointRef {
 }
 
 /**
- * Nine-slot pool:
- * Trading ← HELIUS_API_KEY → ALCHEMY_API_KEY_BACKUP → HELIUS_API_KEY_BACKUP → Emergency
- * Data ← ALCHEMY_API_KEY (+ ALCHEMY_API_KEY_BACKUP)
- * Background ← ALCHEMY_API_KEY_BACKUP2 → publics
- * Emergency ← HELIUS_API_KEY_BACKUP2 → publics
+ * Trading ← ALCHEMY_API_KEY_BACKUP → Emergency public
+ * Data ← ALCHEMY_API_KEY
+ * Background ← ALCHEMY_API_KEY_BACKUP2 (or public) when workloads ON
+ * Helius ← cold / emergency-only (not hot, not probed idle)
  */
 export function rpcEndpointsSimple(): SimpleRpcEndpoints {
-  const trading = resolveHeliusEndpoint(
-    process.env.HELIUS_RPC_URL,
-    process.env.HELIUS_API_KEY,
-    'helius'
-  );
-  const tradingAlchemyFailover = resolveAlchemyEndpoint(
+  const trading = resolveAlchemyEndpoint(
     process.env.ALCHEMY_RPC_URL_BACKUP,
     process.env.ALCHEMY_API_KEY_BACKUP,
     'alchemy-backup'
-  );
-  const tradingFailover = resolveHeliusEndpoint(
-    process.env.HELIUS_RPC_URL_BACKUP,
-    process.env.HELIUS_API_KEY_BACKUP,
-    'helius-backup'
   );
   const data = resolveAlchemyEndpoint(
     process.env.ALCHEMY_RPC_URL,
     process.env.ALCHEMY_API_KEY,
     'alchemy'
   );
-  // Data sticky failover prefers a distinct Alchemy key; may share BACKUP with Trading hop.
-  const dataFailover =
-    resolveAlchemyEndpoint(
-      process.env.ALCHEMY_RPC_URL_BACKUP,
-      process.env.ALCHEMY_API_KEY_BACKUP,
-      'alchemy-backup'
-    ) ||
+  const background =
     resolveAlchemyEndpoint(
       process.env.ALCHEMY_RPC_URL_BACKUP2,
       process.env.ALCHEMY_API_KEY_BACKUP2,
       'alchemy-backup2'
-    );
-  const background = resolveAlchemyEndpoint(
-    process.env.ALCHEMY_RPC_URL_BACKUP2,
-    process.env.ALCHEMY_API_KEY_BACKUP2,
-    'alchemy-backup2'
+    ) || null;
+
+  const heliusCold: RpcEndpointRef[] = [];
+  const pushCold = (e: RpcEndpointRef | null) => {
+    if (!e?.url) return;
+    if (heliusCold.some((x) => x.url.toLowerCase() === e.url.toLowerCase())) return;
+    heliusCold.push(e);
+  };
+  pushCold(
+    resolveHeliusEndpoint(
+      process.env.HELIUS_RPC_URL,
+      process.env.HELIUS_API_KEY,
+      'helius'
+    )
+  );
+  pushCold(
+    resolveHeliusEndpoint(
+      process.env.HELIUS_RPC_URL_BACKUP,
+      process.env.HELIUS_API_KEY_BACKUP,
+      'helius-backup'
+    )
   );
   const emergencyPaid = resolveHeliusEndpoint(
     process.env.HELIUS_RPC_URL_BACKUP2,
     process.env.HELIUS_API_KEY_BACKUP2,
     'helius-backup2'
   );
+  pushCold(emergencyPaid);
 
   const publics: RpcEndpointRef[] = [];
   const seen = new Set<string>();
@@ -176,7 +182,11 @@ export function rpcEndpointsSimple(): SimpleRpcEndpoints {
     publics.push(e);
   };
 
-  const publicnodeEnv = (process.env.PUBLICNODE || process.env.PUBLICNODE_RPC_URL || '').trim();
+  const publicnodeEnv = (
+    process.env.PUBLICNODE ||
+    process.env.PUBLICNODE_RPC_URL ||
+    ''
+  ).trim();
   if (publicnodeEnv && looksLikeFullHttpUrl(publicnodeEnv)) {
     pushPublic(resolvePublic('publicnode', publicnodeEnv));
   } else {
@@ -195,20 +205,27 @@ export function rpcEndpointsSimple(): SimpleRpcEndpoints {
     pushPublic(resolvePublic('mainnet-beta', MAINNET_BETA_RPC_URL));
   }
 
+  const emergencyPublic = publics[0] || null;
+
   return {
     trading,
-    tradingAlchemyFailover,
-    tradingFailover,
+    tradingAlchemyFailover: null,
+    tradingFailover: null,
     data,
-    dataFailover,
+    dataFailover: null,
     background,
     emergencyPaid,
+    emergencyPublic,
     publics,
-    heliusDisabled: false,
+    heliusCold,
+    heliusDisabled: true,
   };
 }
 
-export function rpcEndpointsFromEnv(): Array<{ url: string; label: string }> {
+/** Hot pool only: Trading + Data + Emergency public (+ Background when requested). */
+export function rpcHotEndpointsFromEnv(
+  includeBackground: boolean
+): Array<{ url: string; label: string }> {
   const s = rpcEndpointsSimple();
   const out: Array<{ url: string; label: string }> = [];
   const seen = new Set<string>();
@@ -220,17 +237,20 @@ export function rpcEndpointsFromEnv(): Array<{ url: string; label: string }> {
     out.push(e);
   };
   push(s.trading);
-  push(s.tradingAlchemyFailover);
-  push(s.tradingFailover);
   push(s.data);
-  push(s.dataFailover);
-  push(s.background);
-  push(s.emergencyPaid);
-  for (const p of s.publics) push(p);
+  push(s.emergencyPublic);
+  if (includeBackground) {
+    push(s.background || s.emergencyPublic);
+  }
   if (out.length === 0) {
     out.push({ url: PUBLICNODE_RPC_URL, label: 'publicnode' });
   }
   return out;
+}
+
+/** Boot/config listing — same as hot pool with Background included (default workloads ON). */
+export function rpcEndpointsFromEnv(): Array<{ url: string; label: string }> {
+  return rpcHotEndpointsFromEnv(true);
 }
 
 /** @deprecated — kept for import compatibility. */
@@ -247,18 +267,22 @@ export function discoverAllRpcEndpoints(): Array<{
     paid: boolean;
     emergencyOnly: boolean;
   }> = [];
-  const push = (e: RpcEndpointRef | null, paid: boolean, emergencyOnly: boolean) => {
+  const push = (
+    e: RpcEndpointRef | null,
+    paid: boolean,
+    emergencyOnly: boolean
+  ) => {
     if (!e) return;
     out.push({ ...e, paid, emergencyOnly });
   };
   push(s.trading, true, false);
-  push(s.tradingAlchemyFailover, true, false);
-  push(s.tradingFailover, true, false);
   push(s.data, true, false);
-  push(s.dataFailover, true, false);
   push(s.background, true, false);
-  push(s.emergencyPaid, true, true);
-  for (const p of s.publics) {
+  push(s.emergencyPublic, false, true);
+  for (const h of s.heliusCold) {
+    out.push({ ...h, paid: true, emergencyOnly: true });
+  }
+  for (const p of s.publics.slice(1)) {
     out.push({ ...p, paid: false, emergencyOnly: true });
   }
   return out;

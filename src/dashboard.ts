@@ -10905,7 +10905,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
 
         <div class="card" id="rpc-status-card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Trading=Helius for entries/migration/balance/MEV. Data=Alchemy for scanners/signals. Background=Alchemy BACKUP2→publics for Favourites/activity/probes. Emergency=Helius BACKUP2→publics after Trading hard-fail. Soft watch caps Favourites on Background."></span></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Trading=Alchemy BACKUP. Data=Alchemy. Background=Alchemy BACKUP2 only when background workloads ON. Emergency=public after Trading hard-fail. Helius cold/unprobed. Soft watch caps Favourites on Background."></span></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Background soft-watch. Lower = less Background RPC. 0 = pause Favourites watch. Default 12.">
               <span>Soft watch cap</span>
@@ -10915,20 +10915,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
           <div id="rpc-simple-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8">
-            <div class="mb-1"><strong style="color:#34d399">Trading → Helius</strong> — failover: Alchemy BACKUP → Helius BACKUP → Emergency</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Data → Alchemy</strong> — scanners, signals, market/alpha/zion, metrics/anti-rug (+ Alchemy BACKUP)</div>
-            <div class="mb-1"><strong style="color:#a78bfa">Background → Alchemy BACKUP2</strong> — Favourites soft-watch, activity, import, holdings, health probes → publics</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Emergency → Helius BACKUP2 / publics</strong> — Trading hard-fail only; idle otherwise</div>
+            <div class="mb-1"><strong style="color:#34d399">Trading → Alchemy BACKUP</strong> — hard-fail → Emergency public</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Data → Alchemy</strong> — scanners, signals, market/alpha/zion, metrics/anti-rug</div>
+            <div class="mb-1"><strong style="color:#a78bfa">Background → Alchemy BACKUP2</strong> — only when Favourites/activity/holdings/zion-read ON; else idle</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Emergency → public</strong> — Trading hard-fail only; Helius cold / unprobed</div>
           </div>
           <div class="section-title text-sm mt-3 mb-1">RPC workload toggles <span class="tip" tabindex="0" data-tip="Turn OFF subsystems that call Solana RPC to isolate thrashing / latency. Lane assignment shown per row. Persists in settings."></span></div>
           <p class="mint text-xs mb-2" style="color:#64748b;line-height:1.4">Test kill-switches — OFF skips that work (no RPC). Does not change strategy profiles.</p>
           <div id="rpc-workload-toggles" class="text-xs mb-3" style="display:flex;flex-direction:column;gap:0.35rem"></div>
           <span class="mint text-xs" id="rpc-workload-status">—</span>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">6+3 pool</strong> — sticky Trading/Data/Background. Data never borrows Trading. Background never borrows Trading/Data preferred keys. Emergency unused until Trading hard-fail.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Slim hot pool</strong> — Trading + Data + Emergency public (Background only when its feature workloads are ON). Probes are rare (120s; 300s when all features OFF).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener/Jupiter).</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
+          <div id="rpc-control-plane" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
           <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
@@ -26848,7 +26849,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (plain) {
           plain.textContent =
             (rpcObj && rpcObj.warning) ||
-            (ok ? 'Trading/Data/Background healthy (6+3 pool)' : 'RPC unhealthy') ||
+            (ok ? 'Trading/Data healthy (slim pool)' : 'RPC unhealthy') ||
             '—';
         }
         function hostOf(url) {
@@ -26861,7 +26862,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const c = (lane && lane.congestion) || {};
           if (pill) {
             pill.classList.remove('is-healthy', 'is-degraded', 'is-down', 'is-active');
-            if (!lane || !lane.label) {
+            if (c.state === 'idle' || (key === 'background' && lane && lane.active === false)) {
+              pill.classList.add('is-healthy');
+              pill.textContent = (lane && lane.label ? lane.label : 'idle') + ' · idle';
+            } else if (!lane || !lane.label || lane.label === 'none') {
               pill.classList.add('is-down');
               pill.textContent = unsetHint || 'unset';
             } else if (c.state === 'failover' || (key === 'emergency' && lane.active)) {
@@ -26886,7 +26890,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           if (meta) {
             meta.textContent =
               (hostOf(lane && lane.url) || '') +
-              (lane && lane.active === false && key === 'emergency' ? ' · idle' : '');
+              (lane && lane.active === false && (key === 'emergency' || key === 'background') ? ' · idle' : '');
           }
           if (cong) {
             const details = Array.isArray(c.details) && c.details.length
@@ -26898,10 +26902,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               details;
           }
         }
-        paintLane('trading', t, 'set HELIUS_API_KEY');
+        paintLane('trading', t, 'set ALCHEMY_API_KEY_BACKUP');
         paintLane('data', d, 'set ALCHEMY_API_KEY');
         paintLane('background', b, 'set ALCHEMY_API_KEY_BACKUP2');
-        paintLane('emergency', e, 'HELIUS_BACKUP2 / public');
+        paintLane('emergency', e, 'public emergency');
+        const cp = document.getElementById('rpc-control-plane');
+        if (cp && rpcObj) {
+          const thrash = rpcObj.controlPlaneThrash
+            ? ' · THRASH: ' + rpcObj.controlPlaneThrash
+            : '';
+          cp.textContent =
+            'control-plane: probes/min=' +
+            (rpcObj.probe_calls_per_min != null ? rpcObj.probe_calls_per_min : '—') +
+            ' · features/min=' +
+            (rpcObj.feature_calls_per_min != null ? rpcObj.feature_calls_per_min : '—') +
+            ' · health-refresh/min=' +
+            (rpcObj.health_page_refresh_calls_per_min != null
+              ? rpcObj.health_page_refresh_calls_per_min
+              : '—') +
+            ' · hot=' +
+            (rpcObj.active_endpoints_count != null ? rpcObj.active_endpoints_count : '—') +
+            (rpcObj.background_idle_when_workloads_off ? ' · bg idle' : '') +
+            thrash;
+          cp.style.color = thrash ? '#fbbf24' : '#94a3b8';
+        }
       }
       const critLane = rpc.primary || {};
       const activeEp =

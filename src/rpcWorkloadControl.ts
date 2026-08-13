@@ -34,12 +34,20 @@ export type RpcWorkloadDef = {
   note: string;
 };
 
+/** Background feature workloads (excludes health_probe — probes must not keep Background hot). */
+export const BACKGROUND_FEATURE_WORKLOAD_IDS: readonly RpcWorkloadId[] = [
+  'wallet_poll',
+  'activity',
+  'influencer_holdings',
+  'zion_wallet_read',
+] as const;
+
 export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
   {
     id: 'trade_entry',
     label: 'Trade entry / buys',
     lane: 'trading',
-    laneLabel: 'Trading (Helius)',
+    laneLabel: 'Trading (Alchemy BACKUP)',
     intensity: 'HEAVY',
     note: 'Buy orchestration + nested send path',
   },
@@ -47,7 +55,7 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     id: 'migration',
     label: 'Migration listener',
     lane: 'trading',
-    laneLabel: 'Trading (Helius)',
+    laneLabel: 'Trading (Alchemy BACKUP)',
     intensity: 'HEAVY',
     note: 'Program sig polls + parsed txs / WS',
   },
@@ -55,7 +63,7 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     id: 'live_balance',
     label: 'Live wallet balance',
     lane: 'trading',
-    laneLabel: 'Trading (Helius)',
+    laneLabel: 'Trading (Alchemy BACKUP)',
     intensity: 'LIGHT',
     note: 'getBalance for trading wallets',
   },
@@ -63,7 +71,7 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     id: 'mev',
     label: 'MEV sandwich check',
     lane: 'trading',
-    laneLabel: 'Trading (Helius)',
+    laneLabel: 'Trading (Alchemy BACKUP)',
     intensity: 'VERY HEAVY',
     note: 'Per-buy sigs + multi parse',
   },
@@ -71,7 +79,7 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     id: 'priority_fee',
     label: 'Priority fee estimate',
     lane: 'trading',
-    laneLabel: 'Trading (Helius)',
+    laneLabel: 'Trading (Alchemy BACKUP)',
     intensity: 'LIGHT',
     note: 'getRecentPrioritizationFees',
   },
@@ -79,7 +87,7 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     id: 'zion_place_trade',
     label: 'Zion Place Trade',
     lane: 'trading',
-    laneLabel: 'Trading (Helius)',
+    laneLabel: 'Trading (Alchemy BACKUP)',
     intensity: 'HEAVY',
     note: 'Manual Zion buy send path',
   },
@@ -167,9 +175,9 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     id: 'health_probe',
     label: 'RPC health probes',
     lane: 'background',
-    laneLabel: 'Background (preferred probe CU)',
+    laneLabel: 'Control-plane (rare getSlot)',
     intensity: 'LIGHT',
-    note: 'Periodic getSlot (still probes Trading/Data lightly)',
+    note: 'One probe per active lane; Background only when feature bg workloads ON; 120s / 300s when features OFF',
   },
   {
     id: 'zion_wallet_read',
@@ -232,7 +240,6 @@ export function resolveWorkloadId(feature: string | undefined | null): RpcWorklo
   const key = String(feature).trim();
   if (!key) return null;
   if (FEATURE_TO_WORKLOAD[key]) return FEATURE_TO_WORKLOAD[key]!;
-  // fuzzy
   for (const [k, id] of Object.entries(FEATURE_TO_WORKLOAD)) {
     if (key === k || key.startsWith(k)) return id;
   }
@@ -243,6 +250,17 @@ export function isRpcWorkloadEnabled(id: RpcWorkloadId): boolean {
   return enabled.get(id) !== false;
 }
 
+export function anyBackgroundFeatureWorkloadEnabled(): boolean {
+  return BACKGROUND_FEATURE_WORKLOAD_IDS.some((id) => isRpcWorkloadEnabled(id));
+}
+
+/** True when every catalog workload except health_probe is OFF. */
+export function allFeatureWorkloadsOff(): boolean {
+  return RPC_WORKLOAD_CATALOG.every(
+    (w) => w.id === 'health_probe' || !isRpcWorkloadEnabled(w.id)
+  );
+}
+
 export function assertRpcWorkloadEnabled(featureOrId: string): void {
   const id =
     (RPC_WORKLOAD_CATALOG.some((w) => w.id === featureOrId)
@@ -251,6 +269,16 @@ export function assertRpcWorkloadEnabled(featureOrId: string): void {
   if (!id) return;
   if (!isRpcWorkloadEnabled(id)) {
     throw new RpcWorkloadDisabledError(id);
+  }
+}
+
+function notifyHotPoolRefresh(): void {
+  try {
+    const { refreshRpcHotPool } =
+      require('./connection') as typeof import('./connection');
+    refreshRpcHotPool();
+  } catch {
+    /* boot order / circular */
   }
 }
 
@@ -265,6 +293,7 @@ export function setRpcWorkloadEnabled(
   console.log(
     `[rpc-workload] ${id} → ${on ? 'ON' : 'OFF'} (test kill-switch)`
   );
+  notifyHotPoolRefresh();
   return isRpcWorkloadEnabled(id);
 }
 
@@ -276,6 +305,7 @@ export function setRpcWorkloads(
       enabled.set(k as RpcWorkloadId, v);
     }
   }
+  notifyHotPoolRefresh();
   return getRpcWorkloadEnabledMap();
 }
 
@@ -296,6 +326,7 @@ export function applyRpcWorkloadSaved(
       enabled.set(w.id, saved[w.id] as boolean);
     }
   }
+  notifyHotPoolRefresh();
 }
 
 export function getRpcWorkloadSnapshot(): Array<

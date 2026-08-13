@@ -2692,7 +2692,7 @@ export const config: BotConfig = {
 
   rpc: {
     endpoints: rpcEndpointsFromEnv(),
-    healthIntervalMs: 45_000,
+    healthIntervalMs: 120_000,
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
     // shareLoad / mode kept for settings compatibility — routing always simple 2-lane.

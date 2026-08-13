@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.324',
+    title: 'Stop RPC control-plane thrash — Alchemy Trading, rare probes',
+    sections: ['execution', 'overview'],
+    items: [
+      'Trading primary is Alchemy BACKUP (not Helius); Helius cold/unprobed; Emergency = public only on hard-fail.',
+      'Hot pool shrinks to Trading + Data + Emergency public; Background joins only when Favourites/activity/holdings/zion-read are ON.',
+      'Health probes: one getSlot per active lane, 120s normal / 300s when all feature workloads OFF; no idle Emergency/Helius sweeps.',
+      'Stats show probe/feature/health-refresh per-min, active endpoint count, background-idle, and control-plane thrash flag.',
+    ],
+  },
+  {
     version: '1.2.323',
     title: 'Fix dashboard stall from RPC workload toggle JS',
     sections: ['overview', 'execution'],
