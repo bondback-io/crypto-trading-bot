@@ -60,7 +60,7 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
     lane: 'trading',
     laneLabel: 'Trading (Alchemy)',
     intensity: 'HEAVY',
-    note: 'Program sig polls + parsed txs / WS',
+    note: 'Program sig polls + parsed txs; WS logsSubscribe only if supported (else poll-only)',
   },
   {
     id: 'live_balance',

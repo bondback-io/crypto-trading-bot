@@ -83,6 +83,18 @@ let lastWsEventAt = 0;
 let lastSubscribeAt = 0;
 let subscribedRpcUrl = '';
 
+/**
+ * Dedicated Connection for migration onLogs only — never share Trading HTTP
+ * pool's WS (web3.js retries failed logsSubscribe forever → Render thrash).
+ */
+let migrationWsConn: Connection | null = null;
+
+/** HTTP RPC URL for which logsSubscribe returned method-not-found (-32601). */
+let logsSubscribeUnsupportedUrl: string | null = null;
+/** Session hard-disable until endpoint URL changes. */
+let logsSubscribeHardDisabled = false;
+let logsSubscribeUnsupportedLogged = false;
+
 const subIds: number[] = [];
 
 let onMigrationHandler: MigrationHandler | null = null;
@@ -121,6 +133,154 @@ function isRpcTimeoutOrFetchError(err: unknown): boolean {
   return /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|probe timeout/i.test(
     msg
   );
+}
+
+function rpcHostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '(invalid)';
+  }
+}
+
+/** Env kill-switch: MIGRATION_WS=0 forces poll-only (no logsSubscribe). */
+function isMigrationWsEnvEnabled(): boolean {
+  const v = (process.env.MIGRATION_WS || process.env.MIGRATION_LOGS_SUBSCRIBE || '')
+    .trim()
+    .toLowerCase();
+  if (v === '0' || v === 'false' || v === 'off' || v === 'no') return false;
+  return true;
+}
+
+function isLogsSubscribeMethodNotFound(err: unknown): boolean {
+  if (err == null) return false;
+  const any = err as { code?: unknown; message?: unknown };
+  if (any.code === -32601 || any.code === '-32601') return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    /-32601/.test(msg) ||
+    /method ['`]?logsSubscribe['`]? not found/i.test(msg) ||
+    (/not found/i.test(msg) && /logsSubscribe/i.test(msg)) ||
+    /method not found/i.test(msg)
+  );
+}
+
+function migrationWsAllowedForUrl(url: string): boolean {
+  if (!url) return false;
+  if (!isMigrationWsEnvEnabled()) return false;
+  if (logsSubscribeHardDisabled && logsSubscribeUnsupportedUrl === url) {
+    return false;
+  }
+  if (isPublicRpcUrl(url) || isSoftThrottleRpcUrl(url)) return false;
+  return true;
+}
+
+/**
+ * Clear web3.js internal subscription callbacks synchronously so its
+ * immediate retry loop in `_updateSubscriptions` sees callbacks.size === 0
+ * and stops (otherwise -32601 storms the process).
+ */
+function clearWeb3SubscriptionCallbacks(conn: Connection | null): void {
+  if (!conn) return;
+  const c = conn as unknown as {
+    _subscriptionsByHash?: Record<
+      string,
+      { callbacks?: { clear?: () => void; size?: number } }
+    >;
+    _subscriptionHashByClientSubscriptionId?: Record<number, string>;
+    _subscriptionDisposeFunctionsByClientSubscriptionId?: Record<
+      number,
+      () => Promise<void>
+    >;
+    _rpcWebSocket?: { close?: () => void; call?: (...a: unknown[]) => unknown };
+  };
+  try {
+    for (const id of subIds) {
+      const hash = c._subscriptionHashByClientSubscriptionId?.[id];
+      if (hash && c._subscriptionsByHash?.[hash]?.callbacks?.clear) {
+        c._subscriptionsByHash[hash]!.callbacks!.clear!();
+      }
+      delete c._subscriptionDisposeFunctionsByClientSubscriptionId?.[id];
+      delete c._subscriptionHashByClientSubscriptionId?.[id];
+    }
+    if (c._subscriptionsByHash) {
+      for (const hash of Object.keys(c._subscriptionsByHash)) {
+        const sub = c._subscriptionsByHash[hash];
+        sub?.callbacks?.clear?.();
+        delete c._subscriptionsByHash[hash];
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
+  try {
+    c._rpcWebSocket?.close?.();
+  } catch {
+    /* */
+  }
+}
+
+function disableLogsSubscribeUnsupported(url: string, detail?: string): void {
+  logsSubscribeHardDisabled = true;
+  logsSubscribeUnsupportedUrl = url;
+  wsMode = false;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  clearWeb3SubscriptionCallbacks(migrationWsConn);
+  for (const id of subIds) {
+    try {
+      migrationWsConn?.removeOnLogsListener(id).catch(() => undefined);
+    } catch {
+      /* */
+    }
+  }
+  subIds.length = 0;
+  try {
+    migrationWsConn = null;
+  } catch {
+    migrationWsConn = null;
+  }
+  if (!logsSubscribeUnsupportedLogged) {
+    logsSubscribeUnsupportedLogged = true;
+    console.warn(
+      `[migration] logsSubscribe_unsupported_disabled host=${rpcHostOf(url)}` +
+        (detail ? ` detail=${detail.slice(0, 120)}` : '') +
+        ' — poll-only until RPC endpoint changes (no WS reconnect)'
+    );
+  }
+}
+
+function wrapWsCallForMethodNotFound(conn: Connection, httpUrl: string): void {
+  const c = conn as unknown as {
+    _rpcWebSocket?: {
+      call?: (method: string, args?: unknown) => Promise<unknown>;
+    };
+  };
+  const ws = c._rpcWebSocket;
+  if (!ws || typeof ws.call !== 'function') return;
+  if ((ws as { __migrationLogsGuard?: boolean }).__migrationLogsGuard) return;
+  const origCall = ws.call.bind(ws);
+  (ws as { __migrationLogsGuard?: boolean }).__migrationLogsGuard = true;
+  ws.call = async (method: string, args?: unknown) => {
+    try {
+      return await origCall(method, args);
+    } catch (err) {
+      if (
+        method === 'logsSubscribe' &&
+        isLogsSubscribeMethodNotFound(err)
+      ) {
+        // Clear callbacks BEFORE web3.js catch re-enters _updateSubscriptions.
+        clearWeb3SubscriptionCallbacks(conn);
+        disableLogsSubscribeUnsupported(
+          httpUrl,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+      throw err;
+    }
+  };
 }
 
 function noteMigrationTimeout(err: unknown): void {
@@ -210,21 +370,36 @@ export function startMigrationListener(): void {
   );
   console.log('[migration] ═══════════════════════════════════════');
 
-  // Public RPCs cannot handle program-wide onLogs (flood → OOM / crash loop on Render).
+  // HTTP reads (poll) vs WS logsSubscribe are separate — never storm WS reconnects.
   const rpcUrl = getRpcUrl();
-  if (isPublicRpcUrl(rpcUrl)) {
+  if (!isMigrationWsEnvEnabled()) {
     console.warn(
-      '[migration] Public RPC detected — WebSocket program logs DISABLED (poll-only). ' +
-        'Set HELIUS_API_KEY + ALCHEMY_API_KEY (or a paid RPC_URL) for real-time migration WS.'
+      '[migration] MIGRATION_WS disabled — poll-only (no logsSubscribe)'
     );
     wsMode = false;
+  } else if (!migrationWsAllowedForUrl(rpcUrl)) {
+    if (
+      logsSubscribeHardDisabled &&
+      logsSubscribeUnsupportedUrl === rpcUrl
+    ) {
+      // one-shot log already emitted
+      wsMode = false;
+    } else {
+      console.warn(
+        `[migration] WebSocket program logs DISABLED (poll-only) host=${rpcHostOf(rpcUrl)} — ` +
+          'public/soft-throttle RPC or logsSubscribe unsupported. Paid WS-capable RPC required for real-time.'
+      );
+      wsMode = false;
+    }
   } else {
     const subscribed = subscribeWebSocket();
     if (!subscribed) {
-      console.warn(
-        '[migration] WebSocket subscribe failed — poll-only until reconnect'
-      );
-      scheduleReconnect('initial subscribe failed');
+      // Do NOT scheduleReconnect on hard-disable / method-not-found.
+      if (!logsSubscribeHardDisabled) {
+        console.warn(
+          '[migration] WebSocket subscribe failed — poll-only (no auto-reconnect storm)'
+        );
+      }
     }
   }
 
@@ -339,6 +514,11 @@ export function getMigrationStatus() {
   return {
     running,
     wsMode,
+    logsSubscribeHardDisabled,
+    logsSubscribeUnsupportedHost: logsSubscribeUnsupportedUrl
+      ? rpcHostOf(logsSubscribeUnsupportedUrl)
+      : null,
+    migrationWsEnvEnabled: isMigrationWsEnvEnabled(),
     recentCount: recentMigrations.size,
     lastSignature: lastMigrationSig,
     lastWsEventAt: lastWsEventAt || null,
@@ -353,21 +533,17 @@ export function getMigrationStatus() {
 }
 
 function unsubscribeAll(): void {
-  let conn: Connection | null = null;
-  try {
-    conn = getConnection();
-  } catch {
-    // ignore
-  }
-
+  clearWeb3SubscriptionCallbacks(migrationWsConn);
   for (const id of subIds) {
     try {
-      conn?.removeOnLogsListener(id).catch(() => undefined);
+      migrationWsConn?.removeOnLogsListener(id).catch(() => undefined);
     } catch {
       // ignore
     }
   }
   subIds.length = 0;
+  migrationWsConn = null;
+  wsMode = false;
 }
 
 function subscribeWebSocket(): boolean {
@@ -383,9 +559,33 @@ function subscribeWebSocket(): boolean {
     } catch {
       /* */
     }
+    if (!isMigrationWsEnvEnabled()) return false;
+
+    const httpUrl = getRpcUrl();
+    if (
+      logsSubscribeUnsupportedUrl &&
+      logsSubscribeUnsupportedUrl !== httpUrl
+    ) {
+      // New HTTP endpoint after failover — allow one fresh attempt.
+      logsSubscribeHardDisabled = false;
+      logsSubscribeUnsupportedLogged = false;
+      logsSubscribeUnsupportedUrl = null;
+    }
+    if (!migrationWsAllowedForUrl(httpUrl)) {
+      wsMode = false;
+      return false;
+    }
+
     unsubscribeAll();
-    const conn = getConnection();
-    subscribedRpcUrl = conn.rpcEndpoint;
+
+    // Dedicated WS connection (HTTP URL; web3 maps to wss). Isolates retry storms.
+    migrationWsConn = new Connection(httpUrl, {
+      commitment: 'confirmed',
+      disableRetryOnRateLimit: true,
+      confirmTransactionInitialTimeout: 60_000,
+    });
+    wrapWsCallForMethodNotFound(migrationWsConn, httpUrl);
+    subscribedRpcUrl = httpUrl;
     lastSubscribeAt = Date.now();
     try {
       const { noteIdleRpcCall } =
@@ -409,7 +609,8 @@ function subscribeWebSocket(): boolean {
     ];
 
     for (const { id, label } of programs) {
-      const subId = conn.onLogs(
+      if (logsSubscribeHardDisabled) break;
+      const subId = migrationWsConn.onLogs(
         new PublicKey(id),
         (logs: Logs, ctx: Context) => {
           lastWsEventAt = Date.now();
@@ -421,23 +622,40 @@ function subscribeWebSocket(): boolean {
       console.log(`[migration] WS subscribed → ${label} (sub #${subId})`);
     }
 
+    if (logsSubscribeHardDisabled) {
+      unsubscribeAll();
+      return false;
+    }
+
     wsMode = true;
     reconnectAttempts = 0;
-    // Treat subscribe as a heartbeat so we don't immediately stale-reconnect
     lastWsEventAt = Date.now();
     console.log(
-      `[migration] ✅ WebSocket subscriptions active (${programs.length} programs)`
+      `[migration] ✅ WebSocket subscriptions active (${programs.length} programs) host=${rpcHostOf(httpUrl)}`
     );
     return true;
   } catch (err) {
+    if (isLogsSubscribeMethodNotFound(err)) {
+      try {
+        disableLogsSubscribeUnsupported(
+          getRpcUrl(),
+          err instanceof Error ? err.message : String(err)
+        );
+      } catch {
+        /* */
+      }
+      return false;
+    }
     console.error('[migration] WebSocket subscription error:', err);
     wsMode = false;
+    unsubscribeAll();
     return false;
   }
 }
 
 function scheduleReconnect(reason: string): void {
   if (!running) return;
+  if (logsSubscribeHardDisabled) return;
   try {
     const {
       isRpcWorkloadEnabled,
@@ -448,9 +666,13 @@ function scheduleReconnect(reason: string): void {
     /* */
   }
   if (reconnectTimer) return;
-  // Never reconnect WS against public RPC — it crash-loops the host.
+  if (!isMigrationWsEnvEnabled()) {
+    wsMode = false;
+    return;
+  }
   try {
-    if (isPublicRpcUrl(getRpcUrl())) {
+    const url = getRpcUrl();
+    if (!migrationWsAllowedForUrl(url)) {
       wsMode = false;
       return;
     }
@@ -458,9 +680,18 @@ function scheduleReconnect(reason: string): void {
     return;
   }
 
+  // Cap attempts — never infinite reconnect storms.
+  if (reconnectAttempts >= 5) {
+    console.warn(
+      `[migration] WS reconnect cap reached (${reconnectAttempts}) — staying poll-only (${reason})`
+    );
+    wsMode = false;
+    return;
+  }
+
   const delay = Math.min(
     MAX_RECONNECT_DELAY_MS,
-    1_000 * Math.pow(2, reconnectAttempts)
+    5_000 * Math.pow(2, reconnectAttempts)
   );
   reconnectAttempts += 1;
 
@@ -471,10 +702,10 @@ function scheduleReconnect(reason: string): void {
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    if (!running) return;
+    if (!running || logsSubscribeHardDisabled) return;
     console.log('[migration] Reconnecting WebSocket subscriptions…');
     const ok = subscribeWebSocket();
-    if (!ok) {
+    if (!ok && !logsSubscribeHardDisabled) {
       scheduleReconnect('resubscribe failed');
     }
   }, delay);
@@ -492,33 +723,43 @@ function checkSubscriptionHealth(): void {
     /* */
   }
 
-  // Stay poll-only on public RPCs — never try to (re)open program log websockets.
+  if (!isMigrationWsEnvEnabled() || logsSubscribeHardDisabled) {
+    wsMode = false;
+    return;
+  }
+
+  let current = '';
   try {
-    if (isPublicRpcUrl(getRpcUrl())) {
-      wsMode = false;
-      return;
-    }
+    current = getRpcUrl();
   } catch {
     return;
   }
 
-  // Active RPC may have failed over — resubscribe on new endpoint
-  try {
-    const current = getConnection().rpcEndpoint;
-    if (wsMode && subscribedRpcUrl && current !== subscribedRpcUrl) {
-      console.warn(
-        '[migration] RPC endpoint changed — resubscribing WebSocket'
-      );
-      scheduleReconnect('RPC failover');
-      return;
-    }
-  } catch {
-    scheduleReconnect('connection unavailable');
+  if (!migrationWsAllowedForUrl(current)) {
+    wsMode = false;
     return;
   }
 
+  // Active RPC may have failed over — allow WS on the new endpoint once.
+  if (
+    logsSubscribeUnsupportedUrl &&
+    current !== logsSubscribeUnsupportedUrl
+  ) {
+    logsSubscribeHardDisabled = false;
+    logsSubscribeUnsupportedLogged = false;
+    logsSubscribeUnsupportedUrl = null;
+  }
+
+  if (wsMode && subscribedRpcUrl && current !== subscribedRpcUrl) {
+    console.warn(
+      '[migration] RPC endpoint changed — resubscribing WebSocket once'
+    );
+    scheduleReconnect('RPC failover');
+    return;
+  }
+
+  // If WS never came up, do NOT spin reconnect every health tick.
   if (!wsMode) {
-    scheduleReconnect('websocket not active');
     return;
   }
 

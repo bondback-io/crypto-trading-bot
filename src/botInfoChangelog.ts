@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.329',
+    title: 'Stop logsSubscribe -32601 retry storm (migration WS)',
+    sections: ['execution', 'overview'],
+    items: [
+      'Migration WebSocket uses a dedicated Connection; on logsSubscribe method-not-found (-32601) hard-disable that endpoint (one log: logsSubscribe_unsupported_disabled) and stay poll-only — no reconnect loop.',
+      'WS gated by migration workload + MIGRATION_WS env; health checks no longer resubscribe when WS is inactive/unsupported.',
+      'Clears web3.js subscription callbacks before its infinite pending-retry path can thrash Render.',
+    ],
+  },
+  {
     version: '1.2.328',
     title: 'UI RPC lane assignment + Other master kill-switches',
     sections: ['execution', 'overview'],
