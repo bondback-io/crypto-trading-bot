@@ -22,6 +22,7 @@ import {
   shouldSkipForSnipers,
   type GmgnSniperReport,
 } from './gmgn';
+import { trimMapToCap } from './mapCap';
 import {
   getTokenOverview,
   getSmartMoneySignal,
@@ -132,6 +133,7 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<AntiRugReport>>();
+const ANTI_RUG_CACHE_CAP = 1_000;
 
 const DEFAULT_TTL_MS = 90_000;
 const BURN_ADDRESSES = new Set([
@@ -393,6 +395,7 @@ export async function evaluateAntiRug(
         report: { ...report, fromCache: false },
         expiresAt: Date.now() + cacheTtlMs(),
       });
+      trimMapToCap(cache, ANTI_RUG_CACHE_CAP);
       return report;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -420,6 +423,7 @@ export async function evaluateAntiRug(
         report: fail,
         expiresAt: Date.now() + Math.min(cacheTtlMs(), 30_000),
       });
+      trimMapToCap(cache, ANTI_RUG_CACHE_CAP);
       return fail;
     } finally {
       inflight.delete(cacheKey);

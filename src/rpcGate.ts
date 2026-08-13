@@ -138,11 +138,27 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
   };
 }
 
+const SKIP_TIMESTAMPS_CAP = 2_000;
+const SKIP_REASONS_CAP = 64;
+
 function noteSkip(role: RpcGateRole, reason: string): void {
   const L = lanes[role];
   L.skipped += 1;
   L.skipTimestamps.push(Date.now());
+  pruneTimestamps(L.skipTimestamps, 60_000);
+  while (L.skipTimestamps.length > SKIP_TIMESTAMPS_CAP) L.skipTimestamps.shift();
   L.skipReasons.set(reason, (L.skipReasons.get(reason) || 0) + 1);
+  if (L.skipReasons.size > SKIP_REASONS_CAP) {
+    let worstKey: string | null = null;
+    let worstN = Infinity;
+    for (const [k, v] of L.skipReasons) {
+      if (v < worstN) {
+        worstN = v;
+        worstKey = k;
+      }
+    }
+    if (worstKey) L.skipReasons.delete(worstKey);
+  }
 }
 
 function tryAcquire(role: RpcGateRole): boolean {
@@ -179,11 +195,10 @@ async function acquire(
 
   const L = lanes[role];
   const cap = LIMITS[role].queueCap;
+  // Hard cap for ALL roles — never enqueue past queueCap (OOM under thrash).
   if (L.queued >= cap) {
     noteSkip(role, reason);
-    if (skippable) {
-      throw new RpcGateSkipError('busy', role, reason);
-    }
+    throw new RpcGateSkipError('busy', role, reason);
   }
 
   if (skippable && L.queued > cap / 2) {

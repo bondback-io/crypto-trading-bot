@@ -24,12 +24,25 @@ export function noteSignalAdmitted(): void {
   prune(admittedAt, now);
 }
 
+const BLOCKED_REASONS_CAP = 32;
+
 export function noteSignalBlockedByGate(reason: string): void {
   const now = Date.now();
   blockedAt.push(now);
   prune(blockedAt, now);
   const key = (reason || 'unknown').slice(0, 96);
   blockedReasons.set(key, (blockedReasons.get(key) || 0) + 1);
+  if (blockedReasons.size > BLOCKED_REASONS_CAP) {
+    let worstKey: string | null = null;
+    let worstN = Infinity;
+    for (const [k, v] of blockedReasons) {
+      if (v < worstN) {
+        worstN = v;
+        worstKey = k;
+      }
+    }
+    if (worstKey) blockedReasons.delete(worstKey);
+  }
   if (now - lastBlockedLogAt > 15_000) {
     lastBlockedLogAt = now;
     console.warn(`[signals_blocked_by_gate] ${key}`);

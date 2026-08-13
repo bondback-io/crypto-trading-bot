@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.332',
+    title: 'Emergency RPC thrash + heap OOM containment',
+    sections: ['execution', 'overview'],
+    items: [
+      'Alchemy 429: exponential per-endpoint backoff; withRpc no longer tight-retries inside cooldown; health probes skip rate-limited endpoints.',
+      'rpcGate hard-enforces queueCap for all roles (fixes unbounded waiter Promise growth → OOM); skip sample/reason maps capped.',
+      'Hard caps on callTraffic, per-min buckets, scanner/mint caches, migration recent map; scanner timers torn down when workloads OFF / idle isolation.',
+      'Migration logsSubscribe: no failover re-arm after -32601; boot destroys WS when MIGRATION_WS not opt-in.',
+    ],
+  },
+  {
     version: '1.2.331',
     title: 'Migration logsSubscribe OFF by default — kill WS reconnect storms',
     sections: ['execution', 'overview'],

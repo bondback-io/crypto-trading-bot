@@ -436,6 +436,11 @@ export function startMigrationListener(): void {
       '[migration] poll-only — logsSubscribe OFF by default (set MIGRATION_WS=1 to opt in)'
     );
     wsMode = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    unsubscribeAll();
   } else if (!migrationWsAllowedForUrl(rpcUrl)) {
     if (
       logsSubscribeHardDisabled &&
@@ -622,14 +627,11 @@ function subscribeWebSocket(): boolean {
     if (!isMigrationWsEnvEnabled()) return false;
 
     const httpUrl = getRpcUrl();
-    if (
-      logsSubscribeUnsupportedUrl &&
-      logsSubscribeUnsupportedUrl !== httpUrl
-    ) {
-      // New HTTP endpoint after failover — allow one fresh attempt.
-      logsSubscribeHardDisabled = false;
-      logsSubscribeUnsupportedLogged = false;
-      logsSubscribeUnsupportedUrl = null;
+    // Never clear hard-disable on failover — only a process restart + MIGRATION_WS=1
+    // may retry logsSubscribe (stops -32601 re-arm storms).
+    if (logsSubscribeHardDisabled) {
+      wsMode = false;
+      return false;
     }
     if (!migrationWsAllowedForUrl(httpUrl)) {
       wsMode = false;
@@ -800,21 +802,13 @@ function checkSubscriptionHealth(): void {
     return;
   }
 
-  // Active RPC may have failed over — allow WS on the new endpoint once.
-  if (
-    logsSubscribeUnsupportedUrl &&
-    current !== logsSubscribeUnsupportedUrl
-  ) {
-    logsSubscribeHardDisabled = false;
-    logsSubscribeUnsupportedLogged = false;
-    logsSubscribeUnsupportedUrl = null;
-  }
-
+  // Endpoint change while WS was active: tear down; do not auto-resubscribe
+  // (avoids -32601 / 429 storms). Opt-in WS only restarts via startMigrationListener.
   if (wsMode && subscribedRpcUrl && current !== subscribedRpcUrl) {
     console.warn(
-      '[migration] RPC endpoint changed — resubscribing WebSocket once'
+      '[migration] RPC endpoint changed — tearing down WS (no auto-resubscribe)'
     );
-    scheduleReconnect('RPC failover');
+    unsubscribeAll();
     return;
   }
 
@@ -1360,6 +1354,16 @@ function pruneExpired(): void {
   for (const [mint, event] of recentMigrations.entries()) {
     if (now - event.detectedAt > MIGRATION_TTL_MS) {
       recentMigrations.delete(mint);
+    }
+  }
+  const RECENT_MIGRATIONS_CAP = 800;
+  if (recentMigrations.size > RECENT_MIGRATIONS_CAP) {
+    const ordered = [...recentMigrations.entries()].sort(
+      (a, b) => a[1].detectedAt - b[1].detectedAt
+    );
+    const drop = recentMigrations.size - RECENT_MIGRATIONS_CAP;
+    for (let i = 0; i < drop; i++) {
+      recentMigrations.delete(ordered[i]![0]);
     }
   }
 }

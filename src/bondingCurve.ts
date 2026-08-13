@@ -20,6 +20,7 @@ import {
   QuietLogGate,
   QuarantineMap,
 } from './httpProviderGate';
+import { trimMapToCap } from './mapCap';
 
 /** Canonical initial real token reserves (raw, 6 decimals) from Pump.fun Global */
 const DEFAULT_INITIAL_REAL_TOKEN_RESERVES = 793_100_000_000_000n;
@@ -68,6 +69,7 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<BondingCurveState>>();
+const BONDING_CACHE_CAP = 1_000;
 
 const PUMP_MINT_UNAVAILABLE_MS = 10 * 60_000;
 const PUMP_API_COOLDOWN_BASE_MS = 15_000;
@@ -465,6 +467,7 @@ export async function fetchBondingCurve(
             state,
             expiresAt: Date.now() + cacheTtlMs(),
           });
+          trimMapToCap(cache, BONDING_CACHE_CAP);
           return state;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -473,6 +476,7 @@ export async function fetchBondingCurve(
             state: fail,
             expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
           });
+          trimMapToCap(cache, BONDING_CACHE_CAP);
           return fail;
         } finally {
           inflight.delete(mint);
@@ -488,6 +492,7 @@ export async function fetchBondingCurve(
             state: fail,
             expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
           });
+          trimMapToCap(cache, BONDING_CACHE_CAP);
           inflight.delete(mint);
           return fail;
         }

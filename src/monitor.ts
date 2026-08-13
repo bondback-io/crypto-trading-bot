@@ -571,6 +571,8 @@ const holderGrowthSnapshots = new Map<
   string,
   { holders: number; at: number }
 >();
+const HOLDER_GROWTH_CAP = 2_000;
+const TRADED_MINTS_CAP = 5_000;
 
 function noteHolderGrowthPct(
   mint: string,
@@ -580,6 +582,12 @@ function noteHolderGrowthPct(
   const prev = holderGrowthSnapshots.get(mint);
   const now = Date.now();
   holderGrowthSnapshots.set(mint, { holders, at: now });
+  try {
+    const { trimMapToCap } = require('./mapCap') as typeof import('./mapCap');
+    trimMapToCap(holderGrowthSnapshots, HOLDER_GROWTH_CAP);
+  } catch {
+    /* */
+  }
   if (!prev || prev.holders <= 0) return null;
   const hours = (now - prev.at) / 3_600_000;
   if (hours < 0.08) return null;
@@ -1431,6 +1439,16 @@ registerDipBuyHistoryProvider((mint) => {
 const tradedMints = new Set<string>();
 /** In-flight buy claims — prevents concurrent duplicate opens while filters await. */
 const pendingBuys = new Set<string>();
+
+function noteTradedMint(mint: string): void {
+  tradedMints.add(mint);
+  try {
+    const { trimSetToCap } = require('./mapCap') as typeof import('./mapCap');
+    trimSetToCap(tradedMints, TRADED_MINTS_CAP);
+  } catch {
+    /* */
+  }
+}
 /** Recent evaluated signals with dynamic size (for dashboard). */
 const recentSignals: Array<{
   mint: string;
@@ -1755,7 +1773,7 @@ function beginBuy(
 ): boolean {
   if (pendingBuys.has(mint)) return false;
   if (paperTrader.hasOpenMint(mint)) {
-    tradedMints.add(mint);
+    noteTradedMint(mint);
     return false;
   }
   if (!opts?.allowRetrade && tradedMints.has(mint)) return false;
@@ -1765,7 +1783,7 @@ function beginBuy(
 
 function finishBuy(mint: string, success: boolean): void {
   pendingBuys.delete(mint);
-  if (success) tradedMints.add(mint);
+  if (success) noteTradedMint(mint);
 }
 
 /** Clear traded/pending mint locks (e.g. after paper reset). */

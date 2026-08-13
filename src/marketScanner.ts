@@ -9,6 +9,7 @@
 import { config, HARD_FILTER_FLOORS } from './config';
 import { logger, errorToMeta } from './logger';
 import { runWithRpcRole } from './connection';
+import { trimMapToCap, trimSetToCap } from './mapCap';
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
@@ -160,6 +161,7 @@ const MAX_FEED = 120;
 const feed: ScannerCandidate[] = [];
 const cooldowns = new Map<string, number>(); // mint → earliest retry ms
 const seenThisSession = new Set<string>();
+const SCANNER_MINT_CACHE_CAP = 3_000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
@@ -1399,6 +1401,8 @@ export function markScannerCooldown(
   const wait = opts?.ms != null ? opts.ms : taken ? base * 2 : base;
   cooldowns.set(mint, Date.now() + Math.max(0, wait));
   seenThisSession.add(mint);
+  trimMapToCap(cooldowns, SCANNER_MINT_CACHE_CAP);
+  trimSetToCap(seenThisSession, SCANNER_MINT_CACHE_CAP);
 }
 
 /** Whether mint is in scanner cooldown (shared with specialty feed). */

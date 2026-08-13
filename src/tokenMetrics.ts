@@ -23,6 +23,7 @@ import {
   lookupCachedJupiterToken,
 } from './jupiterTokens';
 import { isStrategyEnabled } from './strategies';
+import { trimMapToCap } from './mapCap';
 
 export interface HolderBucket {
   address: string;
@@ -95,6 +96,7 @@ const inflight = new Map<string, Promise<TokenMetrics>>();
 /** Dex/Jupiter/GMGN-only results for UI panels — never used as full-metrics cache. */
 const lightCache = new Map<string, CacheEntry>();
 const lightInflight = new Map<string, Promise<TokenMetrics>>();
+const TOKEN_METRICS_CACHE_CAP = 1_000;
 
 const DEFAULT_TTL_MS = 90_000;
 const LIGHT_TTL_MS = 60_000;
@@ -321,6 +323,7 @@ async function fetchTokenMetricsLight(mint: string): Promise<TokenMetrics> {
         data: merged,
         expiresAt: Date.now() + LIGHT_TTL_MS,
       });
+      trimMapToCap(lightCache, TOKEN_METRICS_CACHE_CAP);
       return merged;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -329,6 +332,7 @@ async function fetchTokenMetricsLight(mint: string): Promise<TokenMetrics> {
         data: fail,
         expiresAt: Date.now() + Math.min(LIGHT_TTL_MS, 20_000),
       });
+      trimMapToCap(lightCache, TOKEN_METRICS_CACHE_CAP);
       return fail;
     } finally {
       lightInflight.delete(mint);
@@ -462,6 +466,7 @@ export async function fetchTokenMetrics(
           Date.now() +
           (dexEmpty && stale ? Math.max(cacheTtlMs(), 180_000) : cacheTtlMs()),
       });
+      trimMapToCap(cache, TOKEN_METRICS_CACHE_CAP);
       return merged;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -471,6 +476,7 @@ export async function fetchTokenMetrics(
         data: fail,
         expiresAt: Date.now() + Math.min(cacheTtlMs(), 30_000),
       });
+      trimMapToCap(cache, TOKEN_METRICS_CACHE_CAP);
       return fail;
     } finally {
       inflight.delete(mint);

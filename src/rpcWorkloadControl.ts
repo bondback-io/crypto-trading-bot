@@ -304,6 +304,36 @@ export function assertRpcWorkloadEnabled(featureOrId: string): void {
   }
 }
 
+function syncScannerTimersForWorkloads(): void {
+  const featuresOff = allFeatureWorkloadsOff();
+  const marketOn = !featuresOff && isRpcWorkloadEnabled('market_scanner');
+  const zionOn = !featuresOff && isRpcWorkloadEnabled('zion_scanner');
+  try {
+    const { stopMarketScanner, startMarketScanner } =
+      require('./marketScanner') as typeof import('./marketScanner');
+    if (!marketOn) {
+      stopMarketScanner();
+    } else {
+      try {
+        const { config } = require('./config') as typeof import('./config');
+        if (config.marketScanner?.enabled !== false) startMarketScanner();
+      } catch {
+        /* */
+      }
+    }
+  } catch {
+    /* */
+  }
+  try {
+    const { stopZionKolScanner, syncZionKolScannerLifecycle } =
+      require('./zionKolScanner') as typeof import('./zionKolScanner');
+    if (!zionOn) stopZionKolScanner();
+    else syncZionKolScannerLifecycle();
+  } catch {
+    /* */
+  }
+}
+
 function notifyRpcControlPlane(): void {
   try {
     const { refreshRpcHotPool, syncRpcIdleIsolation } =
@@ -320,6 +350,7 @@ function notifyRpcControlPlane(): void {
   } catch {
     /* */
   }
+  syncScannerTimersForWorkloads();
 }
 
 export function setRpcWorkloadEnabled(

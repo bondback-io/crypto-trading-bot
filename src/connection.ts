@@ -149,23 +149,32 @@ let migrationResumeWanted = false;
 const TRADING_HARD_FAIL_NEED = 3;
 const TRADING_RECOVER_MS = 45_000;
 const RATE_LIMIT_COOLDOWN_MS = 60_000;
+const RATE_LIMIT_BACKOFF_BASE_MS = 15_000;
+const RATE_LIMIT_BACKOFF_CAP_MS = 180_000;
 const HARD_FAIL_COOLDOWN_MS = 120_000;
 const LATENCY_EWMA_ALPHA = 0.25;
-const WITH_RPC_MAX_ATTEMPTS_CRITICAL = 4;
-const WITH_RPC_MAX_ATTEMPTS_OTHER = 2;
+const WITH_RPC_MAX_ATTEMPTS_CRITICAL = 2;
+const WITH_RPC_MAX_ATTEMPTS_OTHER = 1;
 const HEALTH_PROBE_NORMAL_MS = 120_000;
 const HEALTH_PROBE_FEATURES_OFF_MS = 300_000;
 const HEALTH_TICK_CHECK_MS = 30_000;
+const PER_MIN_BUCKET_CAP = 2_000;
+const CALL_TRAFFIC_CAP = 256;
 
 /** Rolling 60s timestamps for control-plane diagnostics. */
 const probeCallAts: number[] = [];
 const featureCallAts: number[] = [];
 const healthPageRefreshAts: number[] = [];
 
+/** Per-endpoint 429 streak for exponential cooldown. */
+const rateLimitStreakByLabel = new Map<string, number>();
+let last429BackoffLogAt = 0;
+
 function notePerMin(bucket: number[]): void {
   const now = Date.now();
   bucket.push(now);
   while (bucket.length && bucket[0]! < now - 60_000) bucket.shift();
+  while (bucket.length > PER_MIN_BUCKET_CAP) bucket.shift();
 }
 
 function perMin(bucket: number[]): number {
@@ -208,6 +217,20 @@ export function enterRpcIdleIsolation(reason = 'all feature workloads OFF'): voi
     } catch {
       /* */
     }
+    try {
+      const { stopMarketScanner } =
+        require('./marketScanner') as typeof import('./marketScanner');
+      stopMarketScanner();
+    } catch {
+      /* */
+    }
+    try {
+      const { stopZionKolScanner } =
+        require('./zionKolScanner') as typeof import('./zionKolScanner');
+      stopZionKolScanner();
+    } catch {
+      /* */
+    }
     return;
   }
   idleIsolationActive = true;
@@ -216,6 +239,20 @@ export function enterRpcIdleIsolation(reason = 'all feature workloads OFF'): voi
     const { syncMigrationWorkloadGate } =
       require('./migrationListener') as typeof import('./migrationListener');
     syncMigrationWorkloadGate();
+  } catch {
+    /* */
+  }
+  try {
+    const { stopMarketScanner } =
+      require('./marketScanner') as typeof import('./marketScanner');
+    stopMarketScanner();
+  } catch {
+    /* */
+  }
+  try {
+    const { stopZionKolScanner } =
+      require('./zionKolScanner') as typeof import('./zionKolScanner');
+    stopZionKolScanner();
   } catch {
     /* */
   }
@@ -241,6 +278,26 @@ export function exitRpcIdleIsolation(): void {
     const { syncMigrationWorkloadGate } =
       require('./migrationListener') as typeof import('./migrationListener');
     syncMigrationWorkloadGate();
+  } catch {
+    /* */
+  }
+  try {
+    const {
+      isRpcWorkloadEnabled,
+    } = require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (isRpcWorkloadEnabled('market_scanner')) {
+      const { config } = require('./config') as typeof import('./config');
+      if (config.marketScanner?.enabled !== false) {
+        const { startMarketScanner } =
+          require('./marketScanner') as typeof import('./marketScanner');
+        startMarketScanner();
+      }
+    }
+    if (isRpcWorkloadEnabled('zion_scanner')) {
+      const { syncZionKolScannerLifecycle } =
+        require('./zionKolScanner') as typeof import('./zionKolScanner');
+      syncZionKolScannerLifecycle();
+    }
   } catch {
     /* */
   }
@@ -280,6 +337,17 @@ function noteCallTraffic(
       count: 1,
       lastAt: Date.now(),
     });
+  }
+  if (callTraffic.size > CALL_TRAFFIC_CAP) {
+    let oldestKey: string | null = null;
+    let oldestAt = Infinity;
+    for (const [k, row] of callTraffic) {
+      if (row.lastAt < oldestAt) {
+        oldestAt = row.lastAt;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey) callTraffic.delete(oldestKey);
   }
 }
 
@@ -566,7 +634,11 @@ function isHardFailed(st: EndpointState): boolean {
 }
 
 function is429(message: string): boolean {
-  return /429|too many requests|rate.?limit/i.test(message);
+  return (
+    /429|too many requests|rate.?limit/i.test(message) ||
+    /compute units per second/i.test(message) ||
+    /-32429/.test(message)
+  );
 }
 
 function isHardError(message: string): boolean {
@@ -576,6 +648,25 @@ function isHardError(message: string): boolean {
       message
     )
   );
+}
+
+function apply429Backoff(st: EndpointState): number {
+  const label = st.endpoint.label || st.endpoint.url;
+  const streak = (rateLimitStreakByLabel.get(label) || 0) + 1;
+  rateLimitStreakByLabel.set(label, Math.min(8, streak));
+  const cool = Math.min(
+    RATE_LIMIT_BACKOFF_CAP_MS,
+    RATE_LIMIT_BACKOFF_BASE_MS * Math.pow(2, streak - 1)
+  );
+  st.rateLimitedUntil = Date.now() + cool;
+  st.healthy = false;
+  if (Date.now() - last429BackoffLogAt > 15_000) {
+    last429BackoffLogAt = Date.now();
+    console.warn(
+      `[rpc] rpc_429_backoff label=${label} cool=${Math.round(cool / 1000)}s streak=${streak}`
+    );
+  }
+  return cool;
 }
 
 function recordSuccess(st: EndpointState, latencyMs: number): void {
@@ -590,6 +681,7 @@ function recordSuccess(st: EndpointState, latencyMs: number): void {
       : LATENCY_EWMA_ALPHA * latencyMs + (1 - LATENCY_EWMA_ALPHA) * st.latencyMs;
   st.healthy = true;
   st.unhealthySince = null;
+  rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
   if (st.hardFailUntil > 0 && Date.now() >= st.hardFailUntil) {
     st.hardFailUntil = 0;
     st.quarantineStreak = 0;
@@ -604,8 +696,7 @@ function recordFailure(st: EndpointState, message: string): void {
   if (!st.unhealthySince) st.unhealthySince = Date.now();
   if (st.consecutiveFailures >= 2) st.healthy = false;
   if (is429(message)) {
-    st.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
-    st.healthy = false;
+    apply429Backoff(st);
   }
   if (isHardError(message) && st.consecutiveFailures >= 2) {
     st.quarantineStreak += 1;
@@ -805,6 +896,7 @@ async function withRpcInner<T>(
   const r = normalizeRole(role ?? currentRole());
   const critical =
     /trade|migrat|send|confirm|swap|buy|sell/i.test(label) || r === 'primary';
+  // Non-critical: single attempt (no tight 150ms retry storm under 429).
   const maxAttempts = critical
     ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
     : WITH_RPC_MAX_ATTEMPTS_OTHER;
@@ -815,6 +907,25 @@ async function withRpcInner<T>(
     if (!st) {
       lastError = new Error(`No ${r} RPC endpoint`);
       break;
+    }
+
+    // Never hammer a rate-limited / hard-failed endpoint in a tight loop.
+    if (isRateLimited(st) || isHardFailed(st)) {
+      if (critical && r === 'primary' && tradingHop < 1 && emergencyPublic) {
+        noteTradingOutcome(false, '429');
+        st = laneState(r);
+        if (!st || isRateLimited(st) || isHardFailed(st)) {
+          lastError = new Error(
+            `RPC ${st?.endpoint.label || r} rate-limited — cooldown active`
+          );
+          break;
+        }
+      } else {
+        lastError = new Error(
+          `RPC ${st.endpoint.label} rate-limited — cooldown active`
+        );
+        break;
+      }
     }
 
     logger.info('RPC', `start: ${label}`, {
@@ -832,6 +943,7 @@ async function withRpcInner<T>(
         method: 'withRpc',
         featuresOff: featuresOffNow() || idleIsolationActive,
       });
+      notePerMin(featureCallAts);
       const result = await fn(st.connection);
       recordSuccess(st, Date.now() - start);
       if (r === 'primary') noteTradingOutcome(true);
@@ -849,8 +961,20 @@ async function withRpcInner<T>(
         ...errorToMeta(err),
         endpoint: st.endpoint.label,
       });
-      if (!critical && attempt + 1 >= maxAttempts) break;
-      await new Promise((res) => setTimeout(res, 150 * (attempt + 1)));
+      if (is429(message)) {
+        // Wait out a slice of the cooldown — never 150ms tight retry.
+        const waitMs = Math.min(
+          5_000,
+          Math.max(500, (st.rateLimitedUntil || Date.now()) - Date.now())
+        );
+        if (critical && attempt + 1 < maxAttempts) {
+          await new Promise((res) => setTimeout(res, waitMs));
+          continue;
+        }
+        break;
+      }
+      if (!critical || attempt + 1 >= maxAttempts) break;
+      await new Promise((res) => setTimeout(res, 400 * (attempt + 1)));
     }
   }
   throw lastError instanceof Error
@@ -1736,18 +1860,32 @@ export function startRpcHealthMonitor(): void {
       if (lastHealthProbeAt && now - lastHealthProbeAt < due) return;
       lastHealthProbeAt = now;
 
-      // One lightweight getSlot per active lane only.
-      if (tradingPref && !isHardFailed(tradingPref)) {
+      // One lightweight getSlot per active lane only — skip rate-limited endpoints.
+      if (
+        tradingPref &&
+        !isHardFailed(tradingPref) &&
+        !isRateLimited(tradingPref)
+      ) {
         await probeState(tradingPref, 8_000);
       }
-      if (dataPref && !isHardFailed(dataPref)) {
+      if (dataPref && !isHardFailed(dataPref) && !isRateLimited(dataPref)) {
         await probeState(dataPref, 8_000);
       }
-      if (wantBackgroundHot() && backgroundPref && !isHardFailed(backgroundPref)) {
+      if (
+        wantBackgroundHot() &&
+        backgroundPref &&
+        !isHardFailed(backgroundPref) &&
+        !isRateLimited(backgroundPref)
+      ) {
         await probeState(backgroundPref, 8_000);
       }
       // Emergency only when Trading already failed over onto it.
-      if (tradingHop >= 1 && emergencyPublic && !isHardFailed(emergencyPublic)) {
+      if (
+        tradingHop >= 1 &&
+        emergencyPublic &&
+        !isHardFailed(emergencyPublic) &&
+        !isRateLimited(emergencyPublic)
+      ) {
         await probeState(emergencyPublic, 6_000);
       }
       if (tradingHop > 0 && usable(tradingPref)) {

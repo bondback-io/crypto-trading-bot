@@ -18,6 +18,7 @@ import {
   QuietLogGate,
   QuarantineMap,
 } from './httpProviderGate';
+import { trimMapToCap } from './mapCap';
 
 dotenv.config();
 
@@ -510,6 +511,7 @@ const sniperCache = new Map<
   { data: GmgnSniperReport; expiresAt: number }
 >();
 const sniperInflight = new Map<string, Promise<GmgnSniperReport>>();
+const GMGN_CACHE_CAP = 1_000;
 
 export type SniperSensitivity = 'low' | 'medium' | 'high';
 
@@ -1202,6 +1204,7 @@ export async function getWalletActivity(
       data: activity,
       expiresAt: now + cacheTtlMs(),
     });
+    trimMapToCap(activityCache, GMGN_CACHE_CAP);
 
     return activity;
   }
@@ -1216,6 +1219,7 @@ export async function getWalletActivity(
     data: fallback,
     expiresAt: now + Math.min(cacheTtlMs(), 60_000),
   });
+  trimMapToCap(activityCache, GMGN_CACHE_CAP);
   return fallback;
 }
 
@@ -2474,6 +2478,7 @@ export async function getTokenSniperActivity(
         data: report,
         expiresAt: Date.now() + Math.min(cacheTtlMs(), 90_000),
       });
+      trimMapToCap(sniperCache, GMGN_CACHE_CAP);
       return report;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2482,6 +2487,7 @@ export async function getTokenSniperActivity(
         data: fail,
         expiresAt: Date.now() + 20_000,
       });
+      trimMapToCap(sniperCache, GMGN_CACHE_CAP);
       return fail;
     } finally {
       sniperInflight.delete(mint);
