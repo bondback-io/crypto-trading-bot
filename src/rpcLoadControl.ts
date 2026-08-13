@@ -9,7 +9,7 @@
 import { getRpcGateSnapshot, type RpcGateRole } from './rpcGate';
 
 /** Data-lane EWMA below this → treat scanners as healthy for intake protect. */
-export const SIGNALS_RPC_HEALTHY_MS = 180;
+export const SIGNALS_RPC_HEALTHY_MS = 400;
 
 export type RpcLoadControlSnapshot = {
   scannerSlowFactor: number;
@@ -36,6 +36,8 @@ let lastSignals = {
   backgroundLatencyMs: null as number | null,
   tradingOnEmergency: false,
   dataHealthy: true,
+  /** True when Data Main is only in 429 cooldown (not hard-down). */
+  dataRateLimited: false,
   backgroundHealthy: true,
   primaryQueued: 0,
   secondaryIdle: false,
@@ -70,9 +72,10 @@ export function noteBackgroundRpcSkip(_role: RpcGateRole, _feature?: string): vo
 export function isSignalsRpcHealthy(
   secondaryLatencyMs: number | null = lastSignals.dataLatencyMs
 ): boolean {
-  if (!lastSignals.dataHealthy) return false;
+  // Hard-down blocks intake; brief 429 cooldown must not (routing already backs off).
+  if (!lastSignals.dataHealthy && !lastSignals.dataRateLimited) return false;
   if (secondaryLatencyMs == null || !Number.isFinite(secondaryLatencyMs)) {
-    // Unknown latency but healthy flag → allow intake (do not starve on missing EWMA).
+    // Unknown latency but usable / rate-limited → allow intake (do not starve on missing EWMA).
     return true;
   }
   return secondaryLatencyMs < SIGNALS_RPC_HEALTHY_MS;
@@ -118,9 +121,12 @@ function recompute(): void {
   }
 
   // Scanner slowdown only from Data-lane pressure (own lane).
-  if (!lastSignals.dataHealthy || dataSkips > 40 || dataQ > 32 || latSpike) {
+  // Rate-limit cooldown alone is soft (×2), not whole-tick ×3 starve.
+  const dataHardDown =
+    !lastSignals.dataHealthy && !lastSignals.dataRateLimited;
+  if (dataHardDown || dataSkips > 40 || dataQ > 32 || latSpike) {
     level = 'shed';
-    cause = !lastSignals.dataHealthy
+    cause = dataHardDown
       ? 'data lane unhealthy'
       : latSpike
         ? `data latency ${Math.round(dataLat!)}ms`
@@ -131,13 +137,15 @@ function recompute(): void {
     scannerReasons.push(cause);
     reasons.push(cause);
   } else if (
+    lastSignals.dataRateLimited ||
     dataQ > 16 ||
     dataSkips > 20 ||
     (dataLat != null && dataLat >= 1_800)
   ) {
     level = 'busy';
-    cause =
-      dataQ > 16
+    cause = lastSignals.dataRateLimited
+      ? 'data lane rate-limited (soft)'
+      : dataQ > 16
         ? `data queue ${dataQ}`
         : dataSkips > 20
           ? `data skips/min ${dataSkips}`
@@ -235,6 +243,7 @@ export function updateRpcLoadSignals(s: {
   utilityFailover?: boolean;
   tradingOnEmergency?: boolean;
   dataHealthy?: boolean;
+  dataRateLimited?: boolean;
   backgroundHealthy?: boolean;
   primaryQueued?: number;
   secondarySkipped?: number;
@@ -256,6 +265,9 @@ export function updateRpcLoadSignals(s: {
   }
   if (s.dataHealthy !== undefined) {
     lastSignals.dataHealthy = s.dataHealthy;
+  }
+  if (s.dataRateLimited !== undefined) {
+    lastSignals.dataRateLimited = s.dataRateLimited;
   }
   if (s.backgroundHealthy !== undefined) {
     lastSignals.backgroundHealthy = s.backgroundHealthy;

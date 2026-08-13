@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.334',
+    title: 'Unstall Market signal intake (Data-lane gates)',
+    sections: ['execution', 'overview', 'scanners'],
+    items: [
+      'Data lane no longer hard-defers Market/Alpha/Zion on soft queue depth (queued≥2); only when wedged (inFlight at max + deep queue).',
+      'Buy-queue enrich empty-return + mid-enrich yield now match the healthy-RPC poll bypass — Favourites backlog no longer zeroes candidates.',
+      'Defer/adaptive skips use a 4s backoff instead of burning the full poll interval via lastPollAt.',
+      'Brief Alchemy 429 cooldown is soft pressure (not scanner×3 starve); signalsRpcHealthy threshold widened to 400ms EWMA.',
+    ],
+  },
+  {
     version: '1.2.333',
     title: 'Hard-kill logsSubscribe storms (poll-only)',
     sections: ['execution', 'overview'],

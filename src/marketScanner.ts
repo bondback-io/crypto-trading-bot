@@ -167,6 +167,9 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let pollInFlight = false;
 let lastPollAt: number | null = null;
+/** Short backoff after defer/adaptive skip — do not burn full poll interval. */
+let lastDeferAt = 0;
+const DEFER_BACKOFF_MS = 4_000;
 let lastPollMs: number | null = null;
 let lastError: string | null = null;
 let handler: ScannerHandler | null = null;
@@ -1059,9 +1062,10 @@ export async function selectScannerCandidates(
     /* ignore */
   }
 
-  // Yield to wallet buy drain only when the queue is truly backed up
+  // Yield to wallet buy drain only when the queue is truly backed up.
+  // Healthy Data: keep enrich flowing (same as poll bypass) — mid-enrich still yields.
   const qDepth = pendingBuyQueueDepth();
-  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH) {
+  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH && !isSignalsRpcHealthy()) {
     skippedForBuyQueue += 1;
     lastSkipReason = `defer enrich — ${qDepth} wallet buy(s) queued (threshold ${SCANNER_YIELD_QUEUE_DEPTH})`;
     console.log(
@@ -1088,8 +1092,12 @@ export async function selectScannerCandidates(
 
   type Enriched = ScannerCandidate & { launch: LaunchEvent };
   const enriched = await mapPool(prefiltered, enrichConcurrency, async (raw) => {
-    // Re-check queue mid-enrich so wallet path stays priority under real backlog
-    if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return null;
+    // Re-check queue mid-enrich so wallet path stays priority under real backlog.
+    // Healthy Data: only yield at the hard backlog threshold (not depth 4).
+    const midYieldAt = isSignalsRpcHealthy()
+      ? SCANNER_YIELD_QUEUE_DEPTH
+      : SCANNER_MID_ENRICH_YIELD_DEPTH;
+    if (pendingBuyQueueDepth() > midYieldAt) return null;
 
     let event: LaunchEvent = raw;
     try {
@@ -1471,13 +1479,16 @@ export async function runScannerPollOnce(): Promise<number> {
   if (lastPollAt != null && Date.now() - lastPollAt < interval * 0.85) {
     return 0;
   }
+  // Short backoff only — do not stamp lastPollAt (that burned the next ~interval).
+  if (lastDeferAt > 0 && Date.now() - lastDeferAt < DEFER_BACKOFF_MS) {
+    return 0;
+  }
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
     logBackgroundDeferred('Market Scanner', defer.reason || 'Scanners busy');
     lastSkipReason = `delayed — ${defer.reason}`;
     noteSignalBlockedByGate(`defer: ${defer.reason || 'Scanners busy'}`);
-    // Still stamp lastPollAt so the UI does not look "frozen" while deferred.
-    lastPollAt = Date.now();
+    lastDeferAt = Date.now();
     lastPollMs = 0;
     return 0;
   }
@@ -1486,7 +1497,7 @@ export async function runScannerPollOnce(): Promise<number> {
     logBackgroundDeferred('Market Scanner', adapt.reason || 'adaptive');
     lastSkipReason = `delayed — ${adapt.reason}`;
     noteSignalBlockedByGate(`adaptive: ${adapt.reason || 'scanner×'}`);
-    lastPollAt = Date.now();
+    lastDeferAt = Date.now();
     lastPollMs = 0;
     return 0;
   }
@@ -1815,6 +1826,7 @@ export function resetMarketScannerSession(): {
   lastError = null;
   // Allow the next tick immediately (boot has no lastPollAt gate).
   lastPollAt = null;
+  lastDeferAt = 0;
   lastPollMs = null;
   pollInFlight = false;
   if (running) {

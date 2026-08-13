@@ -328,11 +328,31 @@ export function shouldDeferBackgroundForCritical(
       reason: `Trading lane busy (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`,
     };
   }
-  if (kind === 'scanner' && (s.queued >= 2 || s.inFlight >= s.max)) {
-    return {
-      defer: true,
-      reason: `Data lane saturated (inFlight ${s.inFlight}/${s.max}, queue ${s.queued})`,
-    };
+  // Market/Alpha/Zion: never defer on soft queue depth (queued>=2 was starving
+  // intake during normal enrich). Only hard-stop when Data is wedged.
+  if (kind === 'scanner') {
+    let signalsHealthy = false;
+    try {
+      const { isSignalsRpcHealthy } =
+        require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+      signalsHealthy = isSignalsRpcHealthy();
+    } catch {
+      /* */
+    }
+    const deepQueue = Math.max(8, Math.floor(s.max / 2));
+    if (signalsHealthy) {
+      if (s.inFlight >= s.max && s.queued >= deepQueue) {
+        return {
+          defer: true,
+          reason: `Data lane wedged (inFlight ${s.inFlight}/${s.max}, queue ${s.queued})`,
+        };
+      }
+    } else if (s.inFlight >= s.max || s.queued >= deepQueue) {
+      return {
+        defer: true,
+        reason: `Data lane saturated (inFlight ${s.inFlight}/${s.max}, queue ${s.queued})`,
+      };
+    }
   }
   if (kind === 'utility' && (b.queued >= 2 || b.skipsPerMin > 15 || snap.stressed)) {
     return {

@@ -1212,6 +1212,10 @@ export function getRpcStats() {
         : bActive?.latencyMs ?? null,
       tradingOnEmergency,
       dataHealthy: Boolean(dActive?.healthy),
+      // 429 cooldown alone must not starve Market intake (soft pressure only).
+      dataRateLimited: Boolean(
+        dActive && (dActive.rateLimitedUntil || 0) > Date.now()
+      ),
       // Idle Background (workloads OFF) is not unhealthy — do not trigger shed.
       backgroundHealthy: backgroundIdleWhenWorkloadsOff
         ? true
