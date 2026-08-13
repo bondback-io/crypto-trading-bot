@@ -2,6 +2,9 @@
  * Main entry point — bootstraps connection, paper trader, monitor, and dashboard.
  */
 
+// MUST be first: stub Connection.onLogs before any RPC / migration module loads.
+import './disableLogsSubscribe';
+
 import dotenv from 'dotenv';
 import { config, setMode, initWallets, hasPersistedSettings } from './config';
 import { env, logEnvSummary, validateDeploymentEnv } from './env';

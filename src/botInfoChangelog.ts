@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.333',
+    title: 'Hard-kill logsSubscribe storms (poll-only)',
+    sections: ['execution', 'overview'],
+    items: [
+      'Boot stub: Connection.prototype.onLogs / removeOnLogsListener are no-ops (one log: logsSubscribe_globally_disabled) so web3.js cannot open logsSubscribe even if old callers try.',
+      'Migration listener is hard poll-only — ignores MIGRATION_WS; subscribeWebSocket / reconnect / health WS resubscribe are neutralized.',
+      'Stops Render -32601 logsSubscribe retry storms that were still visible after env opt-in gating.',
+    ],
+  },
+  {
     version: '1.2.332',
     title: 'Emergency RPC thrash + heap OOM containment',
     sections: ['execution', 'overview'],
