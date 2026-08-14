@@ -67,7 +67,7 @@ export const PCL_PPP_BY_FAMILY: Record<
   },
   dip_trend: {
     armOfTpPct: 50,
-    givebackOfPeakPct: 36,
+    givebackOfPeakPct: 32,
     minOpenSec: 60,
     minProfitFloorPct: 6,
   },

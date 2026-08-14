@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.348',
+    title: 'Tighten late-chase cap, Grad arms, Dip harvest',
+    sections: ['learning', 'execution', 'microbots', 'overview'],
+    items: [
+      'Late-chase 8% share ceiling now binds under armed reclaim relief; latent late (flag/secondary/ext) cannot soft-pass while late_chase is restricted; buy-time re-gate after stamp; MS DNA hardLateChase aligned true.',
+      'Migration Grad qualitySoftOk no longer soft-arms when all metrics are unknown — requires growth, buy pressure, volume, or holders.',
+      'Dip Buyer harvest: PPP giveback 42→36, earlier partial 12%@35%; PCL dip_trend giveback 36→32 (capture only).',
+    ],
+  },
+  {
     version: '1.2.347',
     title: 'Stop trade sound spam during RPC lag',
     sections: ['alerts', 'overview', 'execution'],

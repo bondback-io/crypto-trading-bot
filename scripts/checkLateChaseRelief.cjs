@@ -53,4 +53,24 @@ if (typeof shouldLimitLateChaseShare !== 'function') {
   }
 }
 
+// Near-level + detector late: relief only when under share ceiling. If share
+// cannot be observed (empty book), hard-skip-all still limits under governed.
+{
+  const r = shouldLimitLateChaseShare({
+    armedWatch: true,
+    entryStyle: 'migration_hold_reclaim',
+    entryStyleSecondary: 'late_chase',
+    lateChase: true,
+    extensionFromLevelPct: 2,
+    profileId: 'migration_sniper',
+  });
+  // Empty trade book → no LC_SHARE_CAP; governed hard-skip still applies when
+  // relief is denied for non-near-level. Near-level (ext 2) may relief → limit false
+  // OR hard-skip if admission baseline forces — either way must not throw.
+  if (r.limit && r.reasonCode === 'LC_ARMED_RECLAIM_RELIEF') {
+    console.error('[checkLateChaseRelief] relief reasonCode should not limit', r);
+    process.exit(1);
+  }
+}
+
 console.log('[checkLateChaseRelief] OK');

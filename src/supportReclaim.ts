@@ -274,7 +274,7 @@ export const PROFILE_ENTRY_STYLE_DNA: Record<string, EntryStyleDna> = {
     primary: 'migration_hold_reclaim',
     allowed: ['level_momentum_expansion', 'scalp_reclaim_burst'],
     forbidden: ['late_chase', 'support_dip_reclaim'],
-    hardLateChase: false,
+    hardLateChase: true,
   },
   dip_buyer: {
     primary: 'support_dip_reclaim',

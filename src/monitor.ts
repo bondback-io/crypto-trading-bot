@@ -562,6 +562,75 @@ function stampEntryStyleOnBuyOpts(
 }
 
 /**
+ * Buy-time re-gate: if stamp flipped lateChaseAtEntry true after Entry Skill
+ * admit, re-check share cap + late_chase governor and abort when blocked.
+ * Returns skip reason or null when buy may proceed.
+ */
+function lateChaseBuyReGateReason(
+  buyOpts: NonNullable<Parameters<typeof executeBuy>[2]>,
+  signal: TradeSignal
+): string | null {
+  try {
+    const late =
+      (buyOpts as { lateChaseAtEntry?: boolean }).lateChaseAtEntry === true;
+    if (!late) return null;
+    const {
+      shouldLimitLateChaseShare,
+      shouldSkipFamilyGovernor,
+      isAdmissionBaselineV235,
+    } = require('./expectancyLift') as typeof import('./expectancyLift');
+    if (isAdmissionBaselineV235()) return null;
+    const entryStyle = String(
+      (buyOpts as { entryStyle?: string }).entryStyle || ''
+    );
+    const secondary = String(
+      (buyOpts as { entryStyleSecondary?: string }).entryStyleSecondary || ''
+    );
+    const armedWatch =
+      (buyOpts as { armedWatch?: boolean }).armedWatch === true ||
+      signal.armedWatch === true;
+    const ext =
+      (signal as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
+      null;
+    const profileId = String(
+      (buyOpts as { tradeProfileId?: string }).tradeProfileId ||
+        signal.candidateTradeProfileId ||
+        ''
+    );
+    const lim = shouldLimitLateChaseShare({
+      lateChase: true,
+      family: 'late_chase',
+      entryStyle,
+      entryStyleSecondary: secondary || 'late_chase',
+      armedWatch,
+      extensionFromLevelPct: ext,
+      profileId,
+    });
+    if (lim.limit) {
+      return lim.reason || 'Late-chase share ceiling (buy re-gate)';
+    }
+    const gov = shouldSkipFamilyGovernor({
+      family: 'late_chase',
+      entryStyle,
+      entryStyleSecondary: secondary || 'late_chase',
+      lateChase: true,
+      armedWatch,
+      profileId,
+      entryPath: (buyOpts as { entryPath?: string }).entryPath,
+      setupWatchFamily: (buyOpts as { setupWatchFamily?: string })
+        .setupWatchFamily,
+      extensionFromLevelPct: ext,
+    });
+    if (gov.skip) {
+      return gov.reason || 'late_chase governor (buy re-gate)';
+    }
+  } catch {
+    /* fail soft — do not block on re-gate errors */
+  }
+  return null;
+}
+
+/**
  * Best-effort MC / holders / volume / dip-pullback before Smart Bot lane fight.
  * Wallet signals often arrive without metrics; without this, minConviction /
  * Min MC Override / Scalper Max MC zero every lane.
@@ -4314,6 +4383,24 @@ async function executeSignalBuy(
   buyOpts.tradeProfileScore = profileAssignment.score;
   buyOpts.tradeProfileReason = profileAssignment.reason;
   stampEntryStyleOnBuyOpts(buyOpts, signal);
+  {
+    const lcAbort = lateChaseBuyReGateReason(buyOpts, signal);
+    if (lcAbort) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, lcAbort);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: lcAbort,
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: lcAbort,
+      });
+      markScannerCooldown(signal.mint, false);
+      console.log(`[monitor] late-chase buy re-gate skip: ${lcAbort}`);
+      return;
+    }
+  }
   const erScan = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, erScan);
 
@@ -4799,6 +4886,14 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
         strategyKind: 'migration',
       })
     );
+    {
+      const lcAbort = lateChaseBuyReGateReason(buyOpts, signal);
+      if (lcAbort) {
+        console.log(`[monitor] late-chase buy re-gate skip (mig): ${lcAbort}`);
+        finishBuy(event.mint, false);
+        return;
+      }
+    }
     applyProfileExitRulesToBuyOpts(buyOpts, profileAssignment.exitRules);
     const sized = applyTradeProfileSizing(
       buyOpts.solAmount ?? sizing.sizeSol,
@@ -5820,6 +5915,19 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   buyOpts.tradeProfileScore = profileAssignment.score;
   buyOpts.tradeProfileReason = profileAssignment.reason;
   stampEntryStyleOnBuyOpts(buyOpts, signal);
+  {
+    const lcAbort = lateChaseBuyReGateReason(buyOpts, signal);
+    if (lcAbort) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, lcAbort);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: lcAbort,
+      });
+      console.log(`[monitor] late-chase buy re-gate skip: ${lcAbort}`);
+      return;
+    }
+  }
   const er = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, er);
   const sized = applyTradeProfileSizing(buyOpts.solAmount ?? sizing.sizeSol, er);
@@ -6252,6 +6360,17 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
       buyOpts.tradeProfileScore = profileAssignment.score;
       buyOpts.tradeProfileReason = profileAssignment.reason;
       stampEntryStyleOnBuyOpts(buyOpts, signal);
+      {
+        const lcAbort = lateChaseBuyReGateReason(buyOpts, signal);
+        if (lcAbort) {
+          console.log(
+            `[monitor] late-chase buy re-gate skip (reentry): ${lcAbort}`
+          );
+          markReEntryAttempt(mint, lcAbort);
+          finishBuy(mint, false);
+          return false;
+        }
+      }
       applyProfileExitRulesToBuyOpts(buyOpts, profileAssignment.exitRules);
       const sized = applyTradeProfileSizing(
         buyOpts.solAmount ?? sizing.sizeSol,
@@ -7517,6 +7636,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         signal.entryStyleHint || ctx.detectedEntryStyle || ''
       );
       const lateChase = ctx.lateChase === true || entryStyle === 'late_chase';
+      const entryStyleSecondary =
+        lateChase && entryStyle !== 'late_chase' ? 'late_chase' : undefined;
       const ext =
         (signal as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
         (ctx as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
@@ -7534,6 +7655,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           tradeProfileScore: passer.score,
           armedWatch,
           entryStyle,
+          entryStyleSecondary,
           lateChase,
           extensionFromLevelPct: ext,
           setupWatchFamily: signal.setupWatchFamily,

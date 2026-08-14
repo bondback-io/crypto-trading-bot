@@ -279,13 +279,8 @@ function qualitySoftOk(input: {
   if (vol != null && vol >= (m.minVolumeH1Usd ?? 1500)) return true;
   const holders = input.holderCount;
   if (holders != null && holders >= (m.minHolders ?? 20)) return true;
-  // Soft-pass when metrics unknown (latency path) — arm only with curve + pump mint
-  return (
-    growth == null &&
-    press == null &&
-    (vol == null || vol <= 0) &&
-    (holders == null || holders <= 0)
-  );
+  // No unknown-metrics soft-pass — stay watching until a real quality metric arrives.
+  return false;
 }
 
 /**

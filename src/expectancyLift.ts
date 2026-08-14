@@ -617,6 +617,7 @@ export interface EntrySelectivityCtx {
   tradeProfileScore?: number | null;
   armedWatch?: boolean;
   entryStyle?: string | null;
+  entryStyleSecondary?: string | null;
   lateChase?: boolean;
   extensionFromLevelPct?: number | null;
   setupWatchFamily?: string | null;
@@ -1655,11 +1656,13 @@ function profileMatchesFamilyNative(
 export function shouldSkipFamilyGovernor(input: {
   family?: string | null;
   entryStyle?: string | null;
+  entryStyleSecondary?: string | null;
   lateChase?: boolean;
   armedWatch?: boolean;
   profileId?: string | null;
   entryPath?: string | null;
   setupWatchFamily?: string | null;
+  extensionFromLevelPct?: number | null;
 }): {
   skip: boolean;
   reason?: string;
@@ -1689,6 +1692,16 @@ export function shouldSkipFamilyGovernor(input: {
     input.armedWatch === true ||
     String(input.entryPath || '').toLowerCase() === 'armed_trigger' ||
     String(input.setupWatchFamily || '').toLowerCase() === 'grad';
+  const secondaryLate = /late.?chase/i.test(
+    String(input.entryStyleSecondary || '')
+  );
+  const extLate =
+    input.extensionFromLevelPct != null &&
+    Number.isFinite(Number(input.extensionFromLevelPct)) &&
+    Number(input.extensionFromLevelPct) >= LATE_CHASE_EXT_PCT_LIM;
+  // Latent late (flag / secondary / ext) must not soft-pass as remapped reclaim.
+  const latentLate =
+    input.lateChase === true || secondaryLate || extLate;
 
   // MS disc harden: when migration_hold_reclaim is down_ranked/restricted,
   // only Grad/armed MS soft-passes — unarmed disc hard-skips.
@@ -1708,6 +1721,20 @@ export function shouldSkipFamilyGovernor(input: {
   }
 
   const state = getFamilyGovernorState(effective);
+  // Latent late always consults late_chase governor — remapped reclaim must not
+  // soft-pass while late_chase itself is restricted.
+  if (latentLate) {
+    const lcState = getFamilyGovernorState('late_chase');
+    if (lcState === 'restricted') {
+      return {
+        skip: true,
+        reason: `Expectancy governor: late_chase restricted`,
+        state: lcState,
+        family: 'late_chase',
+        reasonCode: 'LC_GOV_RESTRICTED',
+      };
+    }
+  }
   if (state === 'restricted') {
     // Hard-skip late_chase when restricted
     if (effective === 'late_chase') {
@@ -1962,19 +1989,6 @@ export function shouldLimitLateChaseShare(input: {
   extensionFromLevelPct?: number | null;
   profileId?: string | null;
 }): { limit: boolean; reason?: string; reasonCode?: string } {
-  // Armed reclaim does not hard-skip and does not count toward ceiling
-  if (
-    isArmedReclaimRelief({
-      armedWatch: input.armedWatch,
-      entryStyle: input.entryStyle,
-      entryStyleSecondary: input.entryStyleSecondary,
-      extensionFromLevelPct: input.extensionFromLevelPct,
-      lateChase: input.lateChase,
-      profileId: input.profileId,
-    })
-  ) {
-    return { limit: false, reasonCode: 'LC_ARMED_RECLAIM_RELIEF' };
-  }
   const isLate =
     input.lateChase === true ||
     String(input.entryStyle || '').toLowerCase() === 'late_chase' ||
@@ -1984,6 +1998,33 @@ export function shouldLimitLateChaseShare(input: {
       Number(input.extensionFromLevelPct) >= LATE_CHASE_EXT_PCT_LIM) ||
     normalizeExpectancyFamily(input.family || input.entryStyle) ===
       'late_chase';
+  const wouldRelief = isArmedReclaimRelief({
+    armedWatch: input.armedWatch,
+    entryStyle: input.entryStyle,
+    entryStyleSecondary: input.entryStyleSecondary,
+    extensionFromLevelPct: input.extensionFromLevelPct,
+    lateChase: input.lateChase,
+    profileId: input.profileId,
+  });
+
+  // Portfolio 8% ceiling always binds for late candidates — even under armed
+  // reclaim relief (measured late was bypassing LC_SHARE_CAP via relief-first).
+  if (isLate) {
+    const mix = getRecentMixShares(50, { lateChaseCeilingWindow: true });
+    if (mix.total >= 20 && mix.lateChaseShare > LATE_CHASE_MAX_SHARE) {
+      return {
+        limit: true,
+        reason: `Late-chase share ${(mix.lateChaseShare * 100).toFixed(0)}% > ${(LATE_CHASE_MAX_SHARE * 100).toFixed(0)}% ceiling`,
+        reasonCode: 'LC_SHARE_CAP',
+      };
+    }
+  }
+
+  // Near-level armed reclaim may relief only when share is still under ceiling
+  // (or candidate is not late). Cap check above already blocked late+over-cap.
+  if (wouldRelief) {
+    return { limit: false, reasonCode: 'LC_ARMED_RECLAIM_RELIEF' };
+  }
   if (!isLate) return { limit: false };
 
   // Temporary disable countdown (1.2.257)
@@ -2006,14 +2047,6 @@ export function shouldLimitLateChaseShare(input: {
       limit: true,
       reason: `Entry Skill: hard-skip late_chase primary (${input.profileId || 'any'})`,
       reasonCode: 'LC_HARD_SKIP_ALL',
-    };
-  }
-  const mix = getRecentMixShares(50, { lateChaseCeilingWindow: true });
-  if (mix.total >= 20 && mix.lateChaseShare > LATE_CHASE_MAX_SHARE) {
-    return {
-      limit: true,
-      reason: `Late-chase share ${(mix.lateChaseShare * 100).toFixed(0)}% > ${(LATE_CHASE_MAX_SHARE * 100).toFixed(0)}% ceiling`,
-      reasonCode: 'LC_SHARE_CAP',
     };
   }
   return { limit: false };
@@ -2834,7 +2867,11 @@ export function evaluateEntrySelectivity(
   const baselineV235 = isAdmissionBaselineV235();
   const armedWatch = ctx.armedWatch === true;
   const entryStyle = String(ctx.entryStyle || '');
-  const lateChase = ctx.lateChase === true || entryStyle === 'late_chase';
+  const secondaryStyle = String(ctx.entryStyleSecondary || '');
+  const lateChase =
+    ctx.lateChase === true ||
+    entryStyle === 'late_chase' ||
+    /late.?chase/i.test(secondaryStyle);
   const entryPath =
     ctx.entryPath || (armedWatch ? 'armed_trigger' : 'discretionary');
   const reasons: string[] = [];
@@ -2850,7 +2887,7 @@ export function evaluateEntrySelectivity(
     setupWatchFamily: ctx.setupWatchFamily,
   });
   const passerLate = family === 'late_chase';
-  // Broad late (boolean OR family) — closes flag-only bypass of Entry Skill hard-skip
+  // Broad late (boolean OR family OR secondary) — closes flag-only bypass
   const broadLate = lateChase || passerLate;
   if (lateChase && !passerLate) reasonCodes.push('LC_FLAG_ONLY');
 
@@ -2859,6 +2896,7 @@ export function evaluateEntrySelectivity(
       lateChase: broadLate,
       family: broadLate ? 'late_chase' : family,
       entryStyle: broadLate ? 'late_chase' : entryStyle,
+      entryStyleSecondary: secondaryStyle || ctx.entryStyleSecondary,
       armedWatch,
       extensionFromLevelPct: ctx.extensionFromLevelPct,
       profileId: ctx.profileId,
@@ -2915,11 +2953,13 @@ export function evaluateEntrySelectivity(
   const gov = shouldSkipFamilyGovernor({
     family,
     entryStyle: broadLate ? 'late_chase' : entryStyle,
+    entryStyleSecondary: secondaryStyle || ctx.entryStyleSecondary,
     lateChase: broadLate,
     armedWatch,
     profileId: ctx.profileId,
     entryPath,
     setupWatchFamily: ctx.setupWatchFamily,
+    extensionFromLevelPct: ctx.extensionFromLevelPct,
   });
   if (!baselineV235 && gov.softPassNative) {
     chips.push('gov_soft_pass');
