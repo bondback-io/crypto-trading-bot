@@ -10868,7 +10868,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card rpc-health-panel" id="rpc-health-panel">
-          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="UI-assigned Main / Emergency per Trading, Data, Background lane. Exclusive inventory ownership. Hosts only — API keys never shown."></span></div>
+          <div class="section-title" style="margin-bottom:0.35rem">RPC Health <span class="tip" tabindex="0" data-tip="Lane ms is probe getSlot RTT (fair compare). Call EWMA (send+confirm) shows separately when it diverges — that is not host RTT. UI-assigned Main / Emergency per Trading, Data, Background. Hosts only — API keys never shown."></span></div>
           <div class="rpc-health-chips" id="rpc-health-chips" aria-label="RPC summary">
             <span class="rpc-health-chip" id="rpc-chip-all">All healthy</span>
             <span class="rpc-health-chip" id="rpc-chip-degraded">Degraded</span>
@@ -26929,10 +26929,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               const down = lane.healthy === false || c.state === 'down';
               const busy = c.state === 'busy' || c.state === 'congested';
               pill.classList.add(down ? 'is-down' : busy ? 'is-degraded' : 'is-healthy', 'is-active');
+              const probeMs =
+                lane.probeLatencyMs != null
+                  ? lane.probeLatencyMs
+                  : lane.latencyMs;
+              const callMs = lane.callLatencyMs != null ? lane.callLatencyMs : null;
               pill.textContent =
                 (lane.label || '—') +
-                (lane.latencyMs != null ? ' · ' + Math.round(lane.latencyMs) + 'ms' : '') +
+                (probeMs != null ? ' · ' + Math.round(probeMs) + 'ms' : '') +
                 (lane.successRate != null ? ' · ' + lane.successRate + '%' : '');
+              if (
+                cong &&
+                callMs != null &&
+                probeMs != null &&
+                Math.abs(callMs - probeMs) >= 80
+              ) {
+                // Secondary note applied below via cong — stash for details.
+                lane._callEwmaNote = 'call EWMA ' + Math.round(callMs) + 'ms';
+              }
             }
           }
           if (meta) {
@@ -26944,10 +26958,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const details = Array.isArray(c.details) && c.details.length
               ? ' · ' + c.details.slice(0, 2).join(' · ')
               : '';
+            const callNote =
+              lane && lane._callEwmaNote ? ' · ' + lane._callEwmaNote : '';
             cong.textContent =
               (c.state || '—') +
               (c.cause ? ': ' + c.cause : '') +
-              details;
+              details +
+              callNote;
           }
         }
         paintLane('trading', t, 'assign Trading Main');

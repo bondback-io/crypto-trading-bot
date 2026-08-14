@@ -95,8 +95,13 @@ async function main() {
     }
   })();
 
+  let uploadResult2 = null;
+  let uploadMs2 = null;
+
   if (!OBSERVE_ONLY) {
-    await sleep(1500);
+    const settleMs = Math.max(0, Number(process.env.PROBE_SETTLE_MS) || 12_000);
+    console.log(`[github-upload-cost] settling ${settleMs}ms before uploads…`);
+    await sleep(settleMs);
     // Default dry=1 so local probes without token still measure export cost.
     // Set DRY_UPLOAD=0 to exercise a real GitHub PUT.
     const useDry = process.env.DRY_UPLOAD !== '0';
@@ -104,7 +109,7 @@ async function main() {
       ? `${BASE_URL}/api/site-backup/github/upload?dry=1`
       : `${BASE_URL}/api/site-backup/github/upload`;
     console.log(
-      `[github-upload-cost] triggering POST ${uploadUrl.replace(BASE_URL, '')} …`
+      `[github-upload-cost] triggering POST ${uploadUrl.replace(BASE_URL, '')} (1/2) …`
     );
     const t0 = Date.now();
     uploadResult = await timedFetch(uploadUrl, {
@@ -112,13 +117,35 @@ async function main() {
     });
     uploadMs = Date.now() - t0;
     console.log(
-      `[github-upload-cost] upload HTTP ${uploadResult.status} in ${uploadMs}ms ` +
+      `[github-upload-cost] upload1 HTTP ${uploadResult.status} in ${uploadMs}ms ` +
         `ok=${uploadResult.ok}` +
         (uploadResult.body && uploadResult.body.dryRun ? ' dryRun' : '') +
+        (uploadResult.body && uploadResult.body.skippedFingerprint
+          ? ' skippedFingerprint'
+          : '') +
         (uploadResult.body && uploadResult.body.skippedUnchanged
           ? ' skippedUnchanged'
           : '') +
         (uploadResult.err ? ` err=${uploadResult.err}` : '')
+    );
+
+    // Second pass should hit fingerprint short-circuit (no full rebuild).
+    await sleep(200);
+    console.log(
+      `[github-upload-cost] triggering POST ${uploadUrl.replace(BASE_URL, '')} (2/2 fingerprint) …`
+    );
+    const t1 = Date.now();
+    uploadResult2 = await timedFetch(uploadUrl, { method: 'POST' });
+    uploadMs2 = Date.now() - t1;
+    console.log(
+      `[github-upload-cost] upload2 HTTP ${uploadResult2.status} in ${uploadMs2}ms ` +
+        `ok=${uploadResult2.ok}` +
+        (uploadResult2.body && uploadResult2.body.skippedFingerprint
+          ? ' skippedFingerprint'
+          : '') +
+        (uploadResult2.body && uploadResult2.body.phases
+          ? ` totalMs=${uploadResult2.body.phases.totalMs}`
+          : '')
     );
   }
 
@@ -140,6 +167,16 @@ async function main() {
     (uploadResult && uploadResult.body && uploadResult.body.phases) ||
     null;
 
+  const phases2 =
+    (uploadResult2 && uploadResult2.body && uploadResult2.body.phases) || null;
+  const fingerprintSkipOk = Boolean(
+    uploadResult2 &&
+      uploadResult2.body &&
+      uploadResult2.body.skippedFingerprint &&
+      (uploadMs2 == null ||
+        uploadMs2 < Math.max(150, (uploadMs || 500) * 0.5))
+  );
+
   const report = {
     kind: 'github-upload-cost',
     baseUrl: BASE_URL,
@@ -147,28 +184,46 @@ async function main() {
     endedAt: Date.now(),
     observeOnly: OBSERVE_ONLY,
     uploadMs,
+    uploadMs2,
     uploadHttpStatus: uploadResult?.status ?? null,
     uploadOk: uploadResult?.ok ?? null,
     uploadBodySummary: uploadResult?.body
       ? {
           skippedUnchanged: Boolean(uploadResult.body.skippedUnchanged),
+          skippedFingerprint: Boolean(uploadResult.body.skippedFingerprint),
           coalesced: Boolean(uploadResult.body.coalesced),
           bytes: uploadResult.body.bytes ?? null,
           fileCount: uploadResult.body.fileCount ?? null,
           reason: uploadResult.body.reason ?? null,
         }
       : null,
+    upload2Summary: uploadResult2?.body
+      ? {
+          skippedFingerprint: Boolean(uploadResult2.body.skippedFingerprint),
+          totalMs: uploadResult2.body.phases?.totalMs ?? null,
+        }
+      : null,
     phases,
+    phases2,
     summary: {
       healthSamples: healthSamples.length,
       healthMsP95: p95,
       peakHealthMs: peak,
-      verdict:
-        peak != null && peak >= 2000
-          ? 'STALL: /health peaked >=2s during window — export still blocking hard'
-          : peak != null && peak >= 500
-            ? 'SOFT: /health peaked >=500ms — improved but watch phases'
-            : 'OK: /health stayed responsive during upload window',
+      fingerprintSkipOk,
+      verdict: (() => {
+        if (peak != null && peak >= 2000) {
+          return 'STALL: /health peaked >=2s during window — export still blocking hard';
+        }
+        if (!OBSERVE_ONLY && !fingerprintSkipOk) {
+          return 'FINGERPRINT_MISS: second dry upload did not short-circuit';
+        }
+        if (peak != null && peak >= 500) {
+          return 'SOFT: /health peaked >=500ms — improved but watch phases';
+        }
+        return fingerprintSkipOk
+          ? 'OK: responsive + fingerprint skip on 2nd upload'
+          : 'OK: /health stayed responsive during upload window';
+      })(),
     },
     healthSamples,
   };
@@ -183,8 +238,10 @@ async function main() {
 
   console.log('[github-upload-cost] ── summary ──');
   console.log(`  health p95=${p95}ms peak=${peak}ms`);
-  console.log(`  uploadMs=${uploadMs}`);
+  console.log(`  uploadMs=${uploadMs} uploadMs2=${uploadMs2}`);
+  console.log(`  fingerprintSkipOk=${fingerprintSkipOk}`);
   console.log(`  phases=${JSON.stringify(phases)}`);
+  console.log(`  phases2=${JSON.stringify(phases2)}`);
   console.log(`  verdict: ${report.summary.verdict}`);
   console.log(`[github-upload-cost] wrote ${outPath}`);
 }

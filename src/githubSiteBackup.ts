@@ -13,6 +13,7 @@ import {
 } from './dataDir';
 import {
   buildSiteBackupForGithubUpload,
+  computeDataDirBackupFingerprint,
   isValidSiteBackup,
   restoreSiteBackup,
   saveSiteBackup,
@@ -66,6 +67,8 @@ export interface GithubBackupSettings {
   uploadBackoffMs: number | null;
   /** sha256 of backup.files — skip GitHub PUT when unchanged. */
   lastUploadContentSha: string | null;
+  /** mtime+size fingerprint of discoverable DATA_DIR JSON — skip full export when unchanged. */
+  lastUploadDirFingerprint: string | null;
   /** Blob SHA of the last successful auto-import (or manual GitHub restore). */
   lastAutoImportSha: string | null;
   lastAutoImportAtMs: number | null;
@@ -82,6 +85,7 @@ export type GithubUploadPhaseTimings = {
   putMs: number;
   totalMs: number;
   skippedUnchanged?: boolean;
+  skippedFingerprint?: boolean;
   coalesced?: boolean;
   reason: string;
   at: number;
@@ -108,6 +112,7 @@ export interface GithubBackupStatus {
   consecutiveFailures: number;
   uploadBackoffMs: number | null;
   lastUploadContentSha: string | null;
+  lastUploadDirFingerprint: string | null;
   lastUploadPhases: GithubUploadPhaseTimings | null;
   sameRepoAsDeployHint: boolean;
   lastAutoImportSha: string | null;
@@ -180,6 +185,7 @@ function defaultSettings(): GithubBackupSettings {
     consecutiveFailures: 0,
     uploadBackoffMs: null,
     lastUploadContentSha: null,
+    lastUploadDirFingerprint: null,
     lastAutoImportSha: null,
     lastAutoImportAtMs: null,
     lastAutoImportOk: null,
@@ -261,6 +267,10 @@ export function loadGithubBackupSettings(): GithubBackupSettings {
     lastUploadContentSha:
       raw.lastUploadContentSha != null
         ? String(raw.lastUploadContentSha)
+        : null,
+    lastUploadDirFingerprint:
+      raw.lastUploadDirFingerprint != null
+        ? String(raw.lastUploadDirFingerprint)
         : null,
     lastAutoImportSha:
       raw.lastAutoImportSha != null ? String(raw.lastAutoImportSha) : null,
@@ -373,6 +383,7 @@ export function getGithubBackupStatus(): GithubBackupStatus {
     consecutiveFailures: s.consecutiveFailures || 0,
     uploadBackoffMs: s.uploadBackoffMs,
     lastUploadContentSha: s.lastUploadContentSha,
+    lastUploadDirFingerprint: s.lastUploadDirFingerprint,
     lastUploadPhases,
     sameRepoAsDeployHint: (() => {
       const repo = (target.repo || '').toLowerCase();
@@ -483,6 +494,7 @@ export async function uploadSiteBackupToGithub(opts?: {
   sha: string;
   reason: string;
   skippedUnchanged?: boolean;
+  skippedFingerprint?: boolean;
   coalesced?: boolean;
   dryRun?: boolean;
   phases?: GithubUploadPhaseTimings;
@@ -538,6 +550,60 @@ export async function uploadSiteBackupToGithub(opts?: {
       }
     }
 
+    // Cheap short-circuit: stat-only fingerprint before multi-MB rebuild.
+    const dirFp = computeDataDirBackupFingerprint();
+    const canSkipExport =
+      Boolean(s.lastUploadDirFingerprint) &&
+      s.lastUploadDirFingerprint === dirFp &&
+      (Boolean(s.lastRemoteSha) || dryRun);
+    if (canSkipExport) {
+      const phases: GithubUploadPhaseTimings = {
+        reconcileMs: 0,
+        buildMs: 0,
+        writeMs: 0,
+        encodeMs: 0,
+        putMs: 0,
+        totalMs: Date.now() - totalT0,
+        skippedFingerprint: true,
+        reason,
+        at: Date.now(),
+      };
+      lastUploadPhases = phases;
+      if (!dryRun) {
+        const next: GithubBackupSettings = {
+          ...s,
+          lastUploadAtMs: Date.now(),
+          lastUploadOk: true,
+          lastUploadError: null,
+          lastUploadDirFingerprint: dirFp,
+          consecutiveFailures: 0,
+          uploadBackoffMs: null,
+          lastAutoImportSha: s.lastRemoteSha || s.lastAutoImportSha,
+        };
+        saveGithubBackupSettings(next);
+      } else {
+        // Persist fingerprint so a second dry probe also short-circuits.
+        s.lastUploadDirFingerprint = dirFp;
+        saveGithubBackupSettings(s);
+      }
+      console.log(
+        `[github-backup] skipped fingerprint unchanged ` +
+          `(${reason}, total=${phases.totalMs}ms)`
+      );
+      return {
+        ok: true,
+        exportedAt: new Date().toISOString(),
+        fileCount: 0,
+        bytes: s.lastUploadBytes || 0,
+        path: target.path,
+        sha: s.lastRemoteSha || '',
+        reason,
+        skippedFingerprint: true,
+        dryRun: dryRun || undefined,
+        phases,
+      };
+    }
+
     const exported = await buildSiteBackupForGithubUpload();
     const { backup, compactJson, contentSha256, bytes, phases: exportPhases } =
       exported;
@@ -552,9 +618,13 @@ export async function uploadSiteBackupToGithub(opts?: {
         reason: `dry:${reason}`,
         at: Date.now(),
       };
-      // Touch encode cost of base64 without network.
       void content.length;
       lastUploadPhases = phases;
+      // Fingerprint after export so concurrent writers during build don't poison skip.
+      s.lastUploadDirFingerprint = computeDataDirBackupFingerprint();
+      s.lastUploadContentSha = contentSha256;
+      s.lastUploadBytes = bytes;
+      saveGithubBackupSettings(s);
       console.log(
         `[github-backup] dry-run export ok (${bytes} bytes, ${backup.fileCount} files) ` +
           `phases reconcile=${phases.reconcileMs}ms build=${phases.buildMs}ms ` +
@@ -595,9 +665,9 @@ export async function uploadSiteBackupToGithub(opts?: {
         lastUploadError: null,
         lastUploadBytes: bytes,
         lastUploadContentSha: contentSha256,
+        lastUploadDirFingerprint: computeDataDirBackupFingerprint(),
         consecutiveFailures: 0,
         uploadBackoffMs: null,
-        // Local state matches what was already pushed — treat as imported.
         lastAutoImportSha: s.lastRemoteSha || s.lastAutoImportSha,
       };
       saveGithubBackupSettings(next);
@@ -677,6 +747,7 @@ export async function uploadSiteBackupToGithub(opts?: {
       lastUploadBytes: bytes,
       lastRemoteSha: newSha || null,
       lastUploadContentSha: contentSha256,
+      lastUploadDirFingerprint: computeDataDirBackupFingerprint(),
       // Local state *is* what was just pushed — boot auto-import should skip.
       lastAutoImportSha: newSha || s.lastAutoImportSha,
       consecutiveFailures: 0,

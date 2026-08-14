@@ -773,8 +773,12 @@ export function createServer(): express.Application {
           return getLatestSiteBackupMeta();
         })(),
         message: result.dryRun
-          ? `Dry-run export (${result.bytes} bytes, ${result.fileCount} files) — no GitHub PUT`
-          : result.skippedUnchanged
+          ? result.skippedFingerprint
+            ? `Dry-run fingerprint skip (${result.phases?.totalMs ?? 0}ms) — no export`
+            : `Dry-run export (${result.bytes} bytes, ${result.fileCount} files) — no GitHub PUT`
+          : result.skippedFingerprint
+            ? `Skipped fingerprint unchanged (${result.phases?.totalMs ?? 0}ms) — no export/PUT`
+            : result.skippedUnchanged
             ? `Skipped unchanged GitHub PUT (${result.bytes} bytes, ${result.fileCount} files)`
             : result.coalesced
               ? 'Upload coalesced — another upload was already in progress'

@@ -45,12 +45,25 @@ const BACKUP_DENY_SUFFIXES = [
   '.log',
   '.tmp',
   '.bak',
+  '.ndjson',
 ];
 
 const BACKUP_DENY_NAME_PARTS = [
   'calibrateRiskRecipes',
   'recipeCalibration',
+  'rpc-boot-timeline',
+  'rpc-cold-boot',
+  'rpc-idle',
+  'github-upload-cost',
+  'github-backup-lag',
+  'stats-report-probe',
+  'rpc-workload',
 ];
+
+/** Truncate high-churn rings in backup payload only (disk originals untouched). */
+const BACKUP_RING_CAP = 200;
+const BACKUP_CAP_BASENAMES = new Set(['lane-outcomes.json']);
+const BACKUP_CAP_PREFIXES = ['profile-learning/', 'learning/'];
 
 export interface SiteBackup {
   version: typeof SITE_BACKUP_VERSION;
@@ -128,6 +141,36 @@ function readJsonIfPresent(relPath: string): unknown | null {
   }
 }
 
+/** Cap bulky/high-churn structures for backup export only. */
+function maybeCapBackupPayload(rel: string, data: unknown): unknown {
+  const cleaned = toPosixRel(rel);
+  const base = path.posix.basename(cleaned);
+  const shouldCap =
+    BACKUP_CAP_BASENAMES.has(base) ||
+    BACKUP_CAP_PREFIXES.some(
+      (p) => cleaned === p.replace(/\/$/, '') || cleaned.startsWith(p)
+    );
+  if (!shouldCap || data == null) return data;
+
+  if (Array.isArray(data)) {
+    return data.length > BACKUP_RING_CAP
+      ? data.slice(-BACKUP_RING_CAP)
+      : data;
+  }
+  if (typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...obj };
+    for (const key of ['episodes', 'outcomes', 'events', 'rows', 'history']) {
+      const v = out[key];
+      if (Array.isArray(v) && v.length > BACKUP_RING_CAP) {
+        out[key] = v.slice(-BACKUP_RING_CAP);
+      }
+    }
+    return out;
+  }
+  return data;
+}
+
 /**
  * Recursively collect every parseable *.json under DATA_DIR except denylist.
  */
@@ -157,11 +200,61 @@ function collectDiscoverableJsonFiles(
       if (!name.toLowerCase().endsWith('.json')) continue;
       if (isDeniedBackupRelPath(rel)) continue;
       const data = readJsonIfPresent(rel);
-      if (data != null) files[toPosixRel(rel)] = data;
+      if (data != null) {
+        files[toPosixRel(rel)] = maybeCapBackupPayload(rel, data);
+      }
     }
   };
 
   walk(root, '');
+}
+
+/**
+ * Cheap DATA_DIR fingerprint (mtime+size+path only — no read/parse).
+ * Used to skip full GitHub export when nothing discoverable changed.
+ */
+export function computeDataDirBackupFingerprint(): string {
+  ensureDataDir();
+  const root = getDataDir();
+  const rows: string[] = [];
+  if (!fs.existsSync(root)) {
+    return crypto.createHash('sha256').update('empty').digest('hex');
+  }
+
+  const walk = (absDir: string, relDir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      const name = ent.name;
+      const rel = relDir ? `${relDir}/${name}` : name;
+      const abs = path.join(absDir, name);
+      if (ent.isDirectory()) {
+        if (isDeniedBackupRelPath(rel + '/')) continue;
+        walk(abs, rel);
+        continue;
+      }
+      if (!ent.isFile()) continue;
+      if (!name.toLowerCase().endsWith('.json')) continue;
+      if (isDeniedBackupRelPath(rel)) continue;
+      // Settings file is rewritten on every upload attempt — exclude from fingerprint
+      // or the short-circuit can never hit on the next tick.
+      if (toPosixRel(rel) === 'github-backup-settings.json') continue;
+      try {
+        const st = fs.statSync(abs);
+        rows.push(`${toPosixRel(rel)}|${st.size}|${Math.trunc(st.mtimeMs)}`);
+      } catch {
+        /* skip */
+      }
+    }
+  };
+
+  walk(root, '');
+  rows.sort();
+  return crypto.createHash('sha256').update(rows.join('\n')).digest('hex');
 }
 
 export function buildSiteBackup(): SiteBackup {

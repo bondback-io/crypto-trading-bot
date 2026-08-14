@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.341',
+    title: 'Hourly backup fingerprint skip + honest RPC probe latency',
+    sections: ['execution', 'overview', 'backup'],
+    items: [
+      'GitHub upload: DATA_DIR mtime/size fingerprint short-circuits full export+PUT when unchanged (fixes hourly rebuild stalls that still caused Deploy skipped only when content actually changed).',
+      'Backup payload: deny probe/ndjson artifacts; cap lane-outcomes / learning rings to last 200 entries in export only.',
+      'RPC Health: probeLatencyMs (getSlot) is primary lane ms; call EWMA shown separately when it diverges (send+confirm no longer looks like host RTT).',
+      'Live Sim marks: floor 5s when ≥3 open positions (cuts Dex/Jupiter storm). githubBackupUploadCostProbe verifies 2nd dry upload fingerprint skip.',
+    ],
+  },
+  {
     version: '1.2.340',
     title: 'GitHub upload stall fix (yielded compact export)',
     sections: ['execution', 'overview', 'backup'],

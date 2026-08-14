@@ -69,6 +69,8 @@ export interface RpcEndpointStats {
   role: NormalizedRpcRole | 'utility';
   healthy: boolean;
   latencyMs: number | null;
+  /** Probe-only getSlot EWMA (preferred for Health display). */
+  probeLatencyMs?: number | null;
   lastCallLatencyMs?: number | null;
   successCount: number;
   failureCount: number;
@@ -91,7 +93,10 @@ interface EndpointState {
   endpoint: RpcEndpoint;
   connection: Connection;
   healthy: boolean;
+  /** Mixed EWMA (probes + withRpc wall-clock — can be confirm-poisoned). */
   latencyMs: number | null;
+  /** Probe-only EWMA from health getSlot (fair lane RTT). */
+  probeLatencyMs: number | null;
   lastCallLatencyMs: number | null;
   successCount: number;
   failureCount: number;
@@ -462,6 +467,7 @@ function makeState(ep: RpcEndpointRef, emergencyOnly = false): EndpointState {
     connection: makeConnection(ep.url),
     healthy: true,
     latencyMs: null,
+    probeLatencyMs: null,
     lastCallLatencyMs: null,
     successCount: 0,
     failureCount: 0,
@@ -803,7 +809,11 @@ function apply429Backoff(st: EndpointState): number {
   return cool;
 }
 
-function recordSuccess(st: EndpointState, latencyMs: number): void {
+function recordSuccess(
+  st: EndpointState,
+  latencyMs: number,
+  opts?: { fromProbe?: boolean }
+): void {
   st.successCount += 1;
   st.consecutiveFailures = 0;
   st.lastCheckedAt = Date.now();
@@ -813,6 +823,13 @@ function recordSuccess(st: EndpointState, latencyMs: number): void {
     st.latencyMs == null
       ? latencyMs
       : LATENCY_EWMA_ALPHA * latencyMs + (1 - LATENCY_EWMA_ALPHA) * st.latencyMs;
+  if (opts?.fromProbe) {
+    st.probeLatencyMs =
+      st.probeLatencyMs == null
+        ? latencyMs
+        : LATENCY_EWMA_ALPHA * latencyMs +
+          (1 - LATENCY_EWMA_ALPHA) * st.probeLatencyMs;
+  }
   st.healthy = true;
   st.unhealthySince = null;
   rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
@@ -1017,7 +1034,7 @@ async function probeState(
       ),
     ]);
     const ms = Date.now() - start;
-    recordSuccess(st, ms);
+    recordSuccess(st, ms, { fromProbe: true });
     lastHealthProbeSuccessAt = Date.now();
     try {
       const { noteBootTimeline } =
@@ -1179,6 +1196,7 @@ function toEndpointStats(
     role,
     healthy: st.healthy && !isRateLimited(st) && !isHardFailed(st),
     latencyMs: st.latencyMs,
+    probeLatencyMs: st.probeLatencyMs,
     lastCallLatencyMs: st.lastCallLatencyMs,
     successCount: st.successCount,
     failureCount: st.failureCount,
@@ -1599,7 +1617,9 @@ export function getRpcStats() {
         label: tActive?.endpoint.label || (tradingPref ? tradingPref.endpoint.label : 'none'),
         url: tActive?.endpoint.url || '',
         healthy: tradingPref ? Boolean(tActive?.healthy) : false,
-        latencyMs: tActive?.latencyMs ?? null,
+        latencyMs: tActive?.probeLatencyMs ?? tActive?.latencyMs ?? null,
+        callLatencyMs: tActive?.latencyMs ?? null,
+        probeLatencyMs: tActive?.probeLatencyMs ?? null,
         successRate: successRate(tActive),
         active: Boolean(tradingPref || emergencyPublic),
         mainId: asg.trading.main,
@@ -1617,7 +1637,9 @@ export function getRpcStats() {
         label: dActive?.endpoint.label || (dataPref ? dataPref.endpoint.label : 'none'),
         url: dActive?.endpoint.url || '',
         healthy: dataPref ? Boolean(dActive?.healthy) : false,
-        latencyMs: dActive?.latencyMs ?? null,
+        latencyMs: dActive?.probeLatencyMs ?? dActive?.latencyMs ?? null,
+        callLatencyMs: dActive?.latencyMs ?? null,
+        probeLatencyMs: dActive?.probeLatencyMs ?? null,
         successRate: successRate(dActive),
         active: Boolean(dataPref || dataFailover),
         mainId: asg.data.main,
@@ -1641,7 +1663,13 @@ export function getRpcStats() {
           : Boolean(bActive?.healthy),
         latencyMs: backgroundIdleWhenWorkloadsOff
           ? null
+          : bActive?.probeLatencyMs ?? bActive?.latencyMs ?? null,
+        callLatencyMs: backgroundIdleWhenWorkloadsOff
+          ? null
           : bActive?.latencyMs ?? null,
+        probeLatencyMs: backgroundIdleWhenWorkloadsOff
+          ? null
+          : bActive?.probeLatencyMs ?? null,
         successRate: backgroundIdleWhenWorkloadsOff
           ? 100
           : successRate(bActive),
@@ -1666,7 +1694,9 @@ export function getRpcStats() {
         })(),
         url: eActive?.endpoint.url || '',
         healthy: Boolean(eActive?.healthy),
-        latencyMs: eActive?.latencyMs ?? null,
+        latencyMs: eActive?.probeLatencyMs ?? eActive?.latencyMs ?? null,
+        callLatencyMs: eActive?.latencyMs ?? null,
+        probeLatencyMs: eActive?.probeLatencyMs ?? null,
         successRate: successRate(eActive),
         active: tradingOnEmergency || dataOnEmergency || backgroundOnEmergency,
         congestion: emergCong,
