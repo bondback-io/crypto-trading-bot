@@ -26447,6 +26447,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!_bootSnap) return;
       paintBootOverlayFromSnap(_bootSnap, Date.now() - _bootSnapAt);
     }
+
+    function tickDashboardResetTimer() {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       paintDashboardResetTimer();
       paintBootOverlayTick();

@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.352',
+    title: 'Restore dashboard script after boot-overlay timer break',
+    sections: ['overview'],
+    items: [
+      'Re-wrap tickDashboardResetTimer so the Overview boot overlay no longer leaves a JS parse error that stalls the whole dashboard.',
+    ],
+  },
+  {
     version: '1.2.351',
     title: 'Boot overlay, signal intake, and heavy-job anti-collision',
     sections: ['overview', 'scanners', 'execution', 'backup'],
