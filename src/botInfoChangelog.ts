@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.344',
+    title: 'Stop ~2 min post-deploy scheduled backup lag',
+    sections: ['backup', 'execution', 'overview'],
+    items: [
+      'After auto-import (or sha-unchanged skip), mark upload schedule satisfied so stripped lastUploadAtMs cannot make the hourly tick due ASAP.',
+      'nextDueAtMs: null upload clock with lastAutoImportAtMs/lastRemoteSha waits a full interval instead of due-now.',
+      'First scheduled upload gated to process uptime ≥180s; Live Sim keeps 5s marks until uptime ≥180s as well.',
+    ],
+  },
+  {
     version: '1.2.343',
     title: 'Stop post-deploy Deploy-skipped backup storm',
     sections: ['backup', 'execution', 'overview'],

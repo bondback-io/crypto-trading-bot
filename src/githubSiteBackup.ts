@@ -494,6 +494,8 @@ function scheduleIntervalMs(interval: GithubBackupInterval): number | null {
  * Success → lastUploadAtMs + interval.
  * Sticky failure → lastUploadAttemptAtMs + min(interval, exponential backoff)
  * so failed ticks do not re-run multi-MB export every 60s forever.
+ * Null lastUploadAtMs after stripped restore: use lastAutoImportAtMs / remote
+ * presence so we never treat "just imported" as due ASAP.
  */
 function nextDueAtMs(s: GithubBackupSettings): number | null {
   if (s.interval === 'none') return null;
@@ -508,8 +510,48 @@ function nextDueAtMs(s: GithubBackupSettings): number | null {
     return s.lastUploadAttemptAtMs + Math.min(scheduleMs, backoff);
   }
 
-  if (!s.lastUploadAtMs) return Date.now(); // due ASAP when never uploaded
-  return s.lastUploadAtMs + scheduleMs;
+  if (s.lastUploadAtMs != null) {
+    return s.lastUploadAtMs + scheduleMs;
+  }
+
+  // Stripped export / ephemeral restore left no upload clock.
+  if (s.lastAutoImportAtMs != null) {
+    return s.lastAutoImportAtMs + scheduleMs;
+  }
+  if (s.lastRemoteSha) {
+    return Date.now() + scheduleMs;
+  }
+  return Date.now(); // truly never synced
+}
+
+/**
+ * After auto-import (or sha-unchanged skip), disk matches remote — do not
+ * immediately schedule a full export/PUT (post-deploy Deploy-skipped storm).
+ */
+export function markGithubBackupScheduleSatisfied(
+  reason: string,
+  opts?: { remoteSha?: string | null }
+): void {
+  const s = loadGithubBackupSettings();
+  const now = Date.now();
+  s.lastUploadAtMs = now;
+  s.lastUploadOk = true;
+  s.lastUploadError = null;
+  s.consecutiveFailures = 0;
+  s.uploadBackoffMs = null;
+  if (opts?.remoteSha) {
+    s.lastRemoteSha = String(opts.remoteSha);
+  }
+  try {
+    s.lastUploadDirFingerprint = computeDataDirBackupFingerprint();
+  } catch {
+    /* optional */
+  }
+  saveGithubBackupSettings(s);
+  const intervalLabel = s.interval === 'none' ? 'n/a' : s.interval;
+  console.log(
+    `[github-backup] schedule satisfied after auto-import (${reason}) — next due in ${intervalLabel}`
+  );
 }
 
 function computeFailureBackoffMs(
@@ -1074,6 +1116,7 @@ export async function restoreSiteBackupFromGithub(): Promise<{
   next.lastAutoImportError = null;
   next.lastAutoImportSkippedReason = null;
   saveGithubBackupSettings(next);
+  markGithubBackupScheduleSatisfied('restore-ok', { remoteSha: sha });
 
   return {
     ok: true,
@@ -1237,6 +1280,9 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
         `[github-backup] auto-import skipped: sha unchanged (${remoteSha.slice(0, 7)})`
       );
       recordAutoImportSkip('sha unchanged');
+      markGithubBackupScheduleSatisfied('sha-unchanged', {
+        remoteSha,
+      });
       return { skipped: true, reason: 'sha unchanged', sha: remoteSha };
     }
     if (forced.force && lastImported && lastImported === remoteSha) {
@@ -1281,8 +1327,8 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
   }
 }
 
-/** After boot-seq stage 5 + deferred GitHub auto-import (≥70s). */
-const SCHEDULED_UPLOAD_MIN_UPTIME_MS = 75_000;
+/** After Live Sim warmup / boot settle (auto-import stays at ~70s). */
+const SCHEDULED_UPLOAD_MIN_UPTIME_MS = 180_000;
 
 async function scheduledTick(): Promise<void> {
   try {

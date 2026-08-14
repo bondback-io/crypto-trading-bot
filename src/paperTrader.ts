@@ -5720,14 +5720,23 @@ export class PaperTrader {
       const scheduleNext = (): void => {
         if (this.autoCheckStartedAt <= 0) return;
         const elapsed = Date.now() - this.autoCheckStartedAt;
+        let processWarm = false;
+        try {
+          const { getProcessUptimeMs } =
+            require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+          processWarm = getProcessUptimeMs() < 180_000;
+        } catch {
+          /* optional */
+        }
         const openCount = this.positions?.size ?? 0;
         // Under load: never drop below 5s marks (cuts Dex/Jupiter storm).
         const loadedFloor =
           openCount >= 3 ? LIVE_SIM_WARMUP_INTERVAL_MS : steadyInterval;
-        const nextMs =
-          elapsed < LIVE_SIM_WARMUP_MS
-            ? LIVE_SIM_WARMUP_INTERVAL_MS
-            : Math.max(loadedFloor, steadyInterval);
+        const inWarmup =
+          elapsed < LIVE_SIM_WARMUP_MS || processWarm;
+        const nextMs = inWarmup
+          ? LIVE_SIM_WARMUP_INTERVAL_MS
+          : Math.max(loadedFloor, steadyInterval);
         this.checkTimer = setTimeout(() => {
           if (this.autoCheckStartedAt <= 0) return;
           runTick();
@@ -5737,7 +5746,7 @@ export class PaperTrader {
       runTick();
       scheduleNext();
       console.log(
-        `[paper] Auto position check started (warmup ${LIVE_SIM_WARMUP_INTERVAL_MS}ms for ${LIVE_SIM_WARMUP_MS / 1000}s, then ${steadyInterval}ms; ≥3 open → ${LIVE_SIM_WARMUP_INTERVAL_MS}ms floor) [LIVE SIM]`
+        `[paper] Auto position check started (warmup ${LIVE_SIM_WARMUP_INTERVAL_MS}ms for ${LIVE_SIM_WARMUP_MS / 1000}s or until process uptime≥180s, then ${steadyInterval}ms; ≥3 open → ${LIVE_SIM_WARMUP_INTERVAL_MS}ms floor) [LIVE SIM]`
       );
       return;
     }
