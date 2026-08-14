@@ -130,6 +130,12 @@ let uploadInFlight = false;
 /** When an upload is requested while another runs, coalesce one follow-up. */
 let pendingUploadReason: string | null = null;
 let autoImportInFlight = false;
+/**
+ * Boot auto-import finished (ok/skip/fail). Scheduled uploads must wait so they
+ * cannot race import at uptime≥180s and create a post-deploy Deploy-skipped PUT.
+ */
+let bootGithubImportSettled = false;
+let firstScheduledTickArmed = false;
 /** One-shot: after empty DATA_DIR / bundled seed, do not skip on sha match. */
 let forceAutoImportOnce = false;
 let forceAutoImportReason: string | null = null;
@@ -141,6 +147,8 @@ const CRITICAL_UPLOAD_MIN_GAP_MS = 60_000;
 const CRITICAL_DEFER_IF_DUE_WITHIN_MS = 15 * 60 * 1000;
 /** First failure wait before another full export+PUT (was every 60s forever). */
 const FAILURE_BACKOFF_BASE_MS = 5 * 60 * 1000;
+/** After BootPhase background + auto-import settle. */
+const SCHEDULED_UPLOAD_MIN_UPTIME_MS = 180_000;
 let lastCriticalUploadStartedAt = 0;
 
 let lastUploadPhases: GithubUploadPhaseTimings | null = null;
@@ -1211,9 +1219,46 @@ export function queueGithubBackupUploadAfterCriticalSave(reason: string): void {
 }
 
 /**
+ * Mark boot auto-import done and arm the first scheduled upload check.
+ * Safe to call multiple times.
+ */
+export function markBootGithubImportSettled(reason = 'boot'): void {
+  const wasSettled = bootGithubImportSettled;
+  bootGithubImportSettled = true;
+  if (!wasSettled) {
+    console.log(
+      `[github-backup] boot auto-import settled (${reason}) — scheduled uploads may run after uptime>=${SCHEDULED_UPLOAD_MIN_UPTIME_MS / 1000}s`
+    );
+  }
+  armFirstScheduledTickAfterSettle();
+}
+
+function armFirstScheduledTickAfterSettle(): void {
+  if (firstScheduledTickArmed) return;
+  if (!bootGithubImportSettled) return;
+  firstScheduledTickArmed = true;
+  try {
+    const { getProcessUptimeMs } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    const waitMs = Math.max(
+      0,
+      SCHEDULED_UPLOAD_MIN_UPTIME_MS - getProcessUptimeMs()
+    );
+    setTimeout(() => {
+      void scheduledTick();
+    }, waitMs);
+  } catch {
+    setTimeout(() => {
+      void scheduledTick();
+    }, SCHEDULED_UPLOAD_MIN_UPTIME_MS);
+  }
+}
+
+/**
  * Boot/restart auto-import: restore from GitHub when enabled and remote SHA
  * differs from lastAutoImportSha. Never throws — logs and returns.
  * Call AFTER app.listen so the dashboard stays available.
+ * Always settles the boot-import flag so scheduled uploads cannot race.
  */
 export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
   skipped: boolean;
@@ -1235,6 +1280,7 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
         (forced.force ? ` (force was armed: ${forced.reason})` : '')
     );
     recordAutoImportSkip('disabled');
+    markBootGithubImportSettled('disabled');
     return { skipped: true, reason: 'disabled' };
   }
   const target = resolveGithubBackupTarget(s);
@@ -1243,6 +1289,7 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
       '[github-backup] auto-import skipped: not fully configured (token/owner/repo)'
     );
     recordAutoImportSkip('not configured');
+    markBootGithubImportSettled('not configured');
     return { skipped: true, reason: 'not configured' };
   }
 
@@ -1324,13 +1371,12 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
     return { skipped: false, ok: false, error: msg };
   } finally {
     autoImportInFlight = false;
+    markBootGithubImportSettled('auto-import-finished');
   }
 }
 
-/** After Live Sim warmup / boot settle (auto-import stays at ~70s). */
-const SCHEDULED_UPLOAD_MIN_UPTIME_MS = 180_000;
-
 async function scheduledTick(): Promise<void> {
+  if (!bootGithubImportSettled) return;
   try {
     const { getProcessUptimeMs } =
       require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
@@ -1361,32 +1407,17 @@ export function startGithubSiteBackupScheduler(): void {
   tickTimer = setInterval(() => {
     void scheduledTick();
   }, TICK_MS);
-  // First check after auto-import window so restore cannot clobber then re-upload.
-  const armFirstTick = (): void => {
-    try {
-      const { getProcessUptimeMs } =
-        require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
-      const waitMs = Math.max(
-        0,
-        SCHEDULED_UPLOAD_MIN_UPTIME_MS - getProcessUptimeMs()
-      );
-      setTimeout(() => {
-        void scheduledTick();
-      }, waitMs);
-    } catch {
-      setTimeout(() => {
-        void scheduledTick();
-      }, SCHEDULED_UPLOAD_MIN_UPTIME_MS);
-    }
-  };
-  armFirstTick();
+  // First opportunistic tick is armed only after markBootGithubImportSettled().
+  if (bootGithubImportSettled) {
+    armFirstScheduledTickAfterSettle();
+  }
   const st = getGithubBackupStatus();
   console.log(
     `[github-backup] scheduler on · interval=${st.interval}` +
       (st.configured
         ? ` · ${st.owner}/${st.repo}/${st.path}`
         : ' · not fully configured') +
-      ` · first scheduled check at uptime>=${SCHEDULED_UPLOAD_MIN_UPTIME_MS / 1000}s`
+      ` · scheduled uploads after boot-import settle + uptime>=${SCHEDULED_UPLOAD_MIN_UPTIME_MS / 1000}s`
   );
 }
 

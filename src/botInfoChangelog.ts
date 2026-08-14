@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.346',
+    title: 'No post-deploy scheduled backup before auto-import settles',
+    sections: ['backup', 'execution', 'overview'],
+    items: [
+      'Scheduled GitHub uploads wait until boot auto-import has settled (ok/skip/fail) so they cannot race at uptime≥180s and create a Deploy-skipped site-backup right after a release.',
+      'First scheduled tick is armed only after settle; Deploy skipped for [skip render] backups still does not restart the process.',
+    ],
+  },
+  {
     version: '1.2.345',
     title: 'Post-deploy BootPhase priority (Trading → Scanners → Background)',
     sections: ['execution', 'overview', 'scanners', 'backup'],

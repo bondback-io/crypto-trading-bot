@@ -8666,6 +8666,13 @@ export function startServer(port?: number, host?: string): void {
             '[github-backup] auto-import boot hook failed:',
             err instanceof Error ? err.message : err
           );
+          try {
+            const { markBootGithubImportSettled } =
+              require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+            markBootGithubImportSettled('boot-hook-failed');
+          } catch {
+            /* ignore */
+          }
         }
       })();
     }, 2500);
