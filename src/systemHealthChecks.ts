@@ -170,19 +170,47 @@ function checkTrading(): HealthIssue[] {
     }
 
     if (entry.state === 'off' && !ms.risk?.halted) {
-      const fundsBlock = entry.blockers.some((b) =>
-        /fund|wallet|rpc unhealthy|monitor not running/i.test(b)
-      );
-      out.push({
-        key: 'entry_path_off',
-        area: 'trading',
-        severity: fundsBlock ? 'action' : 'watch',
-        title: entry.label || 'Entries off',
-        detail: entry.blockers.slice(0, 4).join('; ') || entry.detail || '',
-        recommendation:
-          'Fix blockers (RPC, funds, engines, max positions) before expecting new opens.',
-        sustainedHint: fundsBlock,
-      });
+      const monitorBooting =
+        /booting/i.test(entry.label || '') ||
+        entry.blockers.some((b) => /monitor not running/i.test(b));
+      let uptimeBooting = false;
+      try {
+        const { getProcessUptimeMs } =
+          require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+        uptimeBooting = getProcessUptimeMs() < 30_000;
+      } catch {
+        /* optional */
+      }
+      if (monitorBooting && (uptimeBooting || /booting/i.test(entry.label || ''))) {
+        out.push({
+          key: 'entry_path_booting',
+          area: 'trading',
+          severity: 'watch',
+          title: 'Entries: booting',
+          detail:
+            entry.detail ||
+            entry.blockers.slice(0, 4).join('; ') ||
+            'Monitor not started yet',
+          recommendation: 'Wait for boot-seq stage 3 (monitor start)',
+          sustainedHint: false,
+        });
+      } else {
+        const fundsBlock = entry.blockers.some((b) =>
+          /fund|wallet|rpc unhealthy/i.test(b)
+        );
+        out.push({
+          key: 'entry_path_off',
+          area: 'trading',
+          severity: fundsBlock ? 'action' : 'watch',
+          title: entry.label || 'Entries off',
+          detail: entry.blockers.slice(0, 4).join('; ') || entry.detail || '',
+          recommendation:
+            entry.blockers.some((b) => /rpc unhealthy/i.test(b))
+              ? 'Fix blockers (RPC, funds, engines, max positions) before expecting new opens.'
+              : 'Fix blockers (funds, engines, max positions) before expecting new opens.',
+          sustainedHint: fundsBlock,
+        });
+      }
     } else if (entry.state === 'paused' || ms.paused) {
       out.push({
         key: 'monitor_paused',

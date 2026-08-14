@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.342',
+    title: 'Post-deploy RPC lag + Zion Entries boot copy',
+    sections: ['execution', 'overview', 'zion', 'backup', 'scanners'],
+    items: [
+      'GitHub auto-import deferred until process uptime ≥70s (after boot-seq stage 5) so sync restore no longer stalls Live Sim marks + first scanner poll.',
+      'Site restore/reload yields the event loop every N file writes and between major reload steps so /health + getSlot probes can answer mid-import.',
+      'Zion Entries: during early boot (monitor not running / uptime <30s) shows “Entries: booting — Wait for boot-seq stage 3” instead of false RPC blame.',
+      'Live Sim warmup 5s marks for first 180s; Market Scanner first poll delayed to 12s when uptime <90s.',
+    ],
+  },
+  {
     version: '1.2.341',
     title: 'Hourly backup fingerprint skip + honest RPC probe latency',
     sections: ['execution', 'overview', 'backup'],

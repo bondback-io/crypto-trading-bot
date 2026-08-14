@@ -1822,9 +1822,17 @@ export function startMarketScanner(): void {
     `[marketScanner] Starting — poll every ${cfg.pollIntervalMs}ms, ` +
       `lookback ${cfg.lookbackHours}h, minScore ${cfg.minRankScore}`
   );
+  let firstPollDelayMs = 2_000;
+  try {
+    const { getProcessUptimeMs } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    if (getProcessUptimeMs() < 90_000) firstPollDelayMs = 12_000;
+  } catch {
+    /* optional */
+  }
   setTimeout(() => {
     void runScannerPollOnce();
-  }, 2_000);
+  }, firstPollDelayMs);
   // Wake timer only — runScannerPollOnce enforces ≥~22s adaptive spacing.
   // Keep wake ≤ pollInterval so we do not busy-wake every 5s under load.
   const wakeMs = Math.max(

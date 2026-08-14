@@ -258,8 +258,8 @@ const HARD_SL_MAX_GAP_SLIPPAGE = 0.04; // 4% beyond SL threshold
 
 /** Live Simulation polls marks more often so SL/TP see gaps sooner. */
 const LIVE_SIM_CHECK_INTERVAL_MS = 2_000;
-/** First 120s after auto-check start: slower marks to cut post-deploy RPC overlap. */
-const LIVE_SIM_WARMUP_MS = 120_000;
+/** First 180s after auto-check start: slower marks to cut post-deploy RPC overlap. */
+const LIVE_SIM_WARMUP_MS = 180_000;
 const LIVE_SIM_WARMUP_INTERVAL_MS = 5_000;
 
 export type PositionStatus = 'open' | 'closed' | 'partial';

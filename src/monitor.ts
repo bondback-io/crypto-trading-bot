@@ -8833,10 +8833,20 @@ export function getEntryPathLightStatus(): {
 
   if (!running) {
     blockers.push('monitor not running');
+    let bootEarly = false;
+    try {
+      const { getProcessUptimeMs } =
+        require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+      bootEarly = getProcessUptimeMs() < 30_000;
+    } catch {
+      /* optional */
+    }
     return {
       state: 'off',
-      label: 'Entries: off',
-      detail: skipHint,
+      label: bootEarly ? 'Entries: booting' : 'Entries: off',
+      detail: bootEarly
+        ? 'Wait for boot-seq stage 3 (monitor start)'
+        : skipHint,
       blockers,
     };
   }

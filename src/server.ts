@@ -577,7 +577,7 @@ export function createServer(): express.Application {
     }
   });
 
-  app.post('/api/site-backup/restore', (req: Request, res: Response) => {
+  app.post('/api/site-backup/restore', async (req: Request, res: Response) => {
     try {
       const {
         restoreSiteBackup,
@@ -601,9 +601,9 @@ export function createServer(): express.Application {
           });
           return;
         }
-        result = restoreSiteBackup(payload as import('./siteBackup').SiteBackup);
+        result = await restoreSiteBackup(payload as import('./siteBackup').SiteBackup);
       } else {
-        result = restoreSiteBackup('latest');
+        result = await restoreSiteBackup('latest');
       }
       res.json({
         ok: true,
@@ -633,7 +633,7 @@ export function createServer(): express.Application {
    * Restore from an uploaded site-backup JSON (body = backup object, or { backup }).
    * Uses the global 25mb JSON limit so ~1MB+ downloads succeed.
    */
-  app.post('/api/site-backup/restore-upload', (req: Request, res: Response) => {
+  app.post('/api/site-backup/restore-upload', async (req: Request, res: Response) => {
     try {
       const {
         restoreSiteBackup,
@@ -667,7 +667,7 @@ export function createServer(): express.Application {
         });
         return;
       }
-      const result = restoreSiteBackup(
+      const result = await restoreSiteBackup(
         payload as import('./siteBackup').SiteBackup
       );
       res.json({
@@ -8614,10 +8614,24 @@ export function startServer(port?: number, host?: string): void {
       );
     }
 
-    // Auto-import after listen so a slow GitHub restore cannot block the dashboard.
+    // Defer GitHub auto-import until after boot-seq stage 5 (~70s) so sync
+    // restore does not stall Live Sim marks + first scanner poll (+ stage 1 probes).
+    const GITHUB_AUTO_IMPORT_MIN_UPTIME_MS = 70_000;
     setTimeout(() => {
       void (async () => {
         try {
+          const { getProcessUptimeMs } =
+            require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+          const waitMs = Math.max(
+            0,
+            GITHUB_AUTO_IMPORT_MIN_UPTIME_MS - getProcessUptimeMs()
+          );
+          if (waitMs > 0) {
+            console.log(
+              `[boot-seq] deferred github auto-import until uptime>=70s (wait ${Math.round(waitMs / 1000)}s)`
+            );
+            await new Promise<void>((r) => setTimeout(r, waitMs));
+          }
           const { maybeAutoImportGithubBackupOnBoot } =
             require('./githubSiteBackup') as typeof import('./githubSiteBackup');
           await maybeAutoImportGithubBackupOnBoot();

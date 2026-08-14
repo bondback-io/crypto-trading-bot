@@ -402,7 +402,7 @@ function safeRelPath(rel: string): string | null {
   return cleaned;
 }
 
-function writeBackupFiles(backup: SiteBackup): string[] {
+function writeBackupFilesSync(backup: SiteBackup): string[] {
   ensureDataDir();
   const written: string[] = [];
   for (const [rel, data] of Object.entries(backup.files || {})) {
@@ -419,10 +419,30 @@ function writeBackupFiles(backup: SiteBackup): string[] {
   return written;
 }
 
+/** Yield every N file writes so /health + RPC probes can answer mid-import. */
+async function writeBackupFiles(backup: SiteBackup): Promise<string[]> {
+  ensureDataDir();
+  const written: string[] = [];
+  let n = 0;
+  for (const [rel, data] of Object.entries(backup.files || {})) {
+    const safe = safeRelPath(rel);
+    if (!safe) continue;
+    if (isDeniedBackupRelPath(safe)) continue;
+    const full = dataFile(...safe.split('/'));
+    const dir = path.dirname(full);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    atomicWriteJson(full, data);
+    written.push(safe);
+    if (++n % 8 === 0) await yieldEventLoop();
+  }
+  return written;
+}
+
 /**
  * Hot-reload in-memory runtime from DATA_DIR after files were restored.
+ * Sync path used by pre-listen boot seed; async wrapper yields for GitHub/API restore.
  */
-export function reloadPersistedRuntimeFromDisk(): void {
+function reloadPersistedRuntimeFromDiskSync(): void {
   const {
     applyPersistedSettings,
     initWallets,
@@ -475,14 +495,74 @@ export function reloadPersistedRuntimeFromDisk(): void {
   }
 }
 
-export function restoreSiteBackup(
+/**
+ * Hot-reload with yields between major steps so event-loop stalls do not inflate lane RTT.
+ */
+export async function reloadPersistedRuntimeFromDisk(): Promise<void> {
+  const {
+    applyPersistedSettings,
+    initWallets,
+    initTradingWallets,
+  } = require('./config') as typeof import('./config');
+  const { clearDashboardStateCache } =
+    require('./dashboardState') as typeof import('./dashboardState');
+  const { applyTradeProfilesUserStateOnBoot } =
+    require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+  const { ensureTradeProfilesInitialized } =
+    require('./tradeProfiles') as typeof import('./tradeProfiles');
+  const { paperTrader } =
+    require('./paperTrader') as typeof import('./paperTrader');
+  const { invalidateDashboardNotificationsCache } =
+    require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+  const { invalidateProfileLearningEpisodeCache } =
+    require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+  const { invalidateLearningSaveCache } =
+    require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+  const { reloadZionOffersFromDisk } =
+    require('./zion') as typeof import('./zion');
+  const { invalidateLaneOutcomesCache } =
+    require('./laneOutcomes') as typeof import('./laneOutcomes');
+  const { invalidateScannerOutcomesCache } =
+    require('./scannerOutcomes') as typeof import('./scannerOutcomes');
+  const { invalidateFastProfileRecoveryCache } =
+    require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+  const { invalidateDipBuyerRecoveryCache } =
+    require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+
+  clearDashboardStateCache();
+  invalidateDashboardNotificationsCache();
+  invalidateProfileLearningEpisodeCache();
+  invalidateLearningSaveCache();
+  invalidateLaneOutcomesCache();
+  invalidateScannerOutcomesCache();
+  invalidateFastProfileRecoveryCache();
+  invalidateDipBuyerRecoveryCache();
+  reloadZionOffersFromDisk();
+  await yieldEventLoop();
+
+  applyPersistedSettings({ replaceStrategyToggles: true });
+  await yieldEventLoop();
+  initWallets();
+  initTradingWallets();
+  await yieldEventLoop();
+  ensureTradeProfilesInitialized();
+  applyTradeProfilesUserStateOnBoot();
+  await yieldEventLoop();
+  try {
+    paperTrader.loadPersistedState();
+  } catch {
+    /* paper mode may differ */
+  }
+}
+
+export async function restoreSiteBackup(
   source: SiteBackup | 'latest'
-): {
+): Promise<{
   ok: true;
   written: string[];
   exportedAt: string;
   fileCount: number;
-} {
+}> {
   const backup =
     source === 'latest' ? loadLatestSiteBackup() : source;
   if (!backup || !isValidSiteBackup(backup)) {
@@ -492,8 +572,9 @@ export function restoreSiteBackup(
         : 'Invalid backup: expected kind=site-backup version=1'
     );
   }
-  const written = writeBackupFiles(backup);
-  reloadPersistedRuntimeFromDisk();
+  const written = await writeBackupFiles(backup);
+  await yieldEventLoop();
+  await reloadPersistedRuntimeFromDisk();
   try {
     const { pushDashboardNotification } =
       require('./dashboardNotifications') as typeof import('./dashboardNotifications');
@@ -710,16 +791,19 @@ export function maybeSeedDataDirFromBundledSiteBackup(): {
       ` · exportedAt=${backup.exportedAt} · files=${backup.fileCount || Object.keys(backup.files || {}).length}`
   );
   try {
-    const result = restoreSiteBackup(backup);
+    // Pre-listen: sync write+reload (no HTTP yet). Runtime GitHub/API restores
+    // use async restoreSiteBackup with event-loop yields.
+    const written = writeBackupFilesSync(backup);
+    reloadPersistedRuntimeFromDiskSync();
     console.log(
-      `[boot-seed] seeded ok · ${result.fileCount} file(s) · ${result.exportedAt}`
+      `[boot-seed] seeded ok · ${written.length} file(s) · ${backup.exportedAt}`
     );
     return {
       seeded: true,
       reason: 'seeded from bundled backup',
-      written: result.written,
-      exportedAt: result.exportedAt,
-      fileCount: result.fileCount,
+      written,
+      exportedAt: backup.exportedAt,
+      fileCount: written.length,
       path: bundledPath,
     };
   } catch (err) {

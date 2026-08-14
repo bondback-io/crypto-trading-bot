@@ -889,7 +889,7 @@ export async function restoreSiteBackupFromGithub(): Promise<{
   const backup = parsed as SiteBackup;
   // Keep a local copy so Load Last Backup works after a GitHub restore
   saveSiteBackup(backup);
-  const result = restoreSiteBackup(backup);
+  const result = await restoreSiteBackup(backup);
 
   const sha = get.json.sha ? String(get.json.sha) : null;
   const next = loadGithubBackupSettings();
