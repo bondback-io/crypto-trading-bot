@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.354',
+    title: 'Unblock signal intake — polls no longer wait on heavy jobs',
+    sections: ['scanners', 'copy', 'overview'],
+    items: [
+      'Market Scanner, Zion, and Favourites admission polls no longer take the HEAVY mutex; fanout (metrics/GitHub/migration) still defers instead of dropping candidates.',
+      'Favourites no longer skips a tick because Trading has a single in-flight RPC — only a wedged Trading queue or recovered EWMA ≥700ms yields.',
+      'Busy on-chain holder fanout soft-passes anti-rug holder gates instead of FILTER_SKIP metrics unavailable. Trade selectivity (16/hr) is unchanged.',
+    ],
+  },
+  {
     version: '1.2.353',
     title: 'Dismiss Overview boot overlay early',
     sections: ['overview'],

@@ -828,19 +828,6 @@ export async function runZionScannerPollOnce(): Promise<void> {
     return;
   }
   pollInFlight = true;
-  let heavyHeld = false;
-  try {
-    const { tryAcquireHeavyJob } =
-      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
-    if (!tryAcquireHeavyJob('zion_scanner')) {
-      pollInFlight = false;
-      lastError = 'heavy job deferred — data lane busy';
-      return;
-    }
-    heavyHeld = true;
-  } catch {
-    /* */
-  }
   try {
     if (!universe.length) loadUniverseCache();
     await refreshUniverse(false);
@@ -862,15 +849,6 @@ export async function runZionScannerPollOnce(): Promise<void> {
     }
   } finally {
     pollInFlight = false;
-    if (heavyHeld) {
-      try {
-        const { releaseHeavyJob } =
-          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
-        releaseHeavyJob('zion_scanner');
-      } catch {
-        /* */
-      }
-    }
   }
 }
 

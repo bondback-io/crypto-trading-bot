@@ -135,6 +135,7 @@ import {
   getCachedTokenMetrics,
   summarizeTokenMetrics,
   clearTokenMetricsCache,
+  isOnChainMetricsDeferred,
 } from './tokenMetrics';
 import {
   evaluateAntiRug,
@@ -2166,6 +2167,15 @@ async function pollAllWallets(): Promise<void> {
     logBackgroundDeferred('Favourites wallet watch', deferCrit.reason || 'Critical busy', {
       pollIntervalMs: config.pollIntervalMs,
     });
+    try {
+      const { noteSignalBlockedByGate } =
+        require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+      noteSignalBlockedByGate(
+        `favourites_defer: ${deferCrit.reason || 'Trading wedged'}`
+      );
+    } catch {
+      /* */
+    }
     return;
   }
   try {
@@ -2175,6 +2185,13 @@ async function pollAllWallets(): Promise<void> {
         'background_rpc_throttled',
         { pollIntervalMs: config.pollIntervalMs }
       );
+      try {
+        const { noteSignalBlockedByGate } =
+          require('./signalIntakeStats') as typeof import('./signalIntakeStats');
+        noteSignalBlockedByGate('favourites_shed: background_rpc_throttled');
+      } catch {
+        /* */
+      }
       return;
     }
   } catch {
@@ -2182,18 +2199,6 @@ async function pollAllWallets(): Promise<void> {
   }
 
   pollInFlight = true;
-  let heavyHeld = false;
-  try {
-    const { tryAcquireHeavyJob } =
-      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
-    if (!tryAcquireHeavyJob('favourites')) {
-      pollInFlight = false;
-      return;
-    }
-    heavyHeld = true;
-  } catch {
-    /* */
-  }
   const cycleStarted = Date.now();
   try {
     // Soft-yield if buy queue already deep — don't block the whole cycle on enrich
@@ -2341,15 +2346,6 @@ async function pollAllWallets(): Promise<void> {
     }
   } finally {
     pollInFlight = false;
-    if (heavyHeld) {
-      try {
-        const { releaseHeavyJob } =
-          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
-        releaseHeavyJob('favourites');
-      } catch {
-        /* */
-      }
-    }
   }
 }
 
@@ -8242,12 +8238,16 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         signal.metrics = report.metricsSummary;
         if (report.sniper) signal.sniper = report.sniper;
         if (report.birdeye) signal.birdeye = report.birdeye;
+        const onChainDeferred = report.flags.some(
+          (f) => f.id === 'onchain_metrics_deferred'
+        );
         if (!report.ok) {
           const softEarly =
             earlyEntry ||
             Boolean(signal.isMigration) ||
             Boolean(signal.nearMigration) ||
-            Boolean(signal.earlyBuy);
+            Boolean(signal.earlyBuy) ||
+            onChainDeferred;
           const hardReasons = report.skipReasons.filter((reason) => {
             if (isNonBypassableSkipReason(reason)) return true;
             if (!softEarly) return true;
@@ -8410,6 +8410,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         const { evaluateTokenMetricsFilters } = await import('./tokenMetrics');
         const metrics = await fetchTokenMetrics(signal.mint);
         signal.metrics = summarizeTokenMetrics(metrics);
+        if (isOnChainMetricsDeferred(metrics)) {
+          console.log(
+            `[monitor] Anti-rug soft-pass (${signalKind}) ${signal.symbol}: on-chain fanout deferred`
+          );
+        } else {
         const verdict = evaluateTokenMetricsFilters(metrics);
         if (!verdict.ok) {
           console.log(
@@ -8422,22 +8427,30 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           );
           return false;
         }
+        }
       }
     } catch (err) {
       console.warn(
         `[monitor] Anti-rug / metrics fetch failed for ${signal.mint.slice(0, 8)}…:`,
         err instanceof Error ? err.message : err
       );
+      const deferred =
+        isOnChainMetricsDeferred({ error: String(err instanceof Error ? err.message : err) }) ||
+        /onchain_metrics_deferred/i.test(
+          err instanceof Error ? err.message : String(err)
+        );
       const softEarly =
         Boolean(signal.earlyBuy || signal.nearMigration || signal.isMigration) ||
         Boolean(signal.bondingCurve && !signal.isMigration);
-      if (softEarly && config.mode === 'paper') {
+      if (deferred || (softEarly && config.mode === 'paper')) {
         console.log(
-          `[monitor] Anti-rug soft-pass (${signalKind}) ${signal.symbol}: metrics unavailable on early/curve paper signal`
+          `[monitor] Anti-rug soft-pass (${signalKind}) ${signal.symbol}: metrics unavailable` +
+            (deferred ? ' (on-chain fanout deferred)' : ' on early/curve paper signal')
         );
         paperTrader.addLog(
           'info',
-          `Anti-rug soft-pass ${signal.symbol}: metrics unavailable (early paper)`,
+          `Anti-rug soft-pass ${signal.symbol}: metrics unavailable` +
+            (deferred ? ' (on-chain fanout deferred)' : ' (early paper)'),
           { mint: signal.mint, symbol: signal.symbol }
         );
       } else if (

@@ -80,6 +80,14 @@ export interface TokenMetrics {
   error?: string;
 }
 
+export const ONCHAIN_METRICS_DEFERRED = 'onchain_metrics_deferred';
+
+export function isOnChainMetricsDeferred(
+  m: { error?: string } | null | undefined
+): boolean {
+  return m?.error === ONCHAIN_METRICS_DEFERRED;
+}
+
 export interface TokenMetricsFilterResult {
   ok: boolean;
   reasons: string[];
@@ -427,6 +435,10 @@ export async function fetchTokenMetrics(
           (dexEmpty ? stale?.pairCreatedAtMs ?? null : null),
         source: dexEmpty && stale ? 'cache' : 'dexscreener+rpc',
         fetchedAt: Date.now(),
+        error:
+          onchain.error === ONCHAIN_METRICS_DEFERRED
+            ? ONCHAIN_METRICS_DEFERRED
+            : undefined,
       };
 
       // Optional GMGN enrichment
@@ -453,20 +465,22 @@ export async function fetchTokenMetrics(
       }
 
       // Dev recent activity
-      if (merged.devWallet) {
+      if (merged.devWallet && !isOnChainMetricsDeferred(merged)) {
         const activity = await fetchDevActivity(merged.devWallet);
         merged.devRecentTxCount = activity.count;
         merged.devActiveRecently = activity.active;
       }
 
-      cache.set(mint, {
-        data: merged,
-        // Longer TTL when we had to reuse stale Dex fields (429 soft path)
-        expiresAt:
-          Date.now() +
-          (dexEmpty && stale ? Math.max(cacheTtlMs(), 180_000) : cacheTtlMs()),
-      });
-      trimMapToCap(cache, TOKEN_METRICS_CACHE_CAP);
+      if (!isOnChainMetricsDeferred(merged)) {
+        cache.set(mint, {
+          data: merged,
+          // Longer TTL when we had to reuse stale Dex fields (429 soft path)
+          expiresAt:
+            Date.now() +
+            (dexEmpty && stale ? Math.max(cacheTtlMs(), 180_000) : cacheTtlMs()),
+        });
+        trimMapToCap(cache, TOKEN_METRICS_CACHE_CAP);
+      }
       return merged;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -720,7 +734,7 @@ async function fetchOnChainHolderMetrics(
     const { tryAcquireHeavyJob } =
       require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
     if (!tryAcquireHeavyJob('token_metrics')) {
-      return {};
+      return { error: ONCHAIN_METRICS_DEFERRED };
     }
     heavyHeld = true;
   } catch {

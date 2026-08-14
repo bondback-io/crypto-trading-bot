@@ -1569,19 +1569,6 @@ export async function runScannerPollOnce(): Promise<number> {
     );
   }
   pollInFlight = true;
-  let heavyHeld = false;
-  try {
-    const { tryAcquireHeavyJob } =
-      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
-    if (!tryAcquireHeavyJob('market_scanner')) {
-      pollInFlight = false;
-      lastSkipReason = 'heavy job deferred — data lane busy';
-      return 0;
-    }
-    heavyHeld = true;
-  } catch {
-    /* */
-  }
   const t0 = Date.now();
   try {
     const { noteBootTimeline } =
@@ -1845,15 +1832,6 @@ export async function runScannerPollOnce(): Promise<number> {
     return 0;
   } finally {
     pollInFlight = false;
-    if (heavyHeld) {
-      try {
-        const { releaseHeavyJob } =
-          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
-        releaseHeavyJob('market_scanner');
-      } catch {
-        /* */
-      }
-    }
     try {
       const { noteBootTimeline } =
         require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');

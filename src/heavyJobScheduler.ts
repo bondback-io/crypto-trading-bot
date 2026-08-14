@@ -73,10 +73,12 @@ export function heavyJobCadenceOffsetMs(family: HeavyJobFamily): number {
   return CADENCE_OFFSET_MS[family] || 0;
 }
 
-function tradingBusyOrHot(thresholdMs = TRADING_DEFER_EWMA_MS): boolean {
+function tradingWedgedOrHot(thresholdMs = TRADING_DEFER_EWMA_MS): boolean {
   try {
     const gate = getRpcGateSnapshot();
-    if (gate.lanes.primary.queued > 0 || gate.lanes.primary.inFlight > 0) {
+    const p = gate.lanes.primary;
+    const deepQueue = Math.max(8, Math.floor((p.max || 8) / 2));
+    if (p.inFlight >= p.max && p.queued >= deepQueue) {
       return true;
     }
   } catch {
@@ -129,16 +131,12 @@ export function tryAcquireHeavyJob(
 
   if (!opts?.ignoreEwma) {
     if (family === 'github_upload' || family === 'github_restore') {
-      if (tradingBusyOrHot(GITHUB_DEFER_EWMA_MS)) {
+      if (tradingWedgedOrHot(GITHUB_DEFER_EWMA_MS)) {
         noteDefer(family, slots.get('trading')?.family || null);
         return false;
       }
-    } else if (
-      family === 'migration' ||
-      family === 'favourites' ||
-      family === 'influencer_holdings'
-    ) {
-      if (tradingBusyOrHot()) {
+    } else if (family === 'migration' || family === 'influencer_holdings') {
+      if (tradingWedgedOrHot()) {
         noteDefer(family, slots.get('trading')?.family || null);
         return false;
       }

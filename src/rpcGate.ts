@@ -318,15 +318,46 @@ export function shouldDeferBackgroundForCritical(
     /* */
   }
 
-  // Favourites/utility yield to Trading busy; scanners stay free (signal intake).
-  if (
-    kind === 'utility' &&
-    (p.queued > 0 || p.inFlight >= Math.max(1, p.max - 1))
-  ) {
-    return {
-      defer: true,
-      reason: `Trading lane busy (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`,
-    };
+  // Favourites/utility: after scanners open, only yield when Trading is
+  // wedged or recovered EWMA is hot — not because a single probe is in flight.
+  if (kind === 'utility') {
+    let scannersOpen = false;
+    try {
+      const { getBootPhase } =
+        require('./bootPhase') as typeof import('./bootPhase');
+      scannersOpen = getBootPhase() !== 'trading';
+    } catch {
+      scannersOpen = true;
+    }
+    if (scannersOpen) {
+      const deepQueue = Math.max(8, Math.floor(p.max / 2));
+      const wedged = p.inFlight >= p.max && p.queued >= deepQueue;
+      let ewmaHot = false;
+      try {
+        const { isTradingEwmaRecovered, getRpcStats } =
+          require('./connection') as typeof import('./connection');
+        if (isTradingEwmaRecovered()) {
+          const ms = getRpcStats({ lite: true }).lanes?.trading?.latencyMs;
+          ewmaHot = ms != null && ms >= 700;
+        }
+      } catch {
+        /* */
+      }
+      if (wedged || ewmaHot) {
+        return {
+          defer: true,
+          reason: wedged
+            ? `Trading lane wedged (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`
+            : 'Trading EWMA hot',
+        };
+      }
+      return { defer: false, reason: null };
+    } else if (p.queued > 0 || p.inFlight >= Math.max(1, p.max - 1)) {
+      return {
+        defer: true,
+        reason: `Trading lane busy (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`,
+      };
+    }
   }
   // Market/Alpha/Zion: never defer on soft queue depth (queued>=2 was starving
   // intake during normal enrich). Only hard-stop when Data is wedged.

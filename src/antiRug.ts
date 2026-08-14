@@ -14,6 +14,7 @@ import {
   resolveTop10HoldPctForEntry,
   TokenMetrics,
   summarizeTokenMetrics,
+  isOnChainMetricsDeferred,
 } from './tokenMetrics';
 import { getQuote, getSellQuote } from './trade';
 import {
@@ -594,6 +595,14 @@ async function runAntiRugChecks(
   const metrics =
     getCachedTokenMetrics(mint) ?? (await fetchTokenMetrics(mint));
   sources.push(metrics.source || 'tokenMetrics');
+  if (isOnChainMetricsDeferred(metrics)) {
+    flags.push({
+      id: 'onchain_metrics_deferred',
+      severity: 'low',
+      label: 'On-chain holder fanout deferred',
+      detail: 'Admit without holder-concentration fail-close',
+    });
+  }
 
   // Prefer Jupiter Terminal Top 10 H. (audit.topHoldersPercentage) over on-chain
   // so Risk On entry matches Terminal / executeBuy — on-chain alone often null after LP exclusion.
@@ -1145,7 +1154,14 @@ async function runAntiRugChecks(
   // checks.top10HoldPct prefers Jupiter audit.topHoldersPercentage when available.
   // Soak (Risk Off) zeros min+max → inactive; configured >0 still enforces known bounds.
   // HWR/Steady: soft-allow before "top 10 holders too high" hard kill (insider stays hard).
-  const holderHard = evaluateHolderConcentrationHardFloors({
+  const holderHard = isOnChainMetricsDeferred(metrics)
+    ? { skipReasons: [] as string[], scorePenalty: 0, flags: [] as Array<{
+        id: string;
+        severity: 'info' | 'low' | 'medium' | 'high' | 'critical';
+        label: string;
+        detail?: string;
+      }> }
+    : evaluateHolderConcentrationHardFloors({
     top10HoldPct: checks.top10HoldPct,
     insiderPct: checks.insiderPct,
     devHoldPct: checks.devHoldPct,
@@ -1531,14 +1547,16 @@ async function runAntiRugChecks(
   // Risk OFF only ignores soft anti-rug skips; holder hard floors still apply
   // when min/max Top-10% are configured (>0). Soak zeros both to stay open.
   const riskOff = config.riskLevel === 'off';
+  const onChainDeferred = isOnChainMetricsDeferred(metrics);
   const hasHardSkip =
     hardSkipReasons.length > 0 ||
     (!riskOff &&
       skipReasons.some((r) => isNonBypassableSkipReason(r)));
   const softSkips = skipReasons.filter((r) => !isNonBypassableSkipReason(r));
-  // Risk OFF: ignore soft anti-rug skips (modules/floors are intentionally off)
+  // Risk OFF / deferred on-chain fanout: ignore soft anti-rug skips
   const ok =
-    !hasHardSkip && (riskOff || !enabled || softSkips.length === 0);
+    !hasHardSkip &&
+    (riskOff || onChainDeferred || !enabled || softSkips.length === 0);
 
   return {
     mint,
