@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.353',
+    title: 'Dismiss Overview boot overlay early',
+    sections: ['overview'],
+    items: [
+      'Boot overlay Close (✕) hides the popup immediately; boot work continues. Overlay can return on the next deploy.',
+    ],
+  },
+  {
     version: '1.2.352',
     title: 'Restore dashboard script after boot-overlay timer break',
     sections: ['overview'],

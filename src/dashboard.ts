@@ -5136,12 +5136,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .ov-boot-card {
       pointer-events: auto;
+      position: relative;
       width: min(28rem, calc(100% - 1.5rem));
       background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.94));
       border: 1px solid rgba(52, 211, 153, 0.45);
       box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(16, 185, 129, 0.12);
       border-radius: 14px;
-      padding: 1.05rem 1.15rem 1.15rem;
+      padding: 1.05rem 2.4rem 1.15rem 1.15rem;
+    }
+    .ov-boot-close {
+      position: absolute;
+      top: 0.45rem;
+      right: 0.45rem;
+      min-width: 1.85rem;
+      min-height: 1.85rem;
+      padding: 0;
+      border: 0;
+      border-radius: 0.5rem;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 1.05rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .ov-boot-close:hover, .ov-boot-close:focus-visible {
+      color: #f8fafc;
+      background: #1e293b;
+      outline: none;
     }
     .ov-boot-kicker {
       font-size: 10px;
@@ -7727,6 +7748,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <section data-tab-panel="overview" class="space-y-4 ov-boot-section" id="ov-boot-section">
       <div id="ov-boot-overlay" class="ov-boot-overlay" hidden aria-live="polite">
         <div class="ov-boot-card">
+          <button type="button" class="ov-boot-close" onclick="dismissBootOverlay()" title="Close overlay — boot continues in the background" aria-label="Close boot overlay">✕</button>
           <div class="ov-boot-kicker">System</div>
           <div class="ov-boot-title" id="ov-boot-title">System Booting / Dashboard Settling</div>
           <div class="ov-boot-count" id="ov-boot-count">Settling…</div>
@@ -26373,6 +26395,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     let _bootSnap = null;
     let _bootSnapAt = 0;
+    let _bootOverlayDismissed = false;
 
     function fmtBootCountdown(ms) {
       if (ms == null || !Number.isFinite(ms) || ms <= 0) return '0s';
@@ -26387,7 +26410,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const overlay = document.getElementById('ov-boot-overlay');
       const section = document.getElementById('ov-boot-section');
       if (!overlay || !section) return;
-      const visible = snap && snap.overlayVisible === true;
+      if (snap && snap.overlayVisible !== true) _bootOverlayDismissed = false;
+      const visible = !_bootOverlayDismissed && snap && snap.overlayVisible === true;
       overlay.hidden = !visible;
       overlay.classList.toggle('is-visible', visible);
       section.classList.toggle('is-booting', visible);
@@ -26446,6 +26470,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function paintBootOverlayTick() {
       if (!_bootSnap) return;
       paintBootOverlayFromSnap(_bootSnap, Date.now() - _bootSnapAt);
+    }
+
+    function dismissBootOverlay() {
+      _bootOverlayDismissed = true;
+      paintBootOverlayFromSnap(_bootSnap, _bootSnap ? Date.now() - _bootSnapAt : 0);
     }
 
     function tickDashboardResetTimer() {
