@@ -121,6 +121,8 @@ let rateLimitedUntil = 0;
 let lastRateLimitLogAt = 0;
 let lastMigrationPollAt = 0;
 let lastTimeoutLogAt = 0;
+/** First post-boot poll is seed-only; parses allowed after this timestamp. */
+let allowMigrationParseAt = 0;
 
 /** True 429 / provider rate-limit only — timeouts must not mark Helius unhealthy. */
 function isRpcRateLimitError(err: unknown): boolean {
@@ -410,6 +412,7 @@ export function startMigrationListener(): void {
   running = true;
   reconnectAttempts = 0;
   seededPollPrograms.clear();
+  allowMigrationParseAt = 0;
   try {
     const { markMigrationResumeWanted } =
       require('./connection') as typeof import('./connection');
@@ -696,6 +699,13 @@ async function pollMigrations(): Promise<void> {
   if (!running) return;
   if (Date.now() < rateLimitedUntil) return;
   try {
+    const { isBootFeatureAllowed } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    if (!isBootFeatureAllowed('migration')) return;
+  } catch {
+    /* */
+  }
+  try {
     const {
       isRpcWorkloadEnabled,
       allFeatureWorkloadsOff,
@@ -734,8 +744,18 @@ async function pollMigrations(): Promise<void> {
   })();
   const primaryWarm = primaryMs != null && primaryMs >= 200;
   const primaryHot = primaryMs != null && primaryMs >= 500;
+  let bootSettling = false;
+  try {
+    const { isBootSettling } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    bootSettling = isBootSettling();
+  } catch {
+    /* */
+  }
+  const seedOnly =
+    bootSettling || !allowMigrationParseAt || Date.now() < allowMigrationParseAt;
   const minGap =
-    gateStressed || primaryHot
+    seedOnly || gateStressed || primaryHot
       ? POLL_MS_STRESSED
       : primaryWarm
         ? POLL_MS_WARM
@@ -746,15 +766,10 @@ async function pollMigrations(): Promise<void> {
   const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
   return runWithRpcRole(role, async () => {
   const pollT0 = Date.now();
-  let earlyBootSoft = false;
+  let earlyBootSoft = seedOnly;
   try {
-    const { getProcessUptimeMs, noteBootTimeline } =
+    const { noteBootTimeline } =
       require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
-    const { getBootPhase, PHASE_SCANNERS_MS } =
-      require('./bootPhase') as typeof import('./bootPhase');
-    // Soft-seed entire Phase T (0–90s), not only first 60s.
-    earlyBootSoft =
-      getBootPhase() === 'trading' || getProcessUptimeMs() < PHASE_SCANNERS_MS;
     noteBootTimeline({
       event: 'migration_poll',
       feature: 'migration',
@@ -798,7 +813,7 @@ async function pollMigrations(): Promise<void> {
       }
 
       if (earlyBootSoft) {
-        // Remember cursors only until uptime > 60s — avoid parse burst on cold boot.
+        // Seed / cursor-only — first post-boot poll and boot-settle window.
         for (const sig of signatures) {
           rememberSig(sig.signature);
         }
@@ -820,6 +835,13 @@ async function pollMigrations(): Promise<void> {
         const ok = await processMigrationTx(sig, 'poll', target.label);
         if (!ok && Date.now() < rateLimitedUntil) break;
       }
+    }
+
+    if (!allowMigrationParseAt) {
+      allowMigrationParseAt = Date.now() + POLL_MS_STRESSED;
+      console.log(
+        `[migration] Post-boot cursor seeded — parses start in ${Math.round(POLL_MS_STRESSED / 1000)}s`
+      );
     }
 
     pruneExpired();

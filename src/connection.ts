@@ -148,6 +148,10 @@ let backgroundIdx = 0;
 let tradingHardFailStreak = 0;
 let tradingRecoverAt = 0;
 let lastHealthProbeAt = 0;
+/** Skip first Trading getSlot EWMA (cold TLS after deploy). */
+let tradingColdProbeSkipped = false;
+/** Reset Trading EWMA once after boot settle on a healthy probe. */
+let tradingEwmaBootReset = false;
 /** Hard pause of non-essential RPC when all feature workloads are OFF. */
 let idleIsolationActive = false;
 /** Migration was started this process and should resume when isolation ends. */
@@ -904,16 +908,46 @@ function recordSuccess(
   st.lastCheckedAt = Date.now();
   st.lastError = undefined;
   st.lastCallLatencyMs = latencyMs;
-  st.latencyMs =
-    st.latencyMs == null
-      ? latencyMs
-      : LATENCY_EWMA_ALPHA * latencyMs + (1 - LATENCY_EWMA_ALPHA) * st.latencyMs;
-  if (opts?.fromProbe) {
-    st.probeLatencyMs =
-      st.probeLatencyMs == null
+
+  const tradingProbe = Boolean(opts?.fromProbe && tradingPref && st === tradingPref);
+  if (tradingProbe && !tradingColdProbeSkipped) {
+    tradingColdProbeSkipped = true;
+    st.probeLatencyMs = latencyMs;
+    st.healthy = true;
+    st.unhealthySince = null;
+    rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
+    refreshRpcLoadSignalsFromLanes();
+    return;
+  }
+
+  let applyEwma = true;
+  if (tradingProbe && !tradingEwmaBootReset && latencyMs < 400) {
+    try {
+      const { isBootSettling } =
+        require('./bootPhase') as typeof import('./bootPhase');
+      if (!isBootSettling()) {
+        tradingEwmaBootReset = true;
+        st.latencyMs = latencyMs;
+        st.probeLatencyMs = latencyMs;
+        applyEwma = false;
+      }
+    } catch {
+      /* */
+    }
+  }
+
+  if (applyEwma) {
+    st.latencyMs =
+      st.latencyMs == null
         ? latencyMs
-        : LATENCY_EWMA_ALPHA * latencyMs +
-          (1 - LATENCY_EWMA_ALPHA) * st.probeLatencyMs;
+        : LATENCY_EWMA_ALPHA * latencyMs + (1 - LATENCY_EWMA_ALPHA) * st.latencyMs;
+    if (opts?.fromProbe) {
+      st.probeLatencyMs =
+        st.probeLatencyMs == null
+          ? latencyMs
+          : LATENCY_EWMA_ALPHA * latencyMs +
+            (1 - LATENCY_EWMA_ALPHA) * st.probeLatencyMs;
+    }
   }
   st.healthy = true;
   st.unhealthySince = null;
@@ -1810,6 +1844,24 @@ function buildRpcStats() {
     active_endpoints_count: activeEndpointsCount,
     background_idle_when_workloads_off: backgroundIdleWhenWorkloadsOff,
     idleIsolationActive,
+    bootSettling: (() => {
+      try {
+        const { isBootSettling } =
+          require('./bootPhase') as typeof import('./bootPhase');
+        return isBootSettling();
+      } catch {
+        return false;
+      }
+    })(),
+    migration_boot_deferred: (() => {
+      try {
+        const { isBootFeatureAllowed } =
+          require('./bootPhase') as typeof import('./bootPhase');
+        return !isBootFeatureAllowed('migration');
+      } catch {
+        return false;
+      }
+    })(),
     rpc_calls_last_60s: (() => {
       pruneCallTrafficWindow();
       return callTrafficEvents.length;

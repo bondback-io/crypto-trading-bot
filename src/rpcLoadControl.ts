@@ -28,6 +28,7 @@ export type RpcLoadControlSnapshot = {
   favouritesDeferred: boolean;
   dataPressure: boolean;
   backgroundPressure: boolean;
+  bootSettling: boolean;
 };
 
 let lastSignals = {
@@ -59,6 +60,7 @@ let lastSnapshot: RpcLoadControlSnapshot = {
   favouritesDeferred: false,
   dataPressure: false,
   backgroundPressure: false,
+  bootSettling: false,
 };
 
 let lastLogAt = 0;
@@ -100,8 +102,19 @@ function recompute(): void {
   let level: 'ok' | 'busy' | 'shed' = 'ok';
   let cause: string | null = null;
 
+  let bootSettling = false;
+  try {
+    const { isBootSettling } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    bootSettling = isBootSettling();
+  } catch {
+    /* */
+  }
+
   // Trading pressure → Favourites/Background only (NOT scanner×).
-  if (!lastSignals.tradingOnEmergency) {
+  // 1.2.350: ignore Trading latency/queue during post-deploy settle (0–180s)
+  // so a cold getSlot EWMA cannot pin shedBackground for 5–10 minutes.
+  if (!bootSettling && !lastSignals.tradingOnEmergency) {
     if (tradeLat != null && tradeLat >= 700) {
       shedBackground = true;
       utilitySlowFactor = Math.max(utilitySlowFactor, 2);
@@ -115,9 +128,12 @@ function recompute(): void {
       );
     }
   }
-  if (lastSignals.primaryQueued > 0) {
+  if (!bootSettling && lastSignals.primaryQueued > 0) {
     shedBackground = true;
     reasons.push('Trading queue > 0 → shed Favourites (scanners free)');
+  }
+  if (bootSettling) {
+    reasons.push('boot settling — Trading shed grace (migration deferred)');
   }
 
   // Scanner slowdown only from Data-lane pressure (own lane).
@@ -225,6 +241,7 @@ function recompute(): void {
     favouritesDeferred,
     dataPressure: level !== 'ok',
     backgroundPressure: utilitySlowFactor >= 2,
+    bootSettling,
   };
 
   if (reasons.length && Date.now() - lastLogAt > 20_000) {

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.350',
+    title: 'Contain post-deploy Trading-lane lag',
+    sections: ['execution', 'overview', 'scanners'],
+    items: [
+      'Migration listener waits until Phase B (180s) so Pump.fun/PumpSwap getSignatures no longer saturate Alchemy Trading for 5–10 minutes after deploy; first post-boot poll is seed-only, parses 45s later.',
+      'Boot shed grace: Trading latency/queue do not pin shedBackground during 0–180s; first cold getSlot is not blended into EWMA; first healthy probe after settle resets the 1400ms ghost.',
+      'Stats → RPC shows BOOT SETTLING / migration deferred so a quiet Trading lane is not mistaken for a dead lane.',
+    ],
+  },
+  {
     version: '1.2.349',
     title: 'Kill RPC/WS storms and cap memory (OOM pass)',
     sections: ['execution', 'overview', 'scanners', 'knobs'],

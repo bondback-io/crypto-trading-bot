@@ -317,11 +317,13 @@ async function main(): Promise<void> {
         );
       }
 
-      // Stage 4 (+40s): migration listener (soft-seed through Phase T)
+      // Stage 4 (+40s): was migration — deferred to +180s so Pump program
+      // getSignatures do not saturate Trading (Alchemy) during boot.
       await new Promise((r) => setTimeout(r, 15_000));
-      noteStage(4, 'startMigrationListener (soft until Phase D)');
-      startMigrationListener();
-      console.log('[boot] Monitor + migration listener started');
+      noteStage(4, 'skip migration until Phase B (Trading settle)');
+      console.log(
+        '[boot] Monitor started — migration listener deferred to +180s (Trading-lane settle)'
+      );
 
       // Stage 3b (+90s): BootPhase scanners — Market Scanner + Zion KOL
       await new Promise((r) => setTimeout(r, 50_000));
@@ -356,9 +358,9 @@ async function main(): Promise<void> {
         );
       }
 
-      // Stage 5 (+180s): BootPhase background — soft-watch allowed + import window
+      // Stage 5 (+180s): BootPhase background — migration + soft-watch / import
       await new Promise((r) => setTimeout(r, 90_000));
-      noteStage(5, 'BootPhase background — soft-watch / import window');
+      noteStage(5, 'BootPhase background — migration + soft-watch / import window');
       try {
         const { noteBootPhaseIfChanged } =
           require('./bootPhase') as typeof import('./bootPhase');
@@ -366,6 +368,8 @@ async function main(): Promise<void> {
       } catch {
         /* */
       }
+      startMigrationListener();
+      console.log('[boot] Migration listener started (Phase B — first poll seed-only)');
     } catch (err) {
       console.error('[boot] Post-listen startup error (server still up):', err);
     }

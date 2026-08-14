@@ -29,8 +29,9 @@ const FEATURE_MIN_PHASE: Record<string, BootPhase> = {
   health_probe: 'trading',
   bonding_curve: 'trading',
   default: 'trading',
-  // Migration allowed early but soft-seeded until Phase D (listener handles soft)
-  migration: 'trading',
+  // 1.2.350: Pump.fun/PumpSwap getSignatures on Trading during boot saturates
+  // Alchemy for 5–10 min — block until Phase B (180s).
+  migration: 'background',
   // Phase D — scanners / data discovery
   market_scanner: 'scanners',
   alpha_scan: 'scanners',
@@ -53,6 +54,11 @@ export function getBootPhase(uptimeMs = getProcessUptimeMs()): BootPhase {
   if (uptimeMs < PHASE_SCANNERS_MS) return 'trading';
   if (uptimeMs < PHASE_BACKGROUND_MS) return 'scanners';
   return 'background';
+}
+
+/** True during the post-deploy Trading-lane settle window (0–180s). */
+export function isBootSettling(uptimeMs = getProcessUptimeMs()): boolean {
+  return uptimeMs < PHASE_BACKGROUND_MS;
 }
 
 export function getFeatureMinBootPhase(feature: string): BootPhase {
@@ -97,6 +103,7 @@ export function getBootPhaseSnapshot(): {
   phaseBackgroundAtMs: number;
   untilScannersMs: number;
   untilBackgroundMs: number;
+  bootSettling: boolean;
 } {
   const uptimeMs = getProcessUptimeMs();
   return {
@@ -106,5 +113,6 @@ export function getBootPhaseSnapshot(): {
     phaseBackgroundAtMs: PHASE_BACKGROUND_MS,
     untilScannersMs: Math.max(0, PHASE_SCANNERS_MS - uptimeMs),
     untilBackgroundMs: Math.max(0, PHASE_BACKGROUND_MS - uptimeMs),
+    bootSettling: isBootSettling(uptimeMs),
   };
 }

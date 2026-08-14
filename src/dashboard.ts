@@ -27052,10 +27052,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ? rpcObj.majors_watcher_polls_per_min
               : '—');
           const idleOn = rpcObj.idleIsolationActive === true;
+          const bootSettling = rpcObj.bootSettling === true;
           const rpc60 =
             rpcObj.rpc_calls_last_60s != null ? rpcObj.rpc_calls_last_60s : '—';
           cp.textContent =
             (idleOn ? 'IDLE ISOLATION · ' : '') +
+            (bootSettling
+              ? 'BOOT SETTLING · ' +
+                (rpcObj.migration_boot_deferred ? 'migration deferred · ' : '')
+              : '') +
             'control-plane: probes/min=' +
             (rpcObj.probe_calls_per_min != null ? rpcObj.probe_calls_per_min : '—') +
             ' · features/min=' +
@@ -27084,7 +27089,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ? ' · timers=' + rpcObj.active_timers_count
               : '') +
             thrash;
-          cp.style.color = thrash || idleOn ? '#fbbf24' : '#94a3b8';
+          cp.style.color = thrash || idleOn || bootSettling ? '#fbbf24' : '#94a3b8';
         }
       }
       const critLane = rpc.primary || {};
