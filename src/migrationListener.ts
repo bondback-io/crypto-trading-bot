@@ -745,6 +745,20 @@ async function pollMigrations(): Promise<void> {
 
   const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
   return runWithRpcRole(role, async () => {
+  const pollT0 = Date.now();
+  let earlyBootSoft = false;
+  try {
+    const { getProcessUptimeMs, noteBootTimeline } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    earlyBootSoft = getProcessUptimeMs() < 60_000;
+    noteBootTimeline({
+      event: 'migration_poll',
+      feature: 'migration',
+      detail: earlyBootSoft ? 'soft_boot' : 'full',
+    });
+  } catch {
+    /* */
+  }
   try {
     const conn = getConnection();
     const softRpc = isSoftThrottleRpcUrl(conn.rpcEndpoint);
@@ -756,9 +770,11 @@ async function pollMigrations(): Promise<void> {
 
     for (const target of targets) {
       if (Date.now() < rateLimitedUntil) break;
+      // Soft first minute: seed with limit 1 / no burst parses (post-deploy overlap).
+      const sigLimit = earlyBootSoft ? 1 : softRpc ? 8 : 15;
       const signatures = await conn.getSignaturesForAddress(
         new PublicKey(target.id),
-        { limit: softRpc ? 8 : 15 }
+        { limit: sigLimit }
       );
       if (signatures.length === 0) continue;
 
@@ -772,8 +788,16 @@ async function pollMigrations(): Promise<void> {
         lastMigrationSig = signatures[0].signature;
         console.log(
           `[migration] Seeded poll cursor for ${target.label} ` +
-            `(${signatures.length} sigs) — watching for new migrations only`
+            `(${signatures.length} sigs${earlyBootSoft ? ', soft-boot' : ''}) — watching for new migrations only`
         );
+        continue;
+      }
+
+      if (earlyBootSoft) {
+        // Remember cursors only until uptime > 60s — avoid parse burst on cold boot.
+        for (const sig of signatures) {
+          rememberSig(sig.signature);
+        }
         continue;
       }
 
@@ -805,6 +829,19 @@ async function pollMigrations(): Promise<void> {
       return;
     }
     console.error('[migration] Poll error:', err);
+  } finally {
+    try {
+      const { noteBootTimeline } =
+        require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+      noteBootTimeline({
+        event: 'migration_poll',
+        feature: 'migration',
+        ms: Date.now() - pollT0,
+        detail: 'done',
+      });
+    } catch {
+      /* */
+    }
   }
   }, 'migration');
 }

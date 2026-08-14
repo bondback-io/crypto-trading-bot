@@ -212,18 +212,48 @@ async function main(): Promise<void> {
   });
 
   // Heavy I/O after listen — failures here must not take the process down.
-  // Defer monitor/migration briefly so /health stays hot during deploy probes.
+  // Staggered boot-seq (1.2.338): kill post-deploy overlap storm.
   void (async () => {
-    try {
-      await new Promise((r) => setTimeout(r, 2_500));
+    const noteStage = (n: number, detail: string) => {
+      console.log(`[boot-seq] stage=${n} ${detail}`);
+      try {
+        const { noteBootTimeline } =
+          require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+        noteBootTimeline({
+          event: 'boot_stage',
+          detail: `stage=${n} ${detail}`,
+        });
+      } catch {
+        /* */
+      }
+    };
 
-      const rpcOk = await testConnection();
-      if (!rpcOk) {
-        console.warn(
-          '[boot] RPC connection failed — monitor may not work until RPC is fixed'
+    try {
+      // Stage 0: listen already done (server + health monitor only)
+      noteStage(0, 'listen — server + health monitor only');
+
+      // Stage 1 (+5s): skip duplicate testConnection if health probe recently OK
+      await new Promise((r) => setTimeout(r, 5_000));
+      noteStage(1, 'rpc probe (skip if recent health OK)');
+      const { recentHealthProbeOk } =
+        require('./connection') as typeof import('./connection');
+      let rpcOk = recentHealthProbeOk(30_000);
+      if (rpcOk) {
+        console.log(
+          '[boot-seq] Skipping testConnection — health probe OK in last 30s'
         );
+      } else {
+        rpcOk = await testConnection();
+        if (!rpcOk) {
+          console.warn(
+            '[boot] RPC connection failed — monitor may not work until RPC is fixed'
+          );
+        }
       }
 
+      // Stage 2 (+15s): Live Sim / paper auto-check (warmup interval in paperTrader)
+      await new Promise((r) => setTimeout(r, 10_000));
+      noteStage(2, 'Live Sim / paper auto-check');
       if (
         (config.mode === 'paper' || config.mode === 'liveSimulation') &&
         config.strategy.enableAutoSell
@@ -241,7 +271,6 @@ async function main(): Promise<void> {
         );
       });
 
-      // Stagger: wallet polling first, migration listener a few seconds later
       try {
         const { ensureFavouritesAutoImportOnBoot } =
           await import('./walletDiscovery');
@@ -253,6 +282,9 @@ async function main(): Promise<void> {
         );
       }
 
+      // Stage 3 (+25s): monitor + Market Scanner (scanner first poll +2s after start)
+      await new Promise((r) => setTimeout(r, 10_000));
+      noteStage(3, 'startMonitor + Market Scanner');
       startMonitor();
       try {
         const { syncZionKolScannerLifecycle } = await import('./zionKolScanner');
@@ -279,9 +311,16 @@ async function main(): Promise<void> {
           err instanceof Error ? err.message : err
         );
       }
-      await new Promise((r) => setTimeout(r, 3_000));
+
+      // Stage 4 (+40s): migration listener
+      await new Promise((r) => setTimeout(r, 15_000));
+      noteStage(4, 'startMigrationListener');
       startMigrationListener();
       console.log('[boot] Monitor + migration listener started');
+
+      // Stage 5 (+55s): favourites soft-watch allowed (monitor already floors to 55s uptime)
+      await new Promise((r) => setTimeout(r, 15_000));
+      noteStage(5, 'favourites soft-watch allowed (uptime floor)');
     } catch (err) {
       console.error('[boot] Post-listen startup error (server still up):', err);
     }

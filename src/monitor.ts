@@ -1903,7 +1903,19 @@ export function startMonitor(): void {
     isSoftThrottleRpcUrl(getRpcUrl()) ||
     (shareBoot && getRpcRoleFor('wallet_poll', true) === 'background');
   // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
-  const firstPollDelayMs = softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000;
+  // Boot-seq stage 5: favourites soft-watch not before ~55s uptime (existing delay is floor).
+  let bootSeqFloorMs = 0;
+  try {
+    const { getProcessUptimeMs } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    bootSeqFloorMs = Math.max(0, 55_000 - getProcessUptimeMs());
+  } catch {
+    bootSeqFloorMs = 0;
+  }
+  const firstPollDelayMs = Math.max(
+    softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000,
+    bootSeqFloorMs
+  );
   if (softWatchBootTimer) clearTimeout(softWatchBootTimer);
   softWatchBootTimer = setTimeout(() => {
     softWatchBootTimer = null;
@@ -2034,6 +2046,13 @@ async function pollAllWallets(): Promise<void> {
     const { isRpcWorkloadEnabled } =
       require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
     if (!isRpcWorkloadEnabled('wallet_poll')) return;
+  } catch {
+    /* */
+  }
+  try {
+    const { noteBootTimeline } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    noteBootTimeline({ event: 'wallet_poll', feature: 'wallet_poll' });
   } catch {
     /* */
   }

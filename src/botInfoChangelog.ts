@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.338',
+    title: 'Post-deploy RPC overlap + dashboard slim refresh',
+    sections: ['execution', 'overview'],
+    items: [
+      'Boot sequencer stages 0–5 (listen → +5s probe skip if recent health OK → +15s Live Sim → +25s monitor/scanner → +40s migration → +55s favourites soft-watch floor) — kills post-deploy overlap storm.',
+      'rpcBootTimeline + callTrafficLast60s on /api/rpc; /api/status?src=dashboard|probe and ?lite=1 slim rpc blob; Live Sim marks 5s for first 120s then 2s; migration soft seed (limit 1 / no burst parses) until uptime>60s.',
+      'Dashboard default slim refresh every 5s (status lite + positions + config); full fan-out every 30s or on tab focus.',
+      'scripts/rpcColdBootProbe.cjs (npm run probe:rpc-cold): 120s / 5s samples with no settle kill for cold-boot CU proof.',
+    ],
+  },
+  {
     version: '1.2.337',
     title: 'Workloads-ON latency isolator (status path clean)',
     sections: ['execution', 'overview'],

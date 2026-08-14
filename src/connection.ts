@@ -318,6 +318,18 @@ export type RpcCallTrafficRow = {
 };
 
 const callTraffic = new Map<string, RpcCallTrafficRow>();
+/** Rolling events for last-60s callTraffic (not lifetime). */
+const callTrafficEvents: Array<{
+  at: number;
+  endpoint: string;
+  feature: string;
+  role: RpcRole | 'unknown';
+}> = [];
+const CALL_TRAFFIC_EVENTS_CAP = 4_000;
+
+const dashboardRefreshAts: number[] = [];
+const probeRefreshAts: number[] = [];
+let lastHealthProbeSuccessAt = 0;
 
 function noteCallTraffic(
   endpoint: string,
@@ -326,17 +338,28 @@ function noteCallTraffic(
 ) {
   const key = `${endpoint}|${feature}|${role}`;
   const prev = callTraffic.get(key);
+  const now = Date.now();
   if (prev) {
     prev.count += 1;
-    prev.lastAt = Date.now();
+    prev.lastAt = now;
   } else {
     callTraffic.set(key, {
       endpoint,
       feature,
       role,
       count: 1,
-      lastAt: Date.now(),
+      lastAt: now,
     });
+  }
+  callTrafficEvents.push({ at: now, endpoint, feature, role });
+  while (
+    callTrafficEvents.length &&
+    callTrafficEvents[0]!.at < now - 60_000
+  ) {
+    callTrafficEvents.shift();
+  }
+  while (callTrafficEvents.length > CALL_TRAFFIC_EVENTS_CAP) {
+    callTrafficEvents.shift();
   }
   if (callTraffic.size > CALL_TRAFFIC_CAP) {
     let oldestKey: string | null = null;
@@ -358,6 +381,71 @@ export function getRpcCallTraffic(limit = 40): {
   const rows = [...callTraffic.values()].sort((a, b) => b.count - a.count);
   const total = rows.reduce((s, r) => s + r.count, 0);
   return { rows: rows.slice(0, limit), total };
+}
+
+export function getRpcCallTrafficLast60s(limit = 15): {
+  rows: Array<{
+    endpoint: string;
+    feature: string;
+    role: RpcRole | 'unknown';
+    count: number;
+    lastAt: number;
+  }>;
+  total: number;
+} {
+  const now = Date.now();
+  while (
+    callTrafficEvents.length &&
+    callTrafficEvents[0]!.at < now - 60_000
+  ) {
+    callTrafficEvents.shift();
+  }
+  const byKey = new Map<
+    string,
+    {
+      endpoint: string;
+      feature: string;
+      role: RpcRole | 'unknown';
+      count: number;
+      lastAt: number;
+    }
+  >();
+  for (const e of callTrafficEvents) {
+    const key = `${e.endpoint}|${e.feature}|${e.role}`;
+    const prev = byKey.get(key);
+    if (prev) {
+      prev.count += 1;
+      prev.lastAt = Math.max(prev.lastAt, e.at);
+    } else {
+      byKey.set(key, {
+        endpoint: e.endpoint,
+        feature: e.feature,
+        role: e.role,
+        count: 1,
+        lastAt: e.at,
+      });
+    }
+  }
+  const rows = [...byKey.values()].sort((a, b) => b.count - a.count);
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  return { rows: rows.slice(0, limit), total };
+}
+
+export function noteStatusRequestSource(src: string | undefined): void {
+  const s = String(src || '').toLowerCase();
+  if (s === 'dashboard' || s === 'dashboard-refresh') {
+    notePerMin(dashboardRefreshAts);
+  } else if (s === 'probe') {
+    notePerMin(probeRefreshAts);
+  }
+}
+
+/** True if a health probe succeeded recently (skip duplicate testConnection). */
+export function recentHealthProbeOk(withinMs = 30_000): boolean {
+  return (
+    lastHealthProbeSuccessAt > 0 &&
+    Date.now() - lastHealthProbeSuccessAt < withinMs
+  );
 }
 
 function makeConnection(url: string): Connection {
@@ -500,6 +588,8 @@ export function resetRpcEndpointPool(): void {
   tradingRecoverAt = 0;
   lastHealthProbeAt = 0;
   callTraffic.clear();
+  callTrafficEvents.length = 0;
+  lastHealthProbeSuccessAt = 0;
   probeCallAts.length = 0;
   featureCallAts.length = 0;
   healthPageRefreshAts.length = 0;
@@ -926,7 +1016,22 @@ async function probeState(
         )
       ),
     ]);
-    recordSuccess(st, Date.now() - start);
+    const ms = Date.now() - start;
+    recordSuccess(st, ms);
+    lastHealthProbeSuccessAt = Date.now();
+    try {
+      const { noteBootTimeline } =
+        require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+      noteBootTimeline({
+        event: 'probe',
+        feature: 'health_probe',
+        method: 'getSlot',
+        endpoint: st.endpoint.label,
+        ms,
+      });
+    } catch {
+      /* */
+    }
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1001,7 +1106,23 @@ async function withRpcInner<T>(
       });
       notePerMin(featureCallAts);
       const result = await fn(st.connection);
-      recordSuccess(st, Date.now() - start);
+      const ms = Date.now() - start;
+      recordSuccess(st, ms);
+      try {
+        const { noteBootTimeline } =
+          require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+        if (ms >= 80 || /migrat|scanner|wallet_poll|bonding|open_mark/i.test(label)) {
+          noteBootTimeline({
+            event: 'withRpc',
+            feature: label,
+            method: 'withRpc',
+            endpoint: st.endpoint.label,
+            ms,
+          });
+        }
+      } catch {
+        /* */
+      }
       if (r === 'primary') noteTradingOutcome(true);
       else if (r === 'secondary') noteDataOutcome(true);
       else noteBackgroundOutcome(true);
@@ -1425,6 +1546,18 @@ export function getRpcStats() {
     ok: anyHealthy,
     warning,
     callTraffic: getRpcCallTraffic(),
+    callTrafficLast60s: getRpcCallTrafficLast60s(15),
+    bootTimeline: (() => {
+      try {
+        const { getBootTimelineSnapshot } =
+          require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+        return getBootTimelineSnapshot(80);
+      } catch {
+        return { processStartedAt: 0, uptimeMs: 0, recent: [] };
+      }
+    })(),
+    dashboard_refresh_per_min: perMin(dashboardRefreshAts),
+    probe_status_refresh_per_min: perMin(probeRefreshAts),
     gate,
     quarantine,
     loadControl,

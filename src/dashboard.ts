@@ -26388,21 +26388,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (stressed && window._lastRefreshAt && now - window._lastRefreshAt < 9000) {
         return;
       }
-      // Preferred-lane failover alone used to keep slim mode forever (Helius DOWN
-      // while piggybacking) — UI looked stalled. Force a full fan-out every ~30s.
+      // 1.2.338: default slim every 5s; full fan-out every ~30s or on tab focus.
       const forceFull =
-        !stressed ||
+        Boolean(window._forceFullRefreshOnce) ||
         !window._lastFullRefreshAt ||
         now - window._lastFullRefreshAt >= 30000;
+      window._forceFullRefreshOnce = false;
       window._refreshInFlight = true;
       window._refreshStartedAt = now;
       const positionsGenAtStart = window._openPositionsGen || 0;
       try {
       let status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData;
-      if (stressed && !forceFull) {
-        // Slim fan-out: keep status / positions / config; skip heavy side panels.
+      if (!forceFull) {
+        // Slim fan-out: status lite + positions + config (cuts Express CPU / payload).
         [status, positions, cfg] = await Promise.all([
-          fetchJSON('/api/status'),
+          fetchJSON('/api/status?src=dashboard&lite=1'),
           fetchJSON('/api/positions?fast=1'),
           fetchJSON('/api/config'),
         ]);
@@ -26417,7 +26417,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         zionData = null;
       } else {
         [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
-          fetchJSON('/api/status'),
+          fetchJSON('/api/status?src=dashboard'),
           fetchJSON('/api/positions?fast=1'),
           fetchJSON('/api/logs?limit=50').catch(() => ({ logs: [] })),
           fetchJSON('/api/activity').catch(() => []),
@@ -37933,6 +37933,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
     setInterval(refresh, 5000);
+    // Tab focus → one full fan-out (side panels catch up after slim ticks).
+    window.addEventListener('focus', function () {
+      window._forceFullRefreshOnce = true;
+      try { refresh(); } catch (_) {}
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) return;
+      window._forceFullRefreshOnce = true;
+      try { refresh(); } catch (_) {}
+    });
     // Closed list is omitted from fast polls — refresh the full closed slice periodically.
     void refreshClosedPositions({ force: true });
     setInterval(function () {

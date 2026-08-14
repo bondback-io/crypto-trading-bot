@@ -1550,6 +1550,13 @@ export async function runScannerPollOnce(): Promise<number> {
   pollInFlight = true;
   const t0 = Date.now();
   try {
+    const { noteBootTimeline } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    noteBootTimeline({ event: 'scanner_poll', feature: 'market_scanner' });
+  } catch {
+    /* */
+  }
+  try {
     lastError = null;
     const universe = await collectScannerUniverse();
     const picked = await selectScannerCandidates(universe);
@@ -1792,6 +1799,18 @@ export async function runScannerPollOnce(): Promise<number> {
     return 0;
   } finally {
     pollInFlight = false;
+    try {
+      const { noteBootTimeline } =
+        require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+      noteBootTimeline({
+        event: 'scanner_poll',
+        feature: 'market_scanner',
+        ms: Date.now() - t0,
+        detail: 'done',
+      });
+    } catch {
+      /* */
+    }
   }
 }
 

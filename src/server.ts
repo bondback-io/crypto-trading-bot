@@ -279,7 +279,19 @@ export function createServer(): express.Application {
 
   // --- Status ---
 
-  app.get('/api/status', async (_req: Request, res: Response) => {
+  app.get('/api/status', async (req: Request, res: Response) => {
+    const src = typeof req.query.src === 'string' ? req.query.src : undefined;
+    const lite =
+      req.query.lite === '1' ||
+      req.query.lite === 'true' ||
+      String(req.query.lite || '') === '1';
+    try {
+      const { noteStatusRequestSource } =
+        require('./connection') as typeof import('./connection');
+      noteStatusRequestSource(src);
+    } catch {
+      /* */
+    }
     const monitor = getMonitorStatus();
     const active = getActiveTradingWallet();
     const pubkey = getWalletPublicKey();
@@ -422,7 +434,23 @@ export function createServer(): express.Application {
       performanceScore: liveSimScore,
       // Charts live on /paper-status only — avoid duplicating ~40KB every 5s
       charts: null,
-      rpc: getRpcStats(),
+      rpc: (() => {
+        const full = getRpcStats();
+        if (!lite) return full;
+        const { callTraffic: _ct, callTrafficLast60s: _ct60, bootTimeline: _bt, ...slim } =
+          full as typeof full & {
+            callTraffic?: unknown;
+            callTrafficLast60s?: unknown;
+            bootTimeline?: unknown;
+          };
+        return {
+          ...slim,
+          callTraffic: {},
+          callTrafficLast60s: {},
+          bootTimeline: { processStartedAt: 0, uptimeMs: 0, recent: [] },
+          lite: true,
+        };
+      })(),
       jito: getJitoStatus(),
       mev: getMevStatus(),
       gmgn: getGmgnStatus(),

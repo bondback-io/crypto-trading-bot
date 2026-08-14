@@ -258,6 +258,9 @@ const HARD_SL_MAX_GAP_SLIPPAGE = 0.04; // 4% beyond SL threshold
 
 /** Live Simulation polls marks more often so SL/TP see gaps sooner. */
 const LIVE_SIM_CHECK_INTERVAL_MS = 2_000;
+/** First 120s after auto-check start: slower marks to cut post-deploy RPC overlap. */
+const LIVE_SIM_WARMUP_MS = 120_000;
+const LIVE_SIM_WARMUP_INTERVAL_MS = 5_000;
 
 export type PositionStatus = 'open' | 'closed' | 'partial';
 
@@ -1468,7 +1471,10 @@ export class PaperTrader {
   private marketCapCache: Map<string, number> = new Map();
   /** Latest DexScreener activity per mint (for dead-volume exits) */
   private marketActivityCache: Map<string, MarketActivitySample> = new Map();
-  private checkTimer: ReturnType<typeof setInterval> | null = null;
+  private checkTimer: ReturnType<typeof setInterval> | ReturnType<typeof setTimeout> | null =
+    null;
+  private autoCheckStartedAt = 0;
+  private autoCheckUsesTimeout = false;
 
   constructor(
     startingBalance?: number,
@@ -5671,12 +5677,21 @@ export class PaperTrader {
     if (this.checkTimer) return;
 
     const baseInterval = config.paper.positionCheckIntervalMs;
-    const interval =
-      config.mode === 'liveSimulation'
-        ? Math.min(baseInterval, LIVE_SIM_CHECK_INTERVAL_MS)
-        : baseInterval;
-    this.checkTimer = setInterval(() => {
+    this.autoCheckStartedAt = Date.now();
+    this.autoCheckUsesTimeout = config.mode === 'liveSimulation';
+
+    const runTick = (): void => {
       void (async () => {
+        try {
+          const { noteBootTimeline } =
+            require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+          noteBootTimeline({
+            event: 'live_sim_mark',
+            feature: 'open_mark',
+          });
+        } catch {
+          /* */
+        }
         if (config.paper.useLiveData || config.mode === 'liveSimulation') {
           try {
             const { refreshPaperPricesFromLive } = await import('./backtest');
@@ -5694,15 +5709,40 @@ export class PaperTrader {
         }
         this.checkPositions();
       })();
-    }, interval);
+    };
 
+    const steadyInterval =
+      config.mode === 'liveSimulation'
+        ? Math.min(baseInterval, LIVE_SIM_CHECK_INTERVAL_MS)
+        : baseInterval;
+
+    if (config.mode === 'liveSimulation') {
+      const scheduleNext = (): void => {
+        if (this.autoCheckStartedAt <= 0) return;
+        const elapsed = Date.now() - this.autoCheckStartedAt;
+        const nextMs =
+          elapsed < LIVE_SIM_WARMUP_MS
+            ? LIVE_SIM_WARMUP_INTERVAL_MS
+            : steadyInterval;
+        this.checkTimer = setTimeout(() => {
+          if (this.autoCheckStartedAt <= 0) return;
+          runTick();
+          scheduleNext();
+        }, nextMs);
+      };
+      runTick();
+      scheduleNext();
+      console.log(
+        `[paper] Auto position check started (warmup ${LIVE_SIM_WARMUP_INTERVAL_MS}ms for ${LIVE_SIM_WARMUP_MS / 1000}s, then ${steadyInterval}ms) [LIVE SIM]`
+      );
+      return;
+    }
+
+    this.autoCheckUsesTimeout = false;
+    this.checkTimer = setInterval(runTick, steadyInterval);
     console.log(
-      `[paper] Auto position check started (every ${interval}ms)` +
-        (config.mode === 'liveSimulation'
-          ? ' [LIVE SIM]'
-          : config.paper.useLiveData
-            ? ' [live data ON]'
-            : '')
+      `[paper] Auto position check started (every ${steadyInterval}ms)` +
+        (config.paper.useLiveData ? ' [live data ON]' : '')
     );
   }
 
@@ -6178,9 +6218,11 @@ export class PaperTrader {
 
   stopAutoCheck(): void {
     if (this.checkTimer) {
-      clearInterval(this.checkTimer);
+      if (this.autoCheckUsesTimeout) clearTimeout(this.checkTimer);
+      else clearInterval(this.checkTimer);
       this.checkTimer = null;
     }
+    this.autoCheckStartedAt = 0;
   }
 
   /** Simulate price movement for demo/testing (optional) */
