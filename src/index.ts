@@ -212,9 +212,9 @@ async function main(): Promise<void> {
   });
 
   // Heavy I/O after listen — failures here must not take the process down.
-  // Staggered boot-seq (1.2.338): kill post-deploy overlap storm.
+  // BootPhase (1.2.345): Trading → Scanners → Background priority + time stagger.
   void (async () => {
-    const noteStage = (n: number, detail: string) => {
+    const noteStage = (n: number | string, detail: string) => {
       console.log(`[boot-seq] stage=${n} ${detail}`);
       try {
         const { noteBootTimeline } =
@@ -231,6 +231,13 @@ async function main(): Promise<void> {
     try {
       // Stage 0: listen already done (server + health monitor only)
       noteStage(0, 'listen — server + health monitor only');
+      try {
+        const { noteBootPhaseIfChanged } =
+          require('./bootPhase') as typeof import('./bootPhase');
+        noteBootPhaseIfChanged();
+      } catch {
+        /* */
+      }
 
       // Stage 1 (+5s): skip duplicate testConnection if health probe recently OK
       await new Promise((r) => setTimeout(r, 5_000));
@@ -251,9 +258,9 @@ async function main(): Promise<void> {
         }
       }
 
-      // Stage 2 (+15s): Live Sim / paper auto-check (warmup interval in paperTrader)
+      // Stage 2 (+15s): Live Sim / paper auto-check (marks allowed in Phase T)
       await new Promise((r) => setTimeout(r, 10_000));
-      noteStage(2, 'Live Sim / paper auto-check');
+      noteStage(2, 'Live Sim / paper auto-check (BootPhase trading)');
       if (
         (config.mode === 'paper' || config.mode === 'liveSimulation') &&
         config.strategy.enableAutoSell
@@ -282,22 +289,10 @@ async function main(): Promise<void> {
         );
       }
 
-      // Stage 3 (+25s): monitor + Market Scanner (scanner first poll +2s after start)
+      // Stage 3 (+25s): monitor only — scanner deferred to Phase D
       await new Promise((r) => setTimeout(r, 10_000));
-      noteStage(3, 'startMonitor + Market Scanner');
+      noteStage(3, 'startMonitor (scanner deferred to Phase D)');
       startMonitor();
-      try {
-        const { syncZionKolScannerLifecycle } = await import('./zionKolScanner');
-        syncZionKolScannerLifecycle();
-        console.log(
-          `[boot] Zion KOL scanner lifecycle synced (enabled=${config.zion?.enabled === true})`
-        );
-      } catch (err) {
-        console.warn(
-          '[boot] Zion scanner sync error:',
-          err instanceof Error ? err.message : err
-        );
-      }
       try {
         const { emailDeliveryStatus } = await import('./emailNotifications');
         const d = emailDeliveryStatus();
@@ -312,15 +307,55 @@ async function main(): Promise<void> {
         );
       }
 
-      // Stage 4 (+40s): migration listener
+      // Stage 4 (+40s): migration listener (soft-seed through Phase T)
       await new Promise((r) => setTimeout(r, 15_000));
-      noteStage(4, 'startMigrationListener');
+      noteStage(4, 'startMigrationListener (soft until Phase D)');
       startMigrationListener();
       console.log('[boot] Monitor + migration listener started');
 
-      // Stage 5 (+55s): favourites soft-watch allowed (monitor already floors to 55s uptime)
-      await new Promise((r) => setTimeout(r, 15_000));
-      noteStage(5, 'favourites soft-watch allowed (uptime floor)');
+      // Stage 3b (+90s): BootPhase scanners — Market Scanner + Zion KOL
+      await new Promise((r) => setTimeout(r, 50_000));
+      noteStage('3b', 'BootPhase scanners — Market Scanner + Zion KOL');
+      try {
+        const { noteBootPhaseIfChanged } =
+          require('./bootPhase') as typeof import('./bootPhase');
+        noteBootPhaseIfChanged();
+      } catch {
+        /* */
+      }
+      try {
+        const { startMarketScanner } =
+          await import('./marketScanner');
+        startMarketScanner();
+      } catch (err) {
+        console.warn(
+          '[boot] Market Scanner start error:',
+          err instanceof Error ? err.message : err
+        );
+      }
+      try {
+        const { syncZionKolScannerLifecycle } = await import('./zionKolScanner');
+        syncZionKolScannerLifecycle();
+        console.log(
+          `[boot] Zion KOL scanner lifecycle synced (enabled=${config.zion?.enabled === true})`
+        );
+      } catch (err) {
+        console.warn(
+          '[boot] Zion scanner sync error:',
+          err instanceof Error ? err.message : err
+        );
+      }
+
+      // Stage 5 (+180s): BootPhase background — soft-watch allowed + import window
+      await new Promise((r) => setTimeout(r, 90_000));
+      noteStage(5, 'BootPhase background — soft-watch / import window');
+      try {
+        const { noteBootPhaseIfChanged } =
+          require('./bootPhase') as typeof import('./bootPhase');
+        noteBootPhaseIfChanged();
+      } catch {
+        /* */
+      }
     } catch (err) {
       console.error('[boot] Post-listen startup error (server still up):', err);
     }

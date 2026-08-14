@@ -922,6 +922,26 @@ export async function runWithRpcRole<T>(
   feature = 'rpc'
 ): Promise<T> {
   assertRpcWorkloadEnabled(feature);
+  try {
+    const { isBootFeatureAllowed, bootPhaseSkipReason, noteBootPhaseIfChanged } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    noteBootPhaseIfChanged();
+    if (!isBootFeatureAllowed(feature)) {
+      const { RpcGateSkipError } =
+        require('./rpcGate') as typeof import('./rpcGate');
+      const norm = normalizeRole(role);
+      throw new RpcGateSkipError(
+        'busy',
+        norm as 'primary' | 'secondary' | 'background',
+        bootPhaseSkipReason(feature) || feature
+      );
+    }
+  } catch (err) {
+    const { isRpcGateSkipError } =
+      require('./rpcGate') as typeof import('./rpcGate');
+    if (isRpcGateSkipError(err)) throw err;
+    /* bootPhase optional — proceed if module missing */
+  }
   if (feature !== 'health_probe') notePerMin(featureCallAts);
   const norm = normalizeRole(role);
   const depth = rpcGateDepthAls.getStore() ?? 0;
@@ -1572,6 +1592,16 @@ export function getRpcStats() {
         return getBootTimelineSnapshot(80);
       } catch {
         return { processStartedAt: 0, uptimeMs: 0, recent: [] };
+      }
+    })(),
+    bootPhase: (() => {
+      try {
+        const { getBootPhaseSnapshot, noteBootPhaseIfChanged } =
+          require('./bootPhase') as typeof import('./bootPhase');
+        noteBootPhaseIfChanged();
+        return getBootPhaseSnapshot();
+      } catch {
+        return null;
       }
     })(),
     dashboard_refresh_per_min: perMin(dashboardRefreshAts),

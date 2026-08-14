@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.345',
+    title: 'Post-deploy BootPhase priority (Trading → Scanners → Background)',
+    sections: ['execution', 'overview', 'scanners', 'backup'],
+    items: [
+      'New bootPhase gate: 0–90s Trading (balance/trades/marks), 90–180s Scanners, ≥180s Background — lower-priority RPC is skipped until its phase.',
+      'Boot-seq: monitor at +25s without scanner; Market Scanner + Zion at +90s; soft-watch floor + GitHub auto-import at ≥180s.',
+      'Migration stays soft-seeded through Phase T; /api/rpc exposes bootPhase snapshot for operators.',
+    ],
+  },
+  {
     version: '1.2.344',
     title: 'Stop ~2 min post-deploy scheduled backup lag',
     sections: ['backup', 'execution', 'overview'],

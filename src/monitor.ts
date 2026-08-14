@@ -71,7 +71,6 @@ import {
   isEarlyCurveBuy,
 } from './pumpSmartActivity';
 import {
-  startMarketScanner,
   stopMarketScanner,
   onScannerCandidate,
   getScannerFeed,
@@ -1902,15 +1901,16 @@ export function startMonitor(): void {
   const softBoot =
     isSoftThrottleRpcUrl(getRpcUrl()) ||
     (shareBoot && getRpcRoleFor('wallet_poll', true) === 'background');
-  // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
-  // Boot-seq stage 5: favourites soft-watch not before ~55s uptime (existing delay is floor).
+  // BootPhase B: favourites soft-watch not before ~180s uptime (Trading→Scanners first).
   let bootSeqFloorMs = 0;
   try {
     const { getProcessUptimeMs } =
       require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
-    bootSeqFloorMs = Math.max(0, 55_000 - getProcessUptimeMs());
+    const { PHASE_BACKGROUND_MS } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    bootSeqFloorMs = Math.max(0, PHASE_BACKGROUND_MS - getProcessUptimeMs());
   } catch {
-    bootSeqFloorMs = 0;
+    bootSeqFloorMs = Math.max(0, 180_000);
   }
   const firstPollDelayMs = Math.max(
     softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000,
@@ -1928,6 +1928,9 @@ export function startMonitor(): void {
       void pollAllWallets();
     }, config.pollIntervalMs);
   }, firstPollDelayMs);
+  console.log(
+    `[monitor] Soft-watch first poll in ${Math.round(firstPollDelayMs / 1000)}s (BootPhase background)`
+  );
 
   // Activity refresh hits GMGN/RPC per wallet — defer heavily on free RPC or skip
   // the first pass entirely (import grace keeps wallets eligible without a scan).
@@ -1988,10 +1991,9 @@ export function startMonitor(): void {
     pauseMonitor();
   });
 
-  // Autonomous Market Scanner (TA) — hybrid with wallet copy when both ON
+  // Autonomous Market Scanner (TA) — started later by boot-seq Phase D (not here)
   setScannerBuyQueueDepthFn(() => pendingBuyEvents.length);
   onScannerCandidate((candidate) => handleScannerCandidate(candidate));
-  startMarketScanner();
 }
 
 export function stopMonitor(): void {

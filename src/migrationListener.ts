@@ -750,7 +750,11 @@ async function pollMigrations(): Promise<void> {
   try {
     const { getProcessUptimeMs, noteBootTimeline } =
       require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
-    earlyBootSoft = getProcessUptimeMs() < 60_000;
+    const { getBootPhase, PHASE_SCANNERS_MS } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    // Soft-seed entire Phase T (0–90s), not only first 60s.
+    earlyBootSoft =
+      getBootPhase() === 'trading' || getProcessUptimeMs() < PHASE_SCANNERS_MS;
     noteBootTimeline({
       event: 'migration_poll',
       feature: 'migration',

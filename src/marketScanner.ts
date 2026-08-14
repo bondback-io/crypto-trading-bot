@@ -1473,6 +1473,16 @@ export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
   try {
+    const { isBootFeatureAllowed } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    if (!isBootFeatureAllowed('market_scanner')) {
+      lastSkipReason = 'boot phase — waiting for scanners phase';
+      return 0;
+    }
+  } catch {
+    /* */
+  }
+  try {
     const { isRpcWorkloadEnabled } =
       require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
     if (!isRpcWorkloadEnabled('market_scanner')) {

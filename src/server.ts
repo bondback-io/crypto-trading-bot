@@ -8614,9 +8614,8 @@ export function startServer(port?: number, host?: string): void {
       );
     }
 
-    // Defer GitHub auto-import until after boot-seq stage 5 (~70s) so sync
-    // restore does not stall Live Sim marks + first scanner poll (+ stage 1 probes).
-    const GITHUB_AUTO_IMPORT_MIN_UPTIME_MS = 70_000;
+    // Defer GitHub auto-import until BootPhase background (≥180s).
+    const GITHUB_AUTO_IMPORT_MIN_UPTIME_MS = 180_000;
     setTimeout(() => {
       void (async () => {
         try {
@@ -8628,7 +8627,7 @@ export function startServer(port?: number, host?: string): void {
           );
           if (waitMs > 0) {
             console.log(
-              `[boot-seq] deferred github auto-import until uptime>=70s (wait ${Math.round(waitMs / 1000)}s)`
+              `[boot-seq] deferred github auto-import until uptime>=180s (wait ${Math.round(waitMs / 1000)}s)`
             );
             await new Promise<void>((r) => setTimeout(r, waitMs));
           }
