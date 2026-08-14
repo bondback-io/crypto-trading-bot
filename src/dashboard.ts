@@ -11902,19 +11902,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     /**
      * Diff open/closed position ids across refreshes and play lifecycle chimes.
      * First poll hydrates silently (no chime storm on dashboard load).
+     * Never treat empty closed from ?fast=1 as authoritative; never chime on
+     * vanished opens alone (that re-fired buy/sell spam during RPC lag).
      */
-    function maybePlayTradeLifecycleSounds(openList, closedList) {
+    function maybePlayTradeLifecycleSounds(openList, closedList, opts) {
       try {
         if (!window.__tradeSoundState) {
           window.__tradeSoundState = {
             openIds: new Set(),
             closedIds: new Set(),
+            soundedOpenIds: new Set(),
             hydrated: false,
+            lastOpenChimeAt: 0,
+            lastCloseChimeAt: 0,
           };
         }
         const st = window.__tradeSoundState;
+        if (!st.soundedOpenIds) st.soundedOpenIds = new Set();
         const opens = Array.isArray(openList) ? openList : [];
-        const closeds = Array.isArray(closedList) ? closedList : [];
+        let closeds = Array.isArray(closedList) ? closedList : [];
+        // Fast payloads omit closed — use cache so we never take the empty path.
+        if (!closeds.length && Array.isArray(window._lastClosedPositions)) {
+          closeds = window._lastClosedPositions;
+        }
         const curOpen = new Set();
         for (let i = 0; i < opens.length; i++) {
           const id = opens[i] && opens[i].id;
@@ -11929,22 +11939,47 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const c = closeds[i];
             if (c && c.id && !/^partial:/i.test(String(c.reason || ''))) {
               st.closedIds.add(String(c.id));
+              st.soundedOpenIds.add(String(c.id));
             }
           }
+          for (const id of curOpen) st.soundedOpenIds.add(id);
           st.hydrated = true;
           return;
         }
+        // Stress: empty open list while we still had opens — skip sound + state wipe
+        // unless closedTotal proves a real wipe (0).
+        const closedTotal =
+          opts && typeof opts.closedTotal === 'number'
+            ? opts.closedTotal
+            : window._lastClosedTotal;
+        if (
+          curOpen.size === 0 &&
+          st.openIds.size > 0 &&
+          closedTotal !== 0
+        ) {
+          return;
+        }
         const prefs = window.__notifyPrefs || {};
+        const now = Date.now();
+        const OPEN_COOLDOWN_MS = 2500;
+        const CLOSE_COOLDOWN_MS = 2000;
+        let openChimes = 0;
         for (const id of curOpen) {
-          if (!st.openIds.has(id)) playTradeOpenChime();
-        }
-        // When fast poll omits closed rows, still chime on vanished opens
-        if (!closeds.length) {
-          for (const id of st.openIds) {
-            if (!curOpen.has(id)) playTradeCloseSound();
+          if (st.openIds.has(id)) continue;
+          if (st.soundedOpenIds.has(id)) continue;
+          if (openChimes >= 2) break;
+          if (now - (st.lastOpenChimeAt || 0) < OPEN_COOLDOWN_MS && openChimes === 0) {
+            st.soundedOpenIds.add(id);
+            continue;
           }
+          if (prefs.tradeOpenSound !== false) {
+            playTradeOpenChime();
+            st.lastOpenChimeAt = Date.now();
+            openChimes += 1;
+          }
+          st.soundedOpenIds.add(id);
         }
-        // Newest closed first — play at most a few per poll (burst protection)
+        // Close / profit only from closed-list rows (never vanish-open undeduped spam).
         let closeChimes = 0;
         const sortedClosed = closeds.slice().sort(function (a, b) {
           return (Number(b.closedAt) || 0) - (Number(a.closedAt) || 0);
@@ -11956,7 +11991,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const cid = String(c.id);
           if (st.closedIds.has(cid)) continue;
           st.closedIds.add(cid);
+          if (now - (st.lastCloseChimeAt || 0) < CLOSE_COOLDOWN_MS && closeChimes === 0) {
+            continue;
+          }
           closeChimes += 1;
+          st.lastCloseChimeAt = Date.now();
           const pnl = Number(c.pnlSol);
           const isProfit = Number.isFinite(pnl) && pnl > 0;
           if (isProfit && prefs.profitCloseSound !== false) {
@@ -11967,21 +12006,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               window.__profitCloseSoundedIds.add(cid);
               playProfitCashSound();
             }
-          } else {
+          } else if (prefs.tradeCloseSound !== false) {
             playTradeCloseSound();
           }
         }
         st.openIds = curOpen;
         if (st.closedIds.size > 400) {
-          const keep = sortedClosed
-            .filter(function (c) {
-              return c && c.id && !/^partial:/i.test(String(c.reason || ''));
-            })
-            .slice(0, 200)
-            .map(function (c) {
-              return String(c.id);
-            });
-          st.closedIds = new Set(keep);
+          const pruneSrc =
+            sortedClosed.length > 0
+              ? sortedClosed
+              : Array.isArray(window._lastClosedPositions)
+                ? window._lastClosedPositions
+                : [];
+          if (pruneSrc.length > 0) {
+            const keep = pruneSrc
+              .filter(function (c) {
+                return c && c.id && !/^partial:/i.test(String(c.reason || ''));
+              })
+              .slice(0, 200)
+              .map(function (c) {
+                return String(c.id);
+              });
+            st.closedIds = new Set(keep);
+          }
+        }
+        if (st.soundedOpenIds.size > 400) {
+          st.soundedOpenIds = new Set(Array.from(st.soundedOpenIds).slice(-200));
         }
         if (window.__profitCloseSoundedIds && window.__profitCloseSoundedIds.size > 200) {
           window.__profitCloseSoundedIds = new Set(
@@ -22658,14 +22708,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window._openPositionsGen = (window._openPositionsGen || 0) + 1;
       }
       const incoming = Array.isArray(list) ? list : [];
-      window._lastOpenPositions = mergeOpenPositionsPreserve(
-        window._lastOpenPositions,
-        incoming
-      );
+      const prev = window._lastOpenPositions || [];
+      const closedTotal =
+        opts && typeof opts.closedTotal === 'number'
+          ? opts.closedTotal
+          : window._lastClosedTotal;
+      // Under lag, fast/status can return open:[] transiently — do not wipe + re-chime.
+      if (
+        incoming.length === 0 &&
+        prev.length > 0 &&
+        closedTotal !== 0 &&
+        !fromFill
+      ) {
+        return;
+      }
+      window._lastOpenPositions = mergeOpenPositionsPreserve(prev, incoming);
       try {
         maybePlayTradeLifecycleSounds(
           window._lastOpenPositions || [],
-          (opts && opts.closed) || []
+          (opts && opts.closed) || window._lastClosedPositions || [],
+          { closedTotal: closedTotal }
         );
       } catch (_) {}
       const openN = (window._lastOpenPositions || []).length;
@@ -27905,15 +27967,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       window._trailArmAt = trailArmAt;
       // Skip stale positions if Place Trade / fast fill painted while this refresh was in-flight
       if ((window._openPositionsGen || 0) === positionsGenAtStart) {
-        window._lastOpenPositions = mergeOpenPositionsPreserve(
-          window._lastOpenPositions,
-          positions.open || []
-        );
+        const incomingOpen = Array.isArray(positions.open) ? positions.open : [];
+        const prevOpen = window._lastOpenPositions || [];
+        const ctHint =
+          typeof positions.closedTotal === 'number'
+            ? positions.closedTotal
+            : window._lastClosedTotal;
+        // Do not wipe opens on transient empty fast/status payloads during lag.
+        if (!(incomingOpen.length === 0 && prevOpen.length > 0 && ctHint !== 0)) {
+          window._lastOpenPositions = mergeOpenPositionsPreserve(
+            prevOpen,
+            incomingOpen
+          );
+        }
       }
       try {
         maybePlayTradeLifecycleSounds(
           window._lastOpenPositions || positions.open || [],
-          positions.closed || []
+          window._lastClosedPositions || [],
+          {
+            closedTotal:
+              typeof positions.closedTotal === 'number'
+                ? positions.closedTotal
+                : window._lastClosedTotal,
+          }
         );
       } catch (_) {}
       updateOpenTradesBadge(

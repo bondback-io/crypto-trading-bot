@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.347',
+    title: 'Stop trade sound spam during RPC lag',
+    sections: ['alerts', 'overview', 'execution'],
+    items: [
+      'Lifecycle chimes no longer treat empty closed from ?fast=1 as real closes — removed undeduped vanish-open sell spam that could beep for minutes during Trading-lane spikes.',
+      'Empty open snapshots under stress keep prior opens (unless closedTotal is 0); open sounded-id set + 2–3s cooldowns; closedIds prune never clears from an empty list.',
+    ],
+  },
+  {
     version: '1.2.346',
     title: 'No post-deploy scheduled backup before auto-import settles',
     sections: ['backup', 'execution', 'overview'],
