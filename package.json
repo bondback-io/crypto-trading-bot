@@ -1,6 +1,6 @@
 {
   "name": "solana-smart-money-copy-bot",
-  "version": "1.2.339",
+  "version": "1.2.340",
   "updatedAt": "2026-08-14T00:15:00.000Z",
   "description": "Solana smart money copy trading bot for Pump.fun launches and migrations",
   "main": "dist/index.js",
@@ -16,6 +16,7 @@
     "probe:rpc-on": "node scripts/rpcWorkloadLatencyIsolate.cjs",
     "probe:rpc-cold": "node scripts/rpcColdBootProbe.cjs",
     "probe:github-backup-lag": "node scripts/githubBackupLagProbe.cjs",
+    "probe:github-upload-cost": "node scripts/githubBackupUploadCostProbe.cjs",
     "probe:stats-reports": "node scripts/statsReportProbe.cjs",
     "calibrate:recipes": "tsx scripts/calibrateRiskRecipes.ts",
     "calibrate:recipes:verify": "tsx scripts/calibrateRiskRecipes.ts --phase=verify",

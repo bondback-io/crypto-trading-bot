@@ -11044,7 +11044,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </label>
         </div>
         <div class="mint text-xs mt-1" id="github-backup-status">GitHub backup: —</div>
-        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Auto import on deploy defaults to ON (uncheck to disable). For wipe recovery without a mounted disk, also set <code>GITHUB_BACKUP_AUTO_IMPORT=1</code>. Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo.</p>
+        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Auto import on deploy defaults to ON (uncheck to disable). For wipe recovery without a mounted disk, also set <code>GITHUB_BACKUP_AUTO_IMPORT=1</code>. Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo. Prefer a <strong>separate private backups repo</strong> — same-repo backups still create a Render “Deploy skipped” event (ops noise only, not an RPC loop).</p>
       </div>
 
       <div class="card">
@@ -37537,6 +37537,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               Math.round((data.uploadBackoffMs || 0) / 1000) +
               's · failures=' +
               (data.consecutiveFailures || 0)
+          );
+        }
+        if (data.lastUploadPhases && data.lastUploadPhases.totalMs != null) {
+          const p = data.lastUploadPhases;
+          parts.push(
+            (p.skippedUnchanged
+              ? 'last export: skipped unchanged'
+              : p.coalesced
+                ? 'last export: coalesced'
+                : 'last export phases') +
+              ' · total ' +
+              p.totalMs +
+              'ms' +
+              (p.putMs != null ? ' (put ' + p.putMs + 'ms)' : '')
+          );
+        }
+        if (data.sameRepoAsDeployHint) {
+          parts.push(
+            'note: same deploy repo — Render may show Deploy skipped for backup commits (expected, not RPC lag)'
           );
         }
         if (data.lastAutoImportAtMs) {

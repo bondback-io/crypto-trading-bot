@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.340',
+    title: 'GitHub upload stall fix (yielded compact export)',
+    sections: ['execution', 'overview', 'backup'],
+    items: [
+      'Successful uploads no longer double-write pretty multi-MB JSON: yielded compact export path, one latest write, phase timing logs (reconcile/build/encode/write/put).',
+      'Skip unchanged GitHub PUT when DATA_DIR file payload sha matches; set lastAutoImportSha on success so boot auto-import does not re-download what was just pushed.',
+      'Coalesce in-flight uploads (no sticky failure); defer critical-save uploads when scheduled due within 15m; Backup UI notes same-repo Render “Deploy skipped” is ops noise, not RPC.',
+      'scripts/githubBackupUploadCostProbe.cjs (npm run probe:github-upload-cost) samples /health during upload.',
+    ],
+  },
+  {
     version: '1.2.339',
     title: 'GitHub backup failure backoff + Stats report probes',
     sections: ['execution', 'overview'],

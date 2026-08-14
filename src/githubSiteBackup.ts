@@ -12,7 +12,7 @@ import {
   readJsonFile,
 } from './dataDir';
 import {
-  createAndSaveSiteBackup,
+  buildSiteBackupForGithubUpload,
   isValidSiteBackup,
   restoreSiteBackup,
   saveSiteBackup,
@@ -64,6 +64,8 @@ export interface GithubBackupSettings {
   consecutiveFailures: number;
   /** Current failure backoff window in ms (exponential, capped at schedule interval). */
   uploadBackoffMs: number | null;
+  /** sha256 of backup.files — skip GitHub PUT when unchanged. */
+  lastUploadContentSha: string | null;
   /** Blob SHA of the last successful auto-import (or manual GitHub restore). */
   lastAutoImportSha: string | null;
   lastAutoImportAtMs: number | null;
@@ -71,6 +73,19 @@ export interface GithubBackupSettings {
   lastAutoImportError: string | null;
   lastAutoImportSkippedReason: string | null;
 }
+
+export type GithubUploadPhaseTimings = {
+  reconcileMs: number;
+  buildMs: number;
+  writeMs: number;
+  encodeMs: number;
+  putMs: number;
+  totalMs: number;
+  skippedUnchanged?: boolean;
+  coalesced?: boolean;
+  reason: string;
+  at: number;
+};
 
 export interface GithubBackupStatus {
   configured: boolean;
@@ -92,6 +107,9 @@ export interface GithubBackupStatus {
   lastUploadAttemptAt: string | null;
   consecutiveFailures: number;
   uploadBackoffMs: number | null;
+  lastUploadContentSha: string | null;
+  lastUploadPhases: GithubUploadPhaseTimings | null;
+  sameRepoAsDeployHint: boolean;
   lastAutoImportSha: string | null;
   lastAutoImportAtMs: number | null;
   lastAutoImportAt: string | null;
@@ -104,6 +122,8 @@ export interface GithubBackupStatus {
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let uploadInFlight = false;
+/** When an upload is requested while another runs, coalesce one follow-up. */
+let pendingUploadReason: string | null = null;
 let autoImportInFlight = false;
 /** One-shot: after empty DATA_DIR / bundled seed, do not skip on sha match. */
 let forceAutoImportOnce = false;
@@ -112,9 +132,13 @@ let criticalUploadTimer: ReturnType<typeof setTimeout> | null = null;
 let criticalUploadQueuedReason: string | null = null;
 /** Min gap between critical-save uploads — prevents HMC/FPR save storms from stalling the event loop. */
 const CRITICAL_UPLOAD_MIN_GAP_MS = 60_000;
+/** Defer critical uploads when scheduled tick is due soon. */
+const CRITICAL_DEFER_IF_DUE_WITHIN_MS = 15 * 60 * 1000;
 /** First failure wait before another full export+PUT (was every 60s forever). */
 const FAILURE_BACKOFF_BASE_MS = 5 * 60 * 1000;
 let lastCriticalUploadStartedAt = 0;
+
+let lastUploadPhases: GithubUploadPhaseTimings | null = null;
 
 function envToken(): string {
   return String(process.env.GITHUB_BACKUP_TOKEN || '').trim();
@@ -155,6 +179,7 @@ function defaultSettings(): GithubBackupSettings {
     lastUploadAttemptAtMs: null,
     consecutiveFailures: 0,
     uploadBackoffMs: null,
+    lastUploadContentSha: null,
     lastAutoImportSha: null,
     lastAutoImportAtMs: null,
     lastAutoImportOk: null,
@@ -232,6 +257,10 @@ export function loadGithubBackupSettings(): GithubBackupSettings {
     uploadBackoffMs:
       raw.uploadBackoffMs != null && Number.isFinite(Number(raw.uploadBackoffMs))
         ? Math.max(0, Math.round(Number(raw.uploadBackoffMs)))
+        : null,
+    lastUploadContentSha:
+      raw.lastUploadContentSha != null
+        ? String(raw.lastUploadContentSha)
         : null,
     lastAutoImportSha:
       raw.lastAutoImportSha != null ? String(raw.lastAutoImportSha) : null,
@@ -343,6 +372,13 @@ export function getGithubBackupStatus(): GithubBackupStatus {
       : null,
     consecutiveFailures: s.consecutiveFailures || 0,
     uploadBackoffMs: s.uploadBackoffMs,
+    lastUploadContentSha: s.lastUploadContentSha,
+    lastUploadPhases,
+    sameRepoAsDeployHint: (() => {
+      const repo = (target.repo || '').toLowerCase();
+      // Same repo as the live deploy → Render shows Deploy skipped for backup commits.
+      return repo === 'crypto-trading-bot' || repo.includes('crypto-trading-bot');
+    })(),
     lastAutoImportSha: s.lastAutoImportSha,
     lastAutoImportAtMs: s.lastAutoImportAtMs,
     lastAutoImportAt: s.lastAutoImportAtMs
@@ -432,9 +468,12 @@ async function fetchRemoteSha(
 
 /**
  * Build local latest backup and push compact JSON to GitHub (overwrite path).
+ * Yields during export so /health stays responsive; skips PUT when file payload unchanged.
  */
 export async function uploadSiteBackupToGithub(opts?: {
   reason?: string;
+  /** Build+write only — skip GitHub network (probe / local cost measure). */
+  dryRun?: boolean;
 }): Promise<{
   ok: true;
   exportedAt: string;
@@ -443,33 +482,148 @@ export async function uploadSiteBackupToGithub(opts?: {
   path: string;
   sha: string;
   reason: string;
+  skippedUnchanged?: boolean;
+  coalesced?: boolean;
+  dryRun?: boolean;
+  phases?: GithubUploadPhaseTimings;
 }> {
+  const reason = opts?.reason || 'manual';
+  const dryRun = opts?.dryRun === true;
   if (uploadInFlight) {
-    throw new Error('GitHub backup upload already in progress');
+    pendingUploadReason = reason;
+    console.log(
+      `[github-backup] upload coalesced (${reason}) — will run after in-flight`
+    );
+    lastUploadPhases = {
+      reconcileMs: 0,
+      buildMs: 0,
+      writeMs: 0,
+      encodeMs: 0,
+      putMs: 0,
+      totalMs: 0,
+      coalesced: true,
+      reason,
+      at: Date.now(),
+    };
+    return {
+      ok: true,
+      exportedAt: new Date().toISOString(),
+      fileCount: 0,
+      bytes: 0,
+      path: resolveGithubBackupTarget().path,
+      sha: '',
+      reason,
+      coalesced: true,
+      phases: lastUploadPhases,
+    };
   }
   uploadInFlight = true;
-  const reason = opts?.reason || 'manual';
+  const totalT0 = Date.now();
   try {
     const s = loadGithubBackupSettings();
     s.lastUploadAttemptAtMs = Date.now();
     saveGithubBackupSettings(s);
 
     const target = resolveGithubBackupTarget(s);
-    if (!target.token) {
-      throw new Error(
-        'GITHUB_BACKUP_TOKEN not set — add a fine-grained PAT with Contents write'
-      );
-    }
-    if (!target.owner || !target.repo) {
-      throw new Error(
-        'GitHub owner/repo not configured — set GITHUB_BACKUP_OWNER/REPO or save them in Backup settings'
-      );
+    if (!dryRun) {
+      if (!target.token) {
+        throw new Error(
+          'GITHUB_BACKUP_TOKEN not set — add a fine-grained PAT with Contents write'
+        );
+      }
+      if (!target.owner || !target.repo) {
+        throw new Error(
+          'GitHub owner/repo not configured — set GITHUB_BACKUP_OWNER/REPO or save them in Backup settings'
+        );
+      }
     }
 
-    const created = createAndSaveSiteBackup();
-    const compact = JSON.stringify(created.backup);
-    const bytes = Buffer.byteLength(compact, 'utf8');
-    const content = Buffer.from(compact, 'utf8').toString('base64');
+    const exported = await buildSiteBackupForGithubUpload();
+    const { backup, compactJson, contentSha256, bytes, phases: exportPhases } =
+      exported;
+
+    if (dryRun) {
+      const content = Buffer.from(compactJson, 'utf8').toString('base64');
+      const phases: GithubUploadPhaseTimings = {
+        ...exportPhases,
+        encodeMs: exportPhases.encodeMs,
+        putMs: 0,
+        totalMs: Date.now() - totalT0,
+        reason: `dry:${reason}`,
+        at: Date.now(),
+      };
+      // Touch encode cost of base64 without network.
+      void content.length;
+      lastUploadPhases = phases;
+      console.log(
+        `[github-backup] dry-run export ok (${bytes} bytes, ${backup.fileCount} files) ` +
+          `phases reconcile=${phases.reconcileMs}ms build=${phases.buildMs}ms ` +
+          `encode=${phases.encodeMs}ms write=${phases.writeMs}ms total=${phases.totalMs}ms`
+      );
+      return {
+        ok: true,
+        exportedAt: backup.exportedAt,
+        fileCount: backup.fileCount,
+        bytes,
+        path: target.path,
+        sha: '',
+        reason,
+        dryRun: true,
+        phases,
+      };
+    }
+
+    // Unchanged DATA_DIR → skip GitHub PUT (still advance lastUploadAtMs).
+    if (
+      s.lastUploadContentSha &&
+      s.lastUploadContentSha === contentSha256 &&
+      s.lastRemoteSha
+    ) {
+      const phases: GithubUploadPhaseTimings = {
+        ...exportPhases,
+        putMs: 0,
+        totalMs: Date.now() - totalT0,
+        skippedUnchanged: true,
+        reason,
+        at: Date.now(),
+      };
+      lastUploadPhases = phases;
+      const next: GithubBackupSettings = {
+        ...s,
+        lastUploadAtMs: Date.now(),
+        lastUploadOk: true,
+        lastUploadError: null,
+        lastUploadBytes: bytes,
+        lastUploadContentSha: contentSha256,
+        consecutiveFailures: 0,
+        uploadBackoffMs: null,
+        // Local state matches what was already pushed — treat as imported.
+        lastAutoImportSha: s.lastRemoteSha || s.lastAutoImportSha,
+      };
+      saveGithubBackupSettings(next);
+      console.log(
+        `[github-backup] skipped unchanged PUT ` +
+          `(${bytes} bytes, ${backup.fileCount} files, ${reason}) ` +
+          `phases reconcile=${exportPhases.reconcileMs}ms build=${exportPhases.buildMs}ms ` +
+          `encode=${exportPhases.encodeMs}ms write=${exportPhases.writeMs}ms total=${phases.totalMs}ms`
+      );
+      return {
+        ok: true,
+        exportedAt: backup.exportedAt,
+        fileCount: backup.fileCount,
+        bytes,
+        path: target.path,
+        sha: s.lastRemoteSha || '',
+        reason,
+        skippedUnchanged: true,
+        phases,
+      };
+    }
+
+    const encodeT0 = Date.now();
+    const content = Buffer.from(compactJson, 'utf8').toString('base64');
+    const encodeExtraMs = Date.now() - encodeT0;
+
     const sha = await fetchRemoteSha(
       target.owner,
       target.repo,
@@ -481,16 +635,18 @@ export async function uploadSiteBackupToGithub(opts?: {
       .split('/')
       .map((p) => encodeURIComponent(p))
       .join('/');
+    const putT0 = Date.now();
     const put = await githubApi<{
       content?: { sha?: string };
       message?: string;
     }>('PUT', `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/contents/${enc}`, target.token, {
       // [skip render] / [skip ci] prevent Render (and similar) auto-deploys when
       // backups land in the same repo as the web service.
-      message: `[skip render] [skip ci] site-backup ${created.backup.exportedAt} (${reason})`,
+      message: `[skip render] [skip ci] site-backup ${backup.exportedAt} (${reason})`,
       content,
       ...(sha ? { sha } : {}),
     });
+    const putMs = Date.now() - putT0;
 
     if (!put.ok) {
       throw new Error(
@@ -501,6 +657,18 @@ export async function uploadSiteBackupToGithub(opts?: {
     }
 
     const newSha = put.json?.content?.sha || sha || '';
+    const phases: GithubUploadPhaseTimings = {
+      reconcileMs: exportPhases.reconcileMs,
+      buildMs: exportPhases.buildMs,
+      writeMs: exportPhases.writeMs,
+      encodeMs: exportPhases.encodeMs + encodeExtraMs,
+      putMs,
+      totalMs: Date.now() - totalT0,
+      reason,
+      at: Date.now(),
+    };
+    lastUploadPhases = phases;
+
     const next: GithubBackupSettings = {
       ...s,
       lastUploadAtMs: Date.now(),
@@ -508,6 +676,9 @@ export async function uploadSiteBackupToGithub(opts?: {
       lastUploadError: null,
       lastUploadBytes: bytes,
       lastRemoteSha: newSha || null,
+      lastUploadContentSha: contentSha256,
+      // Local state *is* what was just pushed — boot auto-import should skip.
+      lastAutoImportSha: newSha || s.lastAutoImportSha,
       consecutiveFailures: 0,
       uploadBackoffMs: null,
     };
@@ -515,17 +686,20 @@ export async function uploadSiteBackupToGithub(opts?: {
 
     console.log(
       `[github-backup] uploaded ${target.owner}/${target.repo}/${target.path} ` +
-        `(${bytes} bytes, ${created.backup.fileCount} files, ${reason})`
+        `(${bytes} bytes, ${backup.fileCount} files, ${reason}) ` +
+        `phases reconcile=${phases.reconcileMs}ms build=${phases.buildMs}ms ` +
+        `encode=${phases.encodeMs}ms write=${phases.writeMs}ms put=${phases.putMs}ms total=${phases.totalMs}ms`
     );
 
     return {
       ok: true,
-      exportedAt: created.backup.exportedAt,
-      fileCount: created.backup.fileCount,
+      exportedAt: backup.exportedAt,
+      fileCount: backup.fileCount,
       bytes,
       path: target.path,
       sha: newSha,
       reason,
+      phases,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -551,6 +725,16 @@ export async function uploadSiteBackupToGithub(opts?: {
     throw err;
   } finally {
     uploadInFlight = false;
+    if (pendingUploadReason) {
+      const r = pendingUploadReason;
+      pendingUploadReason = null;
+      void uploadSiteBackupToGithub({ reason: `coalesced:${r}` }).catch((err) => {
+        console.warn(
+          '[github-backup] coalesced follow-up failed:',
+          err instanceof Error ? err.message : err
+        );
+      });
+    }
   }
 }
 
@@ -713,6 +897,18 @@ export function queueGithubBackupUploadAfterCriticalSave(reason: string): void {
         if (!st.configured) {
           console.log(
             `[github-backup] critical-save upload skipped (${r}): not configured`
+          );
+          return;
+        }
+        // Defer to scheduler when hourly (etc.) tick is due within 15 minutes.
+        if (
+          st.interval !== 'none' &&
+          st.nextDueAtMs != null &&
+          st.nextDueAtMs - Date.now() <= CRITICAL_DEFER_IF_DUE_WITHIN_MS
+        ) {
+          console.log(
+            `[github-backup] critical-save upload deferred (${r}): scheduled due in ` +
+              `${Math.max(0, Math.round((st.nextDueAtMs - Date.now()) / 1000))}s`
           );
           return;
         }

@@ -751,11 +751,18 @@ export function createServer(): express.Application {
     }
   });
 
-  app.post('/api/site-backup/github/upload', async (_req: Request, res: Response) => {
+  app.post('/api/site-backup/github/upload', async (req: Request, res: Response) => {
     try {
       const { uploadSiteBackupToGithub, getGithubBackupStatus } =
         require('./githubSiteBackup') as typeof import('./githubSiteBackup');
-      const result = await uploadSiteBackupToGithub({ reason: 'manual' });
+      const dryRun =
+        req.query.dry === '1' ||
+        req.query.dry === 'true' ||
+        String(req.query.dry || '') === '1';
+      const result = await uploadSiteBackupToGithub({
+        reason: dryRun ? 'dry-probe' : 'manual',
+        dryRun,
+      });
       res.json({
         ...result,
         ok: true,
@@ -765,7 +772,13 @@ export function createServer(): express.Application {
             require('./siteBackup') as typeof import('./siteBackup');
           return getLatestSiteBackupMeta();
         })(),
-        message: `Uploaded to GitHub (${result.bytes} bytes, ${result.fileCount} files)`,
+        message: result.dryRun
+          ? `Dry-run export (${result.bytes} bytes, ${result.fileCount} files) — no GitHub PUT`
+          : result.skippedUnchanged
+            ? `Skipped unchanged GitHub PUT (${result.bytes} bytes, ${result.fileCount} files)`
+            : result.coalesced
+              ? 'Upload coalesced — another upload was already in progress'
+              : `Uploaded to GitHub (${result.bytes} bytes, ${result.fileCount} files)`,
       });
     } catch (err) {
       res.status(400).json({

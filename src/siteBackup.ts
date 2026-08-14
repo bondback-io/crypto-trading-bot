@@ -9,6 +9,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import {
   atomicWriteJson,
   dataFile,
@@ -442,6 +443,89 @@ export function createAndSaveSiteBackup(): {
     filename: saved.filename,
     meta: getLatestSiteBackupMeta(),
     persistence: getPersistenceStatus(),
+  };
+}
+
+function yieldEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Stable hash of backup file payloads (ignores exportedAt so unchanged DATA_DIR skips PUT). */
+export function stableSiteBackupContentSha(backup: SiteBackup): string {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(backup.files || {}))
+    .digest('hex');
+}
+
+export type GithubUploadExportPhases = {
+  reconcileMs: number;
+  buildMs: number;
+  writeMs: number;
+  encodeMs: number;
+};
+
+/**
+ * Cheap GitHub export path: one compact stringify, one latest write (no stamped
+ * pretty twin), yields between phases so /health can answer during large exports.
+ */
+export async function buildSiteBackupForGithubUpload(): Promise<{
+  backup: SiteBackup;
+  compactJson: string;
+  contentSha256: string;
+  bytes: number;
+  latestPath: string;
+  phases: GithubUploadExportPhases;
+}> {
+  const phases: GithubUploadExportPhases = {
+    reconcileMs: 0,
+    buildMs: 0,
+    writeMs: 0,
+    encodeMs: 0,
+  };
+
+  let t0 = Date.now();
+  try {
+    reconcileCriticalSettingsFromBundledBackup({ reason: 'pre-backup-export' });
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] pre-backup reconcile failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  phases.reconcileMs = Date.now() - t0;
+  await yieldEventLoop();
+
+  t0 = Date.now();
+  const backup = buildSiteBackup();
+  phases.buildMs = Date.now() - t0;
+  await yieldEventLoop();
+
+  t0 = Date.now();
+  const contentSha256 = stableSiteBackupContentSha(backup);
+  const compactJson = JSON.stringify(backup);
+  const bytes = Buffer.byteLength(compactJson, 'utf8');
+  phases.encodeMs = Date.now() - t0;
+  await yieldEventLoop();
+
+  t0 = Date.now();
+  ensureDataDir();
+  const dir = BACKUPS_DIR();
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const latestPath = path.join(dir, LATEST_NAME);
+  // Compact string — atomicWriteJson accepts pre-stringified payload.
+  atomicWriteJson(latestPath, compactJson);
+  latestMetaCache = null;
+  phases.writeMs = Date.now() - t0;
+  await yieldEventLoop();
+
+  return {
+    backup,
+    compactJson,
+    contentSha256,
+    bytes,
+    latestPath,
+    phases,
   };
 }
 
