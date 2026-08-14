@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.343',
+    title: 'Stop post-deploy Deploy-skipped backup storm',
+    sections: ['backup', 'execution', 'overview'],
+    items: [
+      'Root cause: auto-import restored stale lastUploadAtMs from github-backup-settings.json inside the archive, so the hourly scheduler looked overdue every minute after deploy.',
+      'Restore merges backup interval/owner/repo/path but preserves local upload schedule, fingerprints, and auto-import cursors (prefer newer lastUploadAtMs).',
+      'Exports strip upload-runtime fields from github-backup-settings.json; scheduled uploads wait until uptime ≥75s (after deferred auto-import).',
+    ],
+  },
+  {
     version: '1.2.342',
     title: 'Post-deploy RPC lag + Zion Entries boot copy',
     sections: ['execution', 'overview', 'zion', 'backup', 'scanners'],

@@ -297,6 +297,178 @@ function saveGithubBackupSettings(s: GithubBackupSettings): void {
   atomicWriteJson(SETTINGS_FILE(), s);
 }
 
+/**
+ * When restoring github-backup-settings.json from a site backup, take DR config
+ * (interval/owner/repo/path/autoImport) from the archive but preserve local upload
+ * schedule / fingerprint / auto-import cursors so a stale embedded lastUploadAtMs
+ * cannot make the hourly scheduler immediately due again (Deploy-skipped storm).
+ */
+export function mergeGithubBackupSettingsForRestore(
+  incoming: unknown
+): GithubBackupSettings {
+  const fromBackup = (() => {
+    if (incoming == null) return defaultSettings();
+    let raw: Partial<GithubBackupSettings> | null = null;
+    if (typeof incoming === 'string') {
+      try {
+        raw = JSON.parse(incoming) as Partial<GithubBackupSettings>;
+      } catch {
+        raw = null;
+      }
+    } else if (typeof incoming === 'object') {
+      raw = incoming as Partial<GithubBackupSettings>;
+    }
+    if (!raw || typeof raw !== 'object') return defaultSettings();
+    // Reuse load path shape without reading disk.
+    return {
+      ...defaultSettings(),
+      interval: normalizeInterval(raw.interval),
+      owner: String(raw.owner || '').trim(),
+      repo: String(raw.repo || '').trim(),
+      path: String(raw.path || '').trim(),
+      autoImportOnBoot:
+        typeof raw.autoImportOnBoot === 'boolean'
+          ? raw.autoImportOnBoot
+          : true,
+      lastUploadAtMs:
+        raw.lastUploadAtMs != null && Number.isFinite(Number(raw.lastUploadAtMs))
+          ? Number(raw.lastUploadAtMs)
+          : null,
+      lastUploadOk:
+        typeof raw.lastUploadOk === 'boolean' ? raw.lastUploadOk : null,
+      lastUploadError:
+        raw.lastUploadError != null ? String(raw.lastUploadError) : null,
+      lastUploadBytes:
+        raw.lastUploadBytes != null &&
+        Number.isFinite(Number(raw.lastUploadBytes))
+          ? Number(raw.lastUploadBytes)
+          : null,
+      lastRemoteSha:
+        raw.lastRemoteSha != null ? String(raw.lastRemoteSha) : null,
+      lastUploadAttemptAtMs:
+        raw.lastUploadAttemptAtMs != null &&
+        Number.isFinite(Number(raw.lastUploadAttemptAtMs))
+          ? Number(raw.lastUploadAttemptAtMs)
+          : null,
+      consecutiveFailures:
+        raw.consecutiveFailures != null &&
+        Number.isFinite(Number(raw.consecutiveFailures))
+          ? Math.max(0, Math.round(Number(raw.consecutiveFailures)))
+          : 0,
+      uploadBackoffMs:
+        raw.uploadBackoffMs != null &&
+        Number.isFinite(Number(raw.uploadBackoffMs))
+          ? Math.max(0, Math.round(Number(raw.uploadBackoffMs)))
+          : null,
+      lastUploadContentSha:
+        raw.lastUploadContentSha != null
+          ? String(raw.lastUploadContentSha)
+          : null,
+      lastUploadDirFingerprint:
+        raw.lastUploadDirFingerprint != null
+          ? String(raw.lastUploadDirFingerprint)
+          : null,
+      lastAutoImportSha:
+        raw.lastAutoImportSha != null ? String(raw.lastAutoImportSha) : null,
+      lastAutoImportAtMs:
+        raw.lastAutoImportAtMs != null &&
+        Number.isFinite(Number(raw.lastAutoImportAtMs))
+          ? Number(raw.lastAutoImportAtMs)
+          : null,
+      lastAutoImportOk:
+        typeof raw.lastAutoImportOk === 'boolean'
+          ? raw.lastAutoImportOk
+          : null,
+      lastAutoImportError:
+        raw.lastAutoImportError != null
+          ? String(raw.lastAutoImportError)
+          : null,
+      lastAutoImportSkippedReason:
+        raw.lastAutoImportSkippedReason != null
+          ? String(raw.lastAutoImportSkippedReason)
+          : null,
+    } satisfies GithubBackupSettings;
+  })();
+
+  if (!fs.existsSync(SETTINGS_FILE())) {
+    return fromBackup;
+  }
+
+  const local = loadGithubBackupSettings();
+  const localUpload = local.lastUploadAtMs;
+  const backupUpload = fromBackup.lastUploadAtMs;
+  let lastUploadAtMs = localUpload;
+  if (backupUpload != null && (localUpload == null || backupUpload > localUpload)) {
+    lastUploadAtMs = backupUpload;
+  } else if (localUpload != null) {
+    lastUploadAtMs = localUpload;
+  }
+
+  return {
+    // DR config from archive
+    interval: fromBackup.interval,
+    owner: fromBackup.owner || local.owner,
+    repo: fromBackup.repo || local.repo,
+    path: fromBackup.path || local.path,
+    autoImportOnBoot: fromBackup.autoImportOnBoot,
+    // Prefer newer upload clock; otherwise keep local runtime
+    lastUploadAtMs,
+    lastUploadOk: local.lastUploadOk ?? fromBackup.lastUploadOk,
+    lastUploadError: local.lastUploadError ?? fromBackup.lastUploadError,
+    lastUploadBytes: local.lastUploadBytes ?? fromBackup.lastUploadBytes,
+    lastRemoteSha: local.lastRemoteSha || fromBackup.lastRemoteSha,
+    lastUploadAttemptAtMs:
+      local.lastUploadAttemptAtMs != null &&
+      fromBackup.lastUploadAttemptAtMs != null
+        ? Math.max(local.lastUploadAttemptAtMs, fromBackup.lastUploadAttemptAtMs)
+        : local.lastUploadAttemptAtMs ?? fromBackup.lastUploadAttemptAtMs,
+    consecutiveFailures: local.consecutiveFailures,
+    uploadBackoffMs: local.uploadBackoffMs,
+    lastUploadContentSha:
+      local.lastUploadContentSha || fromBackup.lastUploadContentSha,
+    lastUploadDirFingerprint:
+      local.lastUploadDirFingerprint || fromBackup.lastUploadDirFingerprint,
+    lastAutoImportSha: local.lastAutoImportSha || fromBackup.lastAutoImportSha,
+    lastAutoImportAtMs:
+      local.lastAutoImportAtMs != null && fromBackup.lastAutoImportAtMs != null
+        ? Math.max(local.lastAutoImportAtMs, fromBackup.lastAutoImportAtMs)
+        : local.lastAutoImportAtMs ?? fromBackup.lastAutoImportAtMs,
+    lastAutoImportOk: local.lastAutoImportOk ?? fromBackup.lastAutoImportOk,
+    lastAutoImportError:
+      local.lastAutoImportError ?? fromBackup.lastAutoImportError,
+    lastAutoImportSkippedReason:
+      local.lastAutoImportSkippedReason ??
+      fromBackup.lastAutoImportSkippedReason,
+  };
+}
+
+/**
+ * Export-only: keep interval/owner/repo/path/autoImport; strip upload schedule
+ * runtime so archives cannot re-poison lastUploadAtMs on restore.
+ */
+export function stripGithubBackupSettingsForExport(
+  data: unknown
+): Record<string, unknown> {
+  let raw: Record<string, unknown> = {};
+  if (typeof data === 'string') {
+    try {
+      raw = JSON.parse(data) as Record<string, unknown>;
+    } catch {
+      raw = {};
+    }
+  } else if (data && typeof data === 'object') {
+    raw = data as Record<string, unknown>;
+  }
+  return {
+    interval: normalizeInterval(raw.interval),
+    owner: String(raw.owner || '').trim(),
+    repo: String(raw.repo || '').trim(),
+    path: String(raw.path || '').trim(),
+    autoImportOnBoot:
+      typeof raw.autoImportOnBoot === 'boolean' ? raw.autoImportOnBoot : true,
+  };
+}
+
 export function resolveGithubBackupTarget(settings?: GithubBackupSettings): {
   owner: string;
   repo: string;
@@ -1109,7 +1281,17 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
   }
 }
 
+/** After boot-seq stage 5 + deferred GitHub auto-import (≥70s). */
+const SCHEDULED_UPLOAD_MIN_UPTIME_MS = 75_000;
+
 async function scheduledTick(): Promise<void> {
+  try {
+    const { getProcessUptimeMs } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    if (getProcessUptimeMs() < SCHEDULED_UPLOAD_MIN_UPTIME_MS) return;
+  } catch {
+    /* optional — proceed if timeline unavailable */
+  }
   const s = loadGithubBackupSettings();
   if (s.interval === 'none') return;
   const target = resolveGithubBackupTarget(s);
@@ -1133,16 +1315,32 @@ export function startGithubSiteBackupScheduler(): void {
   tickTimer = setInterval(() => {
     void scheduledTick();
   }, TICK_MS);
-  // Opportunistic first check shortly after boot
-  setTimeout(() => {
-    void scheduledTick();
-  }, 15_000);
+  // First check after auto-import window so restore cannot clobber then re-upload.
+  const armFirstTick = (): void => {
+    try {
+      const { getProcessUptimeMs } =
+        require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+      const waitMs = Math.max(
+        0,
+        SCHEDULED_UPLOAD_MIN_UPTIME_MS - getProcessUptimeMs()
+      );
+      setTimeout(() => {
+        void scheduledTick();
+      }, waitMs);
+    } catch {
+      setTimeout(() => {
+        void scheduledTick();
+      }, SCHEDULED_UPLOAD_MIN_UPTIME_MS);
+    }
+  };
+  armFirstTick();
   const st = getGithubBackupStatus();
   console.log(
     `[github-backup] scheduler on · interval=${st.interval}` +
       (st.configured
         ? ` · ${st.owner}/${st.repo}/${st.path}`
-        : ' · not fully configured')
+        : ' · not fully configured') +
+      ` · first scheduled check at uptime>=${SCHEDULED_UPLOAD_MIN_UPTIME_MS / 1000}s`
   );
 }
 

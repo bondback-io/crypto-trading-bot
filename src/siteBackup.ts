@@ -145,6 +145,16 @@ function readJsonIfPresent(relPath: string): unknown | null {
 function maybeCapBackupPayload(rel: string, data: unknown): unknown {
   const cleaned = toPosixRel(rel);
   const base = path.posix.basename(cleaned);
+  // Never embed upload-schedule runtime in archives (restore would clobber due clock).
+  if (cleaned === 'github-backup-settings.json' || base === 'github-backup-settings.json') {
+    try {
+      const { stripGithubBackupSettingsForExport } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      return stripGithubBackupSettingsForExport(data);
+    } catch {
+      return data;
+    }
+  }
   const shouldCap =
     BACKUP_CAP_BASENAMES.has(base) ||
     BACKUP_CAP_PREFIXES.some(
@@ -402,6 +412,19 @@ function safeRelPath(rel: string): string | null {
   return cleaned;
 }
 
+function prepareRestoreFileData(safeRel: string, data: unknown): unknown {
+  if (safeRel === 'github-backup-settings.json') {
+    try {
+      const { mergeGithubBackupSettingsForRestore } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      return mergeGithubBackupSettingsForRestore(data);
+    } catch {
+      return data;
+    }
+  }
+  return data;
+}
+
 function writeBackupFilesSync(backup: SiteBackup): string[] {
   ensureDataDir();
   const written: string[] = [];
@@ -413,7 +436,7 @@ function writeBackupFilesSync(backup: SiteBackup): string[] {
     const full = dataFile(...safe.split('/'));
     const dir = path.dirname(full);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    atomicWriteJson(full, data);
+    atomicWriteJson(full, prepareRestoreFileData(safe, data));
     written.push(safe);
   }
   return written;
@@ -431,7 +454,7 @@ async function writeBackupFiles(backup: SiteBackup): Promise<string[]> {
     const full = dataFile(...safe.split('/'));
     const dir = path.dirname(full);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    atomicWriteJson(full, data);
+    atomicWriteJson(full, prepareRestoreFileData(safe, data));
     written.push(safe);
     if (++n % 8 === 0) await yieldEventLoop();
   }
