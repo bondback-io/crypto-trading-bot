@@ -52,11 +52,18 @@ export interface GithubBackupSettings {
    * by GITHUB_BACKUP_AUTO_IMPORT=1|true|yes|on.
    */
   autoImportOnBoot: boolean;
+  /** Last successful upload only (not advanced on failure). */
   lastUploadAtMs: number | null;
   lastUploadOk: boolean | null;
   lastUploadError: string | null;
   lastUploadBytes: number | null;
   lastRemoteSha: string | null;
+  /** Start of every upload attempt (success or fail) — drives failure backoff. */
+  lastUploadAttemptAtMs: number | null;
+  /** Consecutive failed uploads since last success. */
+  consecutiveFailures: number;
+  /** Current failure backoff window in ms (exponential, capped at schedule interval). */
+  uploadBackoffMs: number | null;
   /** Blob SHA of the last successful auto-import (or manual GitHub restore). */
   lastAutoImportSha: string | null;
   lastAutoImportAtMs: number | null;
@@ -81,6 +88,10 @@ export interface GithubBackupStatus {
   lastUploadOk: boolean | null;
   lastUploadError: string | null;
   lastUploadBytes: number | null;
+  lastUploadAttemptAtMs: number | null;
+  lastUploadAttemptAt: string | null;
+  consecutiveFailures: number;
+  uploadBackoffMs: number | null;
   lastAutoImportSha: string | null;
   lastAutoImportAtMs: number | null;
   lastAutoImportAt: string | null;
@@ -101,6 +112,8 @@ let criticalUploadTimer: ReturnType<typeof setTimeout> | null = null;
 let criticalUploadQueuedReason: string | null = null;
 /** Min gap between critical-save uploads — prevents HMC/FPR save storms from stalling the event loop. */
 const CRITICAL_UPLOAD_MIN_GAP_MS = 60_000;
+/** First failure wait before another full export+PUT (was every 60s forever). */
+const FAILURE_BACKOFF_BASE_MS = 5 * 60 * 1000;
 let lastCriticalUploadStartedAt = 0;
 
 function envToken(): string {
@@ -139,6 +152,9 @@ function defaultSettings(): GithubBackupSettings {
     lastUploadError: null,
     lastUploadBytes: null,
     lastRemoteSha: null,
+    lastUploadAttemptAtMs: null,
+    consecutiveFailures: 0,
+    uploadBackoffMs: null,
     lastAutoImportSha: null,
     lastAutoImportAtMs: null,
     lastAutoImportOk: null,
@@ -203,6 +219,20 @@ export function loadGithubBackupSettings(): GithubBackupSettings {
         : null,
     lastRemoteSha:
       raw.lastRemoteSha != null ? String(raw.lastRemoteSha) : null,
+    lastUploadAttemptAtMs:
+      raw.lastUploadAttemptAtMs != null &&
+      Number.isFinite(Number(raw.lastUploadAttemptAtMs))
+        ? Number(raw.lastUploadAttemptAtMs)
+        : null,
+    consecutiveFailures:
+      raw.consecutiveFailures != null &&
+      Number.isFinite(Number(raw.consecutiveFailures))
+        ? Math.max(0, Math.round(Number(raw.consecutiveFailures)))
+        : 0,
+    uploadBackoffMs:
+      raw.uploadBackoffMs != null && Number.isFinite(Number(raw.uploadBackoffMs))
+        ? Math.max(0, Math.round(Number(raw.uploadBackoffMs)))
+        : null,
     lastAutoImportSha:
       raw.lastAutoImportSha != null ? String(raw.lastAutoImportSha) : null,
     lastAutoImportAtMs:
@@ -243,11 +273,42 @@ export function resolveGithubBackupTarget(settings?: GithubBackupSettings): {
   };
 }
 
+function scheduleIntervalMs(interval: GithubBackupInterval): number | null {
+  if (interval === 'none') return null;
+  return INTERVAL_MS[interval];
+}
+
+/**
+ * Next scheduled upload time.
+ * Success → lastUploadAtMs + interval.
+ * Sticky failure → lastUploadAttemptAtMs + min(interval, exponential backoff)
+ * so failed ticks do not re-run multi-MB export every 60s forever.
+ */
 function nextDueAtMs(s: GithubBackupSettings): number | null {
   if (s.interval === 'none') return null;
-  const ms = INTERVAL_MS[s.interval];
+  const scheduleMs = scheduleIntervalMs(s.interval);
+  if (scheduleMs == null) return null;
+
+  if (s.lastUploadOk === false && s.lastUploadAttemptAtMs != null) {
+    const backoff = Math.max(
+      FAILURE_BACKOFF_BASE_MS,
+      Number(s.uploadBackoffMs) || FAILURE_BACKOFF_BASE_MS
+    );
+    return s.lastUploadAttemptAtMs + Math.min(scheduleMs, backoff);
+  }
+
   if (!s.lastUploadAtMs) return Date.now(); // due ASAP when never uploaded
-  return s.lastUploadAtMs + ms;
+  return s.lastUploadAtMs + scheduleMs;
+}
+
+function computeFailureBackoffMs(
+  consecutiveFailures: number,
+  interval: GithubBackupInterval
+): number {
+  const scheduleMs = scheduleIntervalMs(interval) ?? FAILURE_BACKOFF_BASE_MS;
+  const exp = Math.max(0, consecutiveFailures - 1);
+  const raw = FAILURE_BACKOFF_BASE_MS * Math.pow(2, exp);
+  return Math.min(scheduleMs, raw);
 }
 
 export function getGithubBackupStatus(): GithubBackupStatus {
@@ -276,6 +337,12 @@ export function getGithubBackupStatus(): GithubBackupStatus {
     lastUploadOk: s.lastUploadOk,
     lastUploadError: s.lastUploadError,
     lastUploadBytes: s.lastUploadBytes,
+    lastUploadAttemptAtMs: s.lastUploadAttemptAtMs,
+    lastUploadAttemptAt: s.lastUploadAttemptAtMs
+      ? new Date(s.lastUploadAttemptAtMs).toISOString()
+      : null,
+    consecutiveFailures: s.consecutiveFailures || 0,
+    uploadBackoffMs: s.uploadBackoffMs,
     lastAutoImportSha: s.lastAutoImportSha,
     lastAutoImportAtMs: s.lastAutoImportAtMs,
     lastAutoImportAt: s.lastAutoImportAtMs
@@ -384,6 +451,9 @@ export async function uploadSiteBackupToGithub(opts?: {
   const reason = opts?.reason || 'manual';
   try {
     const s = loadGithubBackupSettings();
+    s.lastUploadAttemptAtMs = Date.now();
+    saveGithubBackupSettings(s);
+
     const target = resolveGithubBackupTarget(s);
     if (!target.token) {
       throw new Error(
@@ -438,6 +508,8 @@ export async function uploadSiteBackupToGithub(opts?: {
       lastUploadError: null,
       lastUploadBytes: bytes,
       lastRemoteSha: newSha || null,
+      consecutiveFailures: 0,
+      uploadBackoffMs: null,
     };
     saveGithubBackupSettings(next);
 
@@ -459,9 +531,20 @@ export async function uploadSiteBackupToGithub(opts?: {
     const msg = err instanceof Error ? err.message : String(err);
     try {
       const s = loadGithubBackupSettings();
+      const failures = (s.consecutiveFailures || 0) + 1;
+      const backoff = computeFailureBackoffMs(failures, s.interval);
       s.lastUploadOk = false;
       s.lastUploadError = msg.slice(0, 400);
+      s.consecutiveFailures = failures;
+      s.uploadBackoffMs = backoff;
+      if (s.lastUploadAttemptAtMs == null) {
+        s.lastUploadAttemptAtMs = Date.now();
+      }
       saveGithubBackupSettings(s);
+      console.warn(
+        `[github-backup] upload failed (failures=${failures}, backoff=${Math.round(backoff / 1000)}s):`,
+        msg.slice(0, 200)
+      );
     } catch {
       /* ignore */
     }

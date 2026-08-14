@@ -26532,7 +26532,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<br>Last saved: ' + last;
         }
       }
-      try { refreshSiteBackupStatus(); } catch (_) {}
+      try {
+        // 1.2.339: site-backup meta can parse multi-MB JSON after writes —
+        // only on full refresh or while Backup tab is open (not every slim 5s).
+        const onBackupTab =
+          document.querySelector('[data-tab-panel="backup"]:not(.hidden)') != null;
+        if (forceFull || onBackupTab) {
+          refreshSiteBackupStatus();
+        }
+      } catch (_) {}
       try { refreshLearningHealth({ statusOnly: true }); } catch (_) {}
 
       const runWrap = document.getElementById('run-status');
@@ -37519,6 +37527,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         if (data.lastUploadOk === false && data.lastUploadError) {
           parts.push('error: ' + String(data.lastUploadError).slice(0, 120));
+        }
+        if (
+          data.lastUploadOk === false &&
+          (data.consecutiveFailures > 0 || data.uploadBackoffMs)
+        ) {
+          parts.push(
+            'retry backoff: ' +
+              Math.round((data.uploadBackoffMs || 0) / 1000) +
+              's · failures=' +
+              (data.consecutiveFailures || 0)
+          );
         }
         if (data.lastAutoImportAtMs) {
           parts.push(

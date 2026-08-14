@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.339',
+    title: 'GitHub backup failure backoff + Stats report probes',
+    sections: ['execution', 'overview'],
+    items: [
+      'Fix compounding lag loop: failed scheduled GitHub uploads no longer leave lastUploadAtMs stale — exponential backoff (5m→… capped at schedule interval) via lastUploadAttemptAtMs / consecutiveFailures / uploadBackoffMs.',
+      'Dashboard: /api/site-backup/latest only on full refresh or Backup tab (not every slim 5s tick) to avoid multi-MB parse after each write.',
+      'scripts/githubBackupLagProbe.cjs (npm run probe:github-backup-lag) detects overdue+fail sticky retries; scripts/statsReportProbe.cjs (npm run probe:stats-reports) proves Generate report / Learning Report are CPU-only (no Solana RPC bump).',
+    ],
+  },
+  {
     version: '1.2.338',
     title: 'Post-deploy RPC overlap + dashboard slim refresh',
     sections: ['execution', 'overview'],
