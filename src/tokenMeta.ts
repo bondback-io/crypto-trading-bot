@@ -4,6 +4,7 @@
  */
 
 import { logger, errorToMeta, loggedFetch } from './logger';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export interface TokenMeta {
   mint: string;
@@ -16,6 +17,14 @@ export interface TokenMeta {
 
 const cache = new Map<string, TokenMeta>();
 const inflight = new Map<string, Promise<TokenMeta>>();
+const TOKEN_META_CAP = 1000;
+
+function capTokenMeta(): Record<string, number> {
+  trimMapToCap(cache, TOKEN_META_CAP);
+  trimMapToCap(inflight, TOKEN_META_CAP);
+  return { tokenMeta: cache.size, tokenMetaInflight: inflight.size };
+}
+registerCacheSweep(capTokenMeta);
 
 function isValidMint(m: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m);
@@ -224,6 +233,7 @@ export function cacheTokenMeta(
     source: 'cache',
   };
   cache.set(mint, meta);
+  trimMapToCap(cache, TOKEN_META_CAP);
   return meta;
 }
 

@@ -12,6 +12,7 @@ import {
   formatCooldownSecs,
   QuietLogGate,
 } from './httpProviderGate';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export interface MarketCandle {
   /** Unix ms */
@@ -2413,6 +2414,23 @@ const geckoOhlcvInflight = new Map<
   string,
   Promise<FetchTokenOhlcvResult>
 >();
+const MARKET_DATA_CACHE_CAP = 400;
+
+function capMarketDataCaches(): Record<string, number> {
+  trimMapToCap(ohlcvCache, MARKET_DATA_CACHE_CAP);
+  trimMapToCap(geckoOhlcvInflight, MARKET_DATA_CACHE_CAP);
+  trimMapToCap(jupiterMarkCache, MARKET_DATA_CACHE_CAP);
+  trimMapToCap(jupiterMarkInflight, MARKET_DATA_CACHE_CAP);
+  trimMapToCap(dexSnapshotCache, MARKET_DATA_CACHE_CAP);
+  trimMapToCap(dexSnapshotInflight, MARKET_DATA_CACHE_CAP);
+  trimMapToCap(lastActivityFetchAt, MARKET_DATA_CACHE_CAP);
+  return {
+    ohlcvCache: ohlcvCache.size,
+    jupiterMarkCache: jupiterMarkCache.size,
+    dexSnapshotCache: dexSnapshotCache.size,
+  };
+}
+registerCacheSweep(capMarketDataCaches);
 
 const GECKO_COOLDOWN_BASE_MS = 15_000;
 const GECKO_COOLDOWN_CAP_MS = 4 * 60_000;
@@ -2813,6 +2831,7 @@ export async function fetchTokenOhlcvCandles(
       }
 
       ohlcvCache.set(key, { candles, source, solUsd, at: Date.now(), tf });
+      trimMapToCap(ohlcvCache, MARKET_DATA_CACHE_CAP);
       return { candles, source, solUsd, tf };
     } finally {
       geckoOhlcvInflight.delete(key);

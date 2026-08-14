@@ -27078,6 +27078,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ' · Data ' +
             (d && d.latencyMs != null ? Math.round(d.latencyMs) + 'ms' : '—') +
             (rpcObj.background_idle_when_workloads_off ? ' · bg idle' : '') +
+            ' · heap=' +
+            (rpcObj.heap_used_mb != null ? rpcObj.heap_used_mb + 'MB' : '—') +
+            (rpcObj.active_timers_count != null
+              ? ' · timers=' + rpcObj.active_timers_count
+              : '') +
             thrash;
           cp.style.color = thrash || idleOn ? '#fbbf24' : '#94a3b8';
         }

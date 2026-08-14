@@ -22,6 +22,7 @@ import {
 } from './technicalLevels';
 import { isMintOnActiveDipWatch } from './dipSetupWatch';
 import { detectSupportReclaim } from './supportReclaim';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export type ScalperWatchStatus =
   | 'watching'
@@ -88,6 +89,14 @@ const SCALPER_MICROCAP_BELOW = 150_000;
 const watches = new Map<string, ScalperWatchEntry>();
 const lastMcRefreshAt = new Map<string, number>();
 const unwatchCooldownUntil = new Map<string, number>();
+const SCALPER_SIDECAR_CAP = 500;
+
+function capScalperWatchSidecars(): Record<string, number> {
+  trimMapToCap(unwatchCooldownUntil, SCALPER_SIDECAR_CAP);
+  trimMapToCap(lastMcRefreshAt, SCALPER_SIDECAR_CAP);
+  return { scalperUnwatchCooldown: unwatchCooldownUntil.size };
+}
+registerCacheSweep(capScalperWatchSidecars);
 
 /** Rolling Mode B admit funnel (session counters). */
 const modeBFunnel = {

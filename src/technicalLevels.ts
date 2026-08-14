@@ -13,6 +13,7 @@
 
 import { config } from './config';
 import { isStrategyEnabled, logStrategyDecision } from './strategies';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export const FIB_RATIOS = [0.236, 0.382, 0.5, 0.618, 0.786] as const;
 export type FibRatio = (typeof FIB_RATIOS)[number];
@@ -150,6 +151,17 @@ const snapshotCache = new Map<
   { at: number; snap: TechnicalSnapshot }
 >();
 const CACHE_TTL_MS = 4_000;
+const TECH_LEVELS_CAP = 400;
+
+function capTechnicalLevels(): Record<string, number> {
+  trimMapToCap(priceHistory, TECH_LEVELS_CAP);
+  trimMapToCap(snapshotCache, TECH_LEVELS_CAP);
+  return {
+    technicalPriceHistory: priceHistory.size,
+    technicalSnapshotCache: snapshotCache.size,
+  };
+}
+registerCacheSweep(capTechnicalLevels);
 
 function num(v: unknown): number | null {
   const n = Number(v);
@@ -314,6 +326,7 @@ export function recordPriceTick(
   if (!buf) {
     buf = [];
     priceHistory.set(mint, buf);
+    trimMapToCap(priceHistory, TECH_LEVELS_CAP);
   }
   const last = buf[buf.length - 1];
   // Dedupe near-identical ticks within 2s
@@ -1103,6 +1116,7 @@ export function getTechnicalSnapshot(
     lookback: input?.lookback,
   });
   snapshotCache.set(mint, { at: Date.now(), snap });
+  trimMapToCap(snapshotCache, TECH_LEVELS_CAP);
   return snap;
 }
 

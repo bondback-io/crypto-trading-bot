@@ -13,6 +13,7 @@ import { config, normalizeRiskLevel, type RiskLevel } from './config';
 import { fetchLivePriceSol } from './marketData';
 import { logger, errorToMeta, loggedFetch } from './logger';
 import { isStrategyEnabled } from './strategies';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export interface SellHistoryEntry {
   mint: string;
@@ -101,6 +102,14 @@ export type ExitReentryClass =
 /** Sell history keyed by mint (newest last) */
 const sellHistoryByMint = new Map<string, SellHistoryEntry[]>();
 const candidates = new Map<string, ReBuyCandidate>();
+const REBUY_MAP_CAP = 500;
+
+function capReBuyMaps(): Record<string, number> {
+  trimMapToCap(sellHistoryByMint, REBUY_MAP_CAP);
+  trimMapToCap(candidates, REBUY_MAP_CAP);
+  return { reBuyHistory: sellHistoryByMint.size, reBuyCandidates: candidates.size };
+}
+registerCacheSweep(capReBuyMaps);
 
 const MAX_HISTORY_PER_MINT = 20;
 
@@ -363,6 +372,7 @@ function armCandidate(
   };
 
   candidates.set(full.mint, candidate);
+  trimMapToCap(candidates, REBUY_MAP_CAP);
   return candidate;
 }
 

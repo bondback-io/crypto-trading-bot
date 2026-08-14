@@ -4,7 +4,7 @@
 
 import { PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { config, persistUserSettings } from './config';
-import { getConnection, runWithRpcRole } from './connection';
+import { getConnection, runWithRpcRole, isRpc429Message } from './connection';
 import { getJitoStatus, getJitoStats } from './jito';
 import { isStrategyEnabled } from './strategies';
 
@@ -123,8 +123,12 @@ async function checkSandwichRiskInner(
         inspected += 1;
         const buyers = extractMintBuyers(tx, mint);
         for (const b of buyers) buyerOwners.add(b);
-      } catch {
-        // ignore individual parse failures
+      } catch (parseErr) {
+        const message =
+          parseErr instanceof Error ? parseErr.message : String(parseErr);
+        if (isRpc429Message(message)) {
+          return empty(true, 'Check aborted — Trading rate-limited (429)');
+        }
       }
     }
 
@@ -156,6 +160,10 @@ async function checkSandwichRiskInner(
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (isRpc429Message(message)) {
+      console.warn('[mev] Sandwich check aborted — Trading 429');
+      return empty(true, 'Check aborted — Trading rate-limited (429)');
+    }
     // Fail-open with warning so RPC blips don't halt trading entirely
     console.warn(`[mev] Sandwich check error (allowing trade): ${message}`);
     return empty(true, `Check failed (allowed): ${message}`);

@@ -66,6 +66,7 @@ import {
   applyTradeProfileExitRules,
   getGlobalMicroBotTakeProfitPct,
 } from './tradeProfiles';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 /**
  * Effective TP% for a position — Global Micro-Bot Take Profit master override
@@ -505,6 +506,14 @@ const M5_ACTIVITY_RING_MAX = 8;
 const M5_ACTIVITY_MIN_INTERVAL_MS = 60_000;
 const m5ActivityRing = new Map<string, number[]>();
 const m5ActivityRingAt = new Map<string, number>();
+const PAPER_MARK_CAP = 500;
+
+function capPaperM5Rings(): Record<string, number> {
+  trimMapToCap(m5ActivityRing, PAPER_MARK_CAP);
+  trimMapToCap(m5ActivityRingAt, PAPER_MARK_CAP);
+  return { paperM5Ring: m5ActivityRing.size };
+}
+registerCacheSweep(capPaperM5Rings);
 
 export function pushM5ActivitySample(
   mint: string,
@@ -3246,6 +3255,7 @@ export class PaperTrader {
     position.costSol = 0;
 
     this.positions.delete(positionId);
+    this.dropMintCachesIfUnused(position.mint);
     this.closedPositions.push({
       ...position,
       // Preserve buy-in for Closed Trades UI (open book zeros costSol)
@@ -6238,6 +6248,36 @@ export class PaperTrader {
     this.autoCheckStartedAt = 0;
   }
 
+  private dropMintCachesIfUnused(mint: string): void {
+    const stillOpen = [...this.positions.values()].some(
+      (p) => p.status === 'open' && p.mint === mint
+    );
+    if (stillOpen) return;
+    this.priceCache.delete(mint);
+    this.markMetaCache.delete(mint);
+    this.marketCapCache.delete(mint);
+    this.marketActivityCache.delete(mint);
+    m5ActivityRing.delete(mint);
+    m5ActivityRingAt.delete(mint);
+  }
+
+  sweepMarkCaches(): Record<string, number> {
+    trimMapToCap(this.priceCache, PAPER_MARK_CAP);
+    trimMapToCap(this.markMetaCache, PAPER_MARK_CAP);
+    trimMapToCap(this.marketCapCache, PAPER_MARK_CAP);
+    trimMapToCap(this.marketActivityCache, PAPER_MARK_CAP);
+    capPaperM5Rings();
+    return {
+      paperPriceCache: this.priceCache.size,
+      paperMarkMeta: this.markMetaCache.size,
+      paperClosedRing: this.closedPositions.length,
+    };
+  }
+
+  closedRingSize(): number {
+    return this.closedPositions.length;
+  }
+
   /** Simulate price movement for demo/testing (optional) */
   simulatePriceTick(mint: string, changePct: number): void {
     const current = this.priceCache.get(mint);
@@ -6248,3 +6288,4 @@ export class PaperTrader {
 
 /** Singleton instance used across the bot */
 export const paperTrader = new PaperTrader();
+registerCacheSweep(() => paperTrader.sweepMarkCaches());

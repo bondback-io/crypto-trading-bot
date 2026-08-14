@@ -5,6 +5,7 @@
 
 import { logger, errorToMeta, loggedFetch } from './logger';
 import type { LaunchEvent } from './marketData';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export type JupiterCategory = 'toptraded' | 'toptrending' | 'toporganicscore';
 export type JupiterInterval = '5m' | '1h' | '6h' | '24h';
@@ -74,6 +75,17 @@ const mintLookupCache = new Map<
   string,
   { token: JupiterTokenInfo | null; expiresAt: number }
 >();
+const JUPITER_CACHE_CAP = 800;
+
+function capJupiterTokenCaches(): Record<string, number> {
+  trimMapToCap(cache, JUPITER_CACHE_CAP);
+  trimMapToCap(mintLookupCache, JUPITER_CACHE_CAP);
+  return {
+    jupiterTokens: cache.size,
+    jupiterMintLookup: mintLookupCache.size,
+  };
+}
+registerCacheSweep(capJupiterTokenCaches);
 
 let lastError: string | null = null;
 let lastFetchAt: number | null = null;

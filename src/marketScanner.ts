@@ -164,6 +164,7 @@ const seenThisSession = new Set<string>();
 const SCANNER_MINT_CACHE_CAP = 3_000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let firstPollTimer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let pollInFlight = false;
 let lastPollAt: number | null = null;
@@ -1840,7 +1841,8 @@ export function startMarketScanner(): void {
   } catch {
     /* optional */
   }
-  setTimeout(() => {
+  firstPollTimer = setTimeout(() => {
+    firstPollTimer = null;
     void runScannerPollOnce();
   }, firstPollDelayMs);
   // Wake timer only — runScannerPollOnce enforces ≥~22s adaptive spacing.
@@ -1856,6 +1858,10 @@ export function startMarketScanner(): void {
 
 export function stopMarketScanner(): void {
   running = false;
+  if (firstPollTimer) {
+    clearTimeout(firstPollTimer);
+    firstPollTimer = null;
+  }
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;

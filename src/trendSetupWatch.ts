@@ -18,6 +18,7 @@ import {
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
 import { noteWatcherPoll } from './watcherPollMetrics';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export type TrendWatchStatus =
   | 'watching'
@@ -72,6 +73,14 @@ const TRIGGER_RECLAIM_PCT = 1.0;
 const watches = new Map<string, TrendWatchEntry>();
 let lastMcRefreshAt = new Map<string, number>();
 const unwatchCooldownUntil = new Map<string, number>();
+const TREND_SIDECAR_CAP = 500;
+
+function capTrendWatchSidecars(): Record<string, number> {
+  trimMapToCap(unwatchCooldownUntil, TREND_SIDECAR_CAP);
+  trimMapToCap(lastMcRefreshAt, TREND_SIDECAR_CAP);
+  return { trendUnwatchCooldown: unwatchCooldownUntil.size };
+}
+registerCacheSweep(capTrendWatchSidecars);
 
 const trendFunnel = {
   offered: 0,

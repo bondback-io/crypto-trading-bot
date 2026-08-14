@@ -31,6 +31,7 @@ import {
 } from './rpcLoadControl';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
 import { logger } from './logger';
@@ -1497,6 +1498,18 @@ type SignalHandler = (signal: TradeSignal) => void;
 const recentBuys = new Map<string, WalletBuyEvent[]>();
 const lastSignature = new Map<string, string>();
 const walletLastActivity = new Map<string, WalletLastActivity>();
+const MONITOR_MAP_CAP = 2000;
+
+function capMonitorMaps(): Record<string, number> {
+  trimMapToCap(lastSignature, MONITOR_MAP_CAP);
+  trimMapToCap(walletLastActivity, MONITOR_MAP_CAP);
+  trimMapToCap(recentBuys, MONITOR_MAP_CAP);
+  return {
+    monitorLastSig: lastSignature.size,
+    monitorWalletActivity: walletLastActivity.size,
+  };
+}
+registerCacheSweep(capMonitorMaps);
 
 // Dip SM buyback / prior-buy detection — live Paper + Live Sim path
 registerDipBuyHistoryProvider((mint) => {
@@ -1570,6 +1583,11 @@ let pollRotationOffset = 0;
 let softWatchRotateOffset = 0;
 /** address → last ms included in soft-watch set (fair coverage across full pool). */
 const softWatchLastCoveredAt = new Map<string, number>();
+const SOFT_WATCH_MAP_CAP = 2000;
+registerCacheSweep(() => {
+  trimMapToCap(softWatchLastCoveredAt, SOFT_WATCH_MAP_CAP);
+  return { softWatchCovered: softWatchLastCoveredAt.size };
+});
 let softWatchCoverageLogAt = 0;
 let lastSoftWatchCoveragePct: number | null = null;
 let lastSoftWatchStickyN = 0;
@@ -1907,6 +1925,10 @@ const ACTIVITY_PER_WALLET_MIN_MS = 45 * 60 * 1000;
 /** Cap how many wallets get a full activity refresh per timer tick. */
 const ACTIVITY_MAX_PER_CYCLE = 8;
 const activityRefreshAt = new Map<string, number>();
+registerCacheSweep(() => {
+  trimMapToCap(activityRefreshAt, 2000);
+  return { activityRefreshAt: activityRefreshAt.size };
+});
 let activityRotationOffset = 0;
 let lastFullActivityPassAt = 0;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -2117,6 +2139,9 @@ async function pollAllWallets(): Promise<void> {
     const { isRpcWorkloadEnabled } =
       require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
     if (!isRpcWorkloadEnabled('wallet_poll')) return;
+    const { shouldIdleIsolate } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (shouldIdleIsolate()) return;
   } catch {
     /* */
   }
@@ -2528,6 +2553,9 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
     const { isRpcWorkloadEnabled } =
       require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
     if (!isRpcWorkloadEnabled('activity')) return reports;
+    const { shouldIdleIsolate } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    if (shouldIdleIsolate()) return reports;
   } catch {
     /* */
   }

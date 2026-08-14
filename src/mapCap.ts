@@ -23,3 +23,24 @@ export function trimSetToCap<T>(set: Set<T>, cap: number): void {
     set.delete(first);
   }
 }
+
+const sweepers: Array<() => Record<string, number> | void> = [];
+
+export function registerCacheSweep(
+  fn: () => Record<string, number> | void
+): void {
+  sweepers.push(fn);
+}
+
+export function runRegisteredCacheSweeps(): Record<string, number> {
+  const sizes: Record<string, number> = {};
+  for (const fn of sweepers) {
+    try {
+      const extra = fn();
+      if (extra) Object.assign(sizes, extra);
+    } catch {
+      /* */
+    }
+  }
+  return sizes;
+}

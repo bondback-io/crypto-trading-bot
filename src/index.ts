@@ -153,6 +153,16 @@ async function main(): Promise<void> {
   // Bind /health FIRST so Render/Fly health checks never see 502 while RPC/GMGN boot.
   // Public Solana RPC 429 retries can hang getSlot for minutes otherwise.
   startServer();
+  try {
+    const { startHeapWatchdog } =
+      require('./heapWatchdog') as typeof import('./heapWatchdog');
+    startHeapWatchdog();
+  } catch (err) {
+    console.warn(
+      '[boot] heap watchdog failed to start:',
+      err instanceof Error ? err.message : err
+    );
+  }
 
   try {
     const { getAppVersion } = require('./version') as typeof import('./version');
@@ -365,8 +375,42 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log('\n[boot] Shutting down…');
     try {
+      const { stopHeapWatchdog } =
+        require('./heapWatchdog') as typeof import('./heapWatchdog');
+      stopHeapWatchdog();
+    } catch {
+      /* ignore */
+    }
+    try {
+      const { stopRpcHealthMonitor } =
+        require('./connection') as typeof import('./connection');
+      stopRpcHealthMonitor();
+    } catch {
+      /* ignore */
+    }
+    try {
+      const { stopMonitor } = require('./monitor') as typeof import('./monitor');
+      stopMonitor();
+    } catch {
+      /* ignore */
+    }
+    try {
+      const { stopMarketScanner } =
+        require('./marketScanner') as typeof import('./marketScanner');
+      stopMarketScanner();
+    } catch {
+      /* ignore */
+    }
+    try {
       const { stopZionKolScanner } = require('./zionKolScanner') as typeof import('./zionKolScanner');
       stopZionKolScanner();
+    } catch {
+      /* ignore */
+    }
+    try {
+      const { stopFastPoll } =
+        require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+      stopFastPoll();
     } catch {
       /* ignore */
     }

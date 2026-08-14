@@ -253,7 +253,7 @@ export function createServer(): express.Application {
 
   /** Detailed readiness (RPC + monitor) — optional ops check */
   app.get('/health/ready', (_req: Request, res: Response) => {
-    const rpc = getRpcStats();
+    const rpc = getRpcStats({ lite: true });
     const monitor = getMonitorStatus();
     const rpcHealthy = rpc.endpoints.some((e) => e.healthy);
     const ok = rpcHealthy && !monitor.risk.halted;
@@ -430,27 +430,11 @@ export function createServer(): express.Application {
       solUsd,
       winRate: liveNeedsImport ? 0 : paperTrader.getWinRatePct(),
       stats: zeroedStats,
-      soak: paperTrader.getSoakMetrics(),
+      soak: lite ? null : paperTrader.getSoakMetrics(),
       performanceScore: liveSimScore,
       // Charts live on /paper-status only — avoid duplicating ~40KB every 5s
       charts: null,
-      rpc: (() => {
-        const full = getRpcStats();
-        if (!lite) return full;
-        const { callTraffic: _ct, callTrafficLast60s: _ct60, bootTimeline: _bt, ...slim } =
-          full as typeof full & {
-            callTraffic?: unknown;
-            callTrafficLast60s?: unknown;
-            bootTimeline?: unknown;
-          };
-        return {
-          ...slim,
-          callTraffic: {},
-          callTrafficLast60s: {},
-          bootTimeline: { processStartedAt: 0, uptimeMs: 0, recent: [] },
-          lite: true,
-        };
-      })(),
+      rpc: getRpcStats({ lite, countHealthRefresh: !lite && src === 'probe' }),
       jito: getJitoStatus(),
       mev: getMevStatus(),
       gmgn: getGmgnStatus(),
@@ -1018,7 +1002,7 @@ export function createServer(): express.Application {
           ok: true,
           workloads,
           groups: getRpcWorkloadGroupSnapshot(),
-          rpc: getRpcStats(),
+          rpc: getRpcStats({ lite: true }),
         });
         return;
       }
@@ -1039,7 +1023,7 @@ export function createServer(): express.Application {
         ok: true,
         workloads,
         groups: getRpcWorkloadGroupSnapshot(),
-        rpc: getRpcStats(),
+        rpc: getRpcStats({ lite: true }),
       });
     } catch (err) {
       res.status(500).json({

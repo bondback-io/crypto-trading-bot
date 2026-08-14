@@ -5,6 +5,7 @@
 
 import { config } from './config';
 import { logger, errorToMeta, loggedFetch } from './logger';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 /** Shared Birdeye 429 cooldown — no tight retries. */
 let birdeyeRateLimitedUntil = 0;
@@ -76,6 +77,17 @@ const trendingCache: {
   data: BirdeyeTrendingToken[] | null;
   expiresAt: number;
 } = { data: null, expiresAt: 0 };
+const BIRDEYE_CACHE_CAP = 800;
+
+function capBirdeyeCaches(): Record<string, number> {
+  trimMapToCap(overviewCache, BIRDEYE_CACHE_CAP);
+  trimMapToCap(signalCache, BIRDEYE_CACHE_CAP);
+  return {
+    birdeyeOverview: overviewCache.size,
+    birdeyeSignal: signalCache.size,
+  };
+}
+registerCacheSweep(capBirdeyeCaches);
 
 function cacheTtlMs(): number {
   return config.birdeye?.cacheTtlMs ?? 90_000;

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.349',
+    title: 'Kill RPC/WS storms and cap memory (OOM pass)',
+    sections: ['execution', 'overview', 'scanners', 'knobs'],
+    items: [
+      'HTTP-only tx confirm (no signatureSubscribe); WS subscribe APIs stubbed; max_reconnects 0; MEV aborts on Trading 429 instead of parse storms.',
+      'Stats → RPC group-OFF now idle-isolates (scanners/watches/favourites/migration stop; nested metrics/curve/probes gated). Proof metrics: rpc_calls_last_60s, heap_used_mb, timers, queue sizes.',
+      'Mint/wallet caches capped (OHLCV, tokenMeta, paper marks, watch sidecars); heap watchdog auto-sheds at ≥400MB; heavy workloads default OFF on fresh disk (saved toggles still win).',
+    ],
+  },
+  {
     version: '1.2.348',
     title: 'Tighten late-chase cap, Grad arms, Dip harvest',
     sections: ['learning', 'execution', 'microbots', 'overview'],

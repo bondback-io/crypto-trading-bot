@@ -14,6 +14,7 @@ import {
 } from './rpcGate';
 import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 import { logger, errorToMeta } from './logger';
 import {
   atomicWriteJson,
@@ -89,9 +90,14 @@ let universe: UniverseWallet[] = [];
 let universeLoadedAt = 0;
 let rotationIndex = 0;
 let lastSignature = new Map<string, string>();
+registerCacheSweep(() => {
+  trimMapToCap(lastSignature, 400);
+  return { zionLastSignature: lastSignature.size };
+});
 let mintAggs = new Map<string, MintAgg>();
 let candidates: ZionKolCandidate[] = [];
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let firstPollTimer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let pollInFlight = false;
 let lastPollAt = 0;
@@ -244,6 +250,10 @@ async function refreshUniverse(force = false): Promise<void> {
     .sort((a, b) => b.quality - a.quality)
     .slice(0, size);
   universeLoadedAt = Date.now();
+  const keep = new Set(universe.map((w) => w.address));
+  for (const addr of [...lastSignature.keys()]) {
+    if (!keep.has(addr)) lastSignature.delete(addr);
+  }
   persistUniverse();
   logger.info(
     'ZionScanner',
@@ -469,6 +479,7 @@ async function pollUniverseBatch(): Promise<number> {
       const lastSeen = lastSignature.get(wallet.address);
       if (lastSeen == null) {
         lastSignature.set(wallet.address, sigs[0].signature);
+        trimMapToCap(lastSignature, 400);
         continue;
       }
       const newer: string[] = [];
@@ -916,7 +927,8 @@ export function startZionKolScanner(): void {
     `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}` +
       (share ? ' (shared RPC lane — throttled)' : '')
   );
-  setTimeout(() => {
+  firstPollTimer = setTimeout(() => {
+    firstPollTimer = null;
     void runZionScannerPollOnce();
   }, 18_000);
   pollTimer = setInterval(() => {
@@ -926,6 +938,10 @@ export function startZionKolScanner(): void {
 
 export function stopZionKolScanner(): void {
   running = false;
+  if (firstPollTimer) {
+    clearTimeout(firstPollTimer);
+    firstPollTimer = null;
+  }
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;

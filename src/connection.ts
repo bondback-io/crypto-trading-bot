@@ -40,6 +40,8 @@ import {
   assertRpcWorkloadEnabled,
   anyBackgroundFeatureWorkloadEnabled,
   allFeatureWorkloadsOff,
+  shouldIdleIsolate,
+  RpcWorkloadDisabledError,
 } from './rpcWorkloadControl';
 import {
   noteIdleRpcCall,
@@ -165,6 +167,9 @@ const HEALTH_PROBE_FEATURES_OFF_MS = 300_000;
 const HEALTH_TICK_CHECK_MS = 30_000;
 const PER_MIN_BUCKET_CAP = 2_000;
 const CALL_TRAFFIC_CAP = 256;
+const RPC_STATS_CACHE_MS = 2_500;
+const CONFIRM_POLL_MS = 1_500;
+const CONFIRM_TIMEOUT_MS = 60_000;
 
 /** Rolling 60s timestamps for control-plane diagnostics. */
 const probeCallAts: number[] = [];
@@ -198,7 +203,7 @@ function wantBackgroundHot(): boolean {
 
 function featuresOffNow(): boolean {
   try {
-    return allFeatureWorkloadsOff();
+    return shouldIdleIsolate() || allFeatureWorkloadsOff();
   } catch {
     return false;
   }
@@ -236,9 +241,17 @@ export function enterRpcIdleIsolation(reason = 'all feature workloads OFF'): voi
     } catch {
       /* */
     }
+    try {
+      const { stopFastPoll } =
+        require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+      stopFastPoll();
+    } catch {
+      /* */
+    }
     return;
   }
   idleIsolationActive = true;
+  rpcStatsCache = null;
   console.warn(`[rpc] IDLE ISOLATION ON — ${reason}`);
   try {
     const { syncMigrationWorkloadGate } =
@@ -258,6 +271,20 @@ export function enterRpcIdleIsolation(reason = 'all feature workloads OFF'): voi
     const { stopZionKolScanner } =
       require('./zionKolScanner') as typeof import('./zionKolScanner');
     stopZionKolScanner();
+  } catch {
+    /* */
+  }
+  try {
+    const { stopFastPoll } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    stopFastPoll();
+  } catch {
+    /* */
+  }
+  try {
+    const { sweepBoundedCaches } =
+      require('./cacheSweep') as typeof import('./cacheSweep');
+    sweepBoundedCaches();
   } catch {
     /* */
   }
@@ -330,7 +357,7 @@ const callTrafficEvents: Array<{
   feature: string;
   role: RpcRole | 'unknown';
 }> = [];
-const CALL_TRAFFIC_EVENTS_CAP = 4_000;
+const CALL_TRAFFIC_EVENTS_CAP = 800;
 
 const dashboardRefreshAts: number[] = [];
 const probeRefreshAts: number[] = [];
@@ -453,12 +480,70 @@ export function recentHealthProbeOk(withinMs = 30_000): boolean {
   );
 }
 
+function hardenWsClient(conn: Connection): void {
+  try {
+    const ws = (
+      conn as unknown as {
+        _rpcWebSocket?: {
+          max_reconnects?: number;
+          reconnect?: boolean;
+          close?: () => void;
+        };
+      }
+    )._rpcWebSocket;
+    if (ws) {
+      ws.max_reconnects = 0;
+      ws.reconnect = false;
+    }
+  } catch {
+    /* web3.js internals */
+  }
+}
+
 function makeConnection(url: string): Connection {
-  return new Connection(url, {
+  const conn = new Connection(url, {
     commitment: 'confirmed',
     disableRetryOnRateLimit: true,
     confirmTransactionInitialTimeout: 60_000,
   });
+  hardenWsClient(conn);
+  return conn;
+}
+
+/** HTTP-only confirm — never opens signatureSubscribe. */
+export async function confirmSignatureHttp(
+  conn: Connection,
+  signature: string,
+  timeoutMs = CONFIRM_TIMEOUT_MS
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const { value } = await conn.getSignatureStatuses([signature]);
+      const st = value[0];
+      if (st?.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(st.err)}`);
+      }
+      if (
+        st?.confirmationStatus === 'confirmed' ||
+        st?.confirmationStatus === 'finalized'
+      ) {
+        return;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (is429(message)) {
+        throw new Error(`confirm aborted: rate-limited (${message})`);
+      }
+      if (/Transaction failed/.test(message)) throw err;
+    }
+    await new Promise((r) => setTimeout(r, CONFIRM_POLL_MS));
+  }
+  throw new Error(`confirm timeout after ${timeoutMs}ms: ${signature}`);
+}
+
+export function isRpc429Message(message: string): boolean {
+  return is429(message);
 }
 
 function makeState(ep: RpcEndpointRef, emergencyOnly = false): EndpointState {
@@ -837,6 +922,7 @@ function recordSuccess(
     st.hardFailUntil = 0;
     st.quarantineStreak = 0;
   }
+  refreshRpcLoadSignalsFromLanes();
 }
 
 function recordFailure(st: EndpointState, message: string): void {
@@ -976,6 +1062,19 @@ export function getRpcUrl(role?: RpcRole): string {
 }
 
 export function getConnection(role?: RpcRole): Connection {
+  const feature = rpcFeatureAls.getStore() || 'getConnection';
+  try {
+    if (feature === 'getConnection') {
+      if (featuresOffNow() || idleIsolationActive) {
+        throw new RpcWorkloadDisabledError('health_probe');
+      }
+    } else {
+      assertRpcWorkloadEnabled(feature);
+    }
+  } catch (err) {
+    if (err instanceof RpcWorkloadDisabledError) throw err;
+    /* catalog optional during boot */
+  }
   ensureEndpoints();
   const norm = normalizeRole(role ?? currentRole());
   const st = laneState(norm);
@@ -991,7 +1090,6 @@ export function getConnection(role?: RpcRole): Connection {
     }
     throw new Error('No RPC endpoint configured');
   }
-  const feature = rpcFeatureAls.getStore() || 'getConnection';
   noteCallTraffic(
     st.endpoint.label,
     feature,
@@ -1303,9 +1401,120 @@ function buildCongestion(
   return { state: 'ok', cause: 'healthy', details };
 }
 
-export function getRpcStats() {
+function refreshRpcLoadSignalsFromLanes(): void {
+  try {
+    const { updateRpcLoadSignals } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    const bgFeatureOn = wantBackgroundHot();
+    const tActive = laneState('primary');
+    const dActive = laneState('secondary');
+    const bActive = bgFeatureOn ? laneState('background') : null;
+    const gate = getRpcGateSnapshot();
+    updateRpcLoadSignals({
+      primaryLatencyMs: tActive?.latencyMs ?? null,
+      secondaryLatencyMs: dActive?.latencyMs ?? null,
+      backgroundLatencyMs: bgFeatureOn ? bActive?.latencyMs ?? null : null,
+      tradingOnEmergency: tradingHop >= 1 && Boolean(emergencyPublic),
+      dataHealthy: Boolean(dActive?.healthy),
+      dataRateLimited: Boolean(
+        dActive && (dActive.rateLimitedUntil || 0) > Date.now()
+      ),
+      backgroundHealthy: bgFeatureOn ? Boolean(bActive?.healthy) : true,
+      primaryQueued: gate.lanes.primary.queued,
+    });
+  } catch {
+    /* */
+  }
+}
+
+function heapUsedMb(): number {
+  return Math.round((process.memoryUsage().heapUsed / (1024 * 1024)) * 10) / 10;
+}
+
+function activeTimersCount(): number | null {
+  try {
+    const proc = process as NodeJS.Process & {
+      getActiveResourcesInfo?: () => string[];
+    };
+    if (typeof proc.getActiveResourcesInfo !== 'function') return null;
+    return proc
+      .getActiveResourcesInfo()
+      .filter((t) => t === 'Timeout' || t === 'Immediate').length;
+  } catch {
+    return null;
+  }
+}
+
+export function getRpcQueueSizeSnapshot(): Record<string, number> {
+  pruneCallTrafficWindow();
+  const out: Record<string, number> = {
+    callTrafficEvents: callTrafficEvents.length,
+    callTraffic: callTraffic.size,
+    heap_used_mb: heapUsedMb(),
+  };
+  try {
+    const { paperTrader } =
+      require('./paperTrader') as typeof import('./paperTrader');
+    out.paperClosedRing = paperTrader.closedRingSize();
+  } catch {
+    /* */
+  }
+  return out;
+}
+
+function pruneCallTrafficWindow(): void {
+  const now = Date.now();
+  while (
+    callTrafficEvents.length &&
+    callTrafficEvents[0]!.at < now - 60_000
+  ) {
+    callTrafficEvents.shift();
+  }
+}
+
+export type GetRpcStatsOpts = {
+  lite?: boolean;
+  /** Count this read as a health-page refresh (Stats RPC tab only). */
+  countHealthRefresh?: boolean;
+};
+
+let rpcStatsCache: { at: number; full: ReturnType<typeof buildRpcStats> } | null =
+  null;
+
+export function getRpcStats(opts?: GetRpcStatsOpts) {
+  if (opts?.countHealthRefresh) notePerMin(healthPageRefreshAts);
+  const now = Date.now();
+  if (rpcStatsCache && now - rpcStatsCache.at < RPC_STATS_CACHE_MS) {
+    const cached = rpcStatsCache.full;
+    return opts?.lite ? slimRpcStats(cached) : cached;
+  }
+  const full = buildRpcStats();
+  rpcStatsCache = { at: now, full };
+  return opts?.lite ? slimRpcStats(full) : full;
+}
+
+function slimRpcStats(full: ReturnType<typeof buildRpcStats>) {
+  const {
+    callTraffic: _ct,
+    callTrafficLast60s: _ct60,
+    bootTimeline: _bt,
+    ...slim
+  } = full as typeof full & {
+    callTraffic?: unknown;
+    callTrafficLast60s?: unknown;
+    bootTimeline?: unknown;
+  };
+  return {
+    ...slim,
+    callTraffic: {},
+    callTrafficLast60s: {},
+    bootTimeline: { processStartedAt: 0, uptimeMs: 0, recent: [] },
+    lite: true as const,
+  };
+}
+
+function buildRpcStats() {
   ensureEndpoints();
-  notePerMin(healthPageRefreshAts);
   const tActive = laneState('primary');
   const dActive = laneState('secondary');
   const bgFeatureOn = wantBackgroundHot();
@@ -1349,7 +1558,7 @@ export function getRpcStats() {
   ).size;
   const featuresOff = (() => {
     try {
-      return allFeatureWorkloadsOff();
+      return shouldIdleIsolate() || allFeatureWorkloadsOff();
     } catch {
       return false;
     }
@@ -1415,28 +1624,8 @@ export function getRpcStats() {
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null = null;
   try {
-    const {
-      updateRpcLoadSignals,
-      getRpcLoadControlSnapshot,
-    } = require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-    updateRpcLoadSignals({
-      primaryLatencyMs: tActive?.latencyMs ?? null,
-      secondaryLatencyMs: dActive?.latencyMs ?? null,
-      backgroundLatencyMs: backgroundIdleWhenWorkloadsOff
-        ? null
-        : bActive?.latencyMs ?? null,
-      tradingOnEmergency,
-      dataHealthy: Boolean(dActive?.healthy),
-      // 429 cooldown alone must not starve Market intake (soft pressure only).
-      dataRateLimited: Boolean(
-        dActive && (dActive.rateLimitedUntil || 0) > Date.now()
-      ),
-      // Idle Background (workloads OFF) is not unhealthy — do not trigger shed.
-      backgroundHealthy: backgroundIdleWhenWorkloadsOff
-        ? true
-        : Boolean(bActive?.healthy),
-      primaryQueued: gate.lanes.primary.queued,
-    });
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     loadControl = getRpcLoadControlSnapshot();
   } catch {
     /* optional */
@@ -1621,16 +1810,24 @@ export function getRpcStats() {
     active_endpoints_count: activeEndpointsCount,
     background_idle_when_workloads_off: backgroundIdleWhenWorkloadsOff,
     idleIsolationActive,
+    rpc_calls_last_60s: (() => {
+      pruneCallTrafficWindow();
+      return callTrafficEvents.length;
+    })(),
+    heap_used_mb: heapUsedMb(),
+    active_timers_count: activeTimersCount(),
+    top_queue_sizes: Object.entries(getRpcQueueSizeSnapshot())
+      .map(([name, size]) => ({ name, size: Number(size) || 0 }))
+      .sort((a, b) => b.size - a.size)
+      .slice(0, 8),
     ...(() => {
       try {
         const t = getIdleRpcTraceSnapshot();
         return {
-          rpc_calls_last_60s: t.rpc_calls_last_60s,
           top_callers_when_workloads_off: t.top_callers_when_workloads_off,
         };
       } catch {
         return {
-          rpc_calls_last_60s: 0,
           top_callers_when_workloads_off: [] as Array<{
             label: string;
             count: number;
@@ -1845,7 +2042,7 @@ export async function sendOptimizedTransaction(
         maxRetries: options.maxRetries ?? 3,
         preflightCommitment: 'confirmed',
       });
-      await conn.confirmTransaction(sig, 'confirmed');
+      await confirmSignatureHttp(conn, sig);
       return sig;
     },
     'primary'
@@ -1871,7 +2068,7 @@ export async function sendAndConfirmLegacyTx(tx: Transaction): Promise<string> {
         skipPreflight: false,
         maxRetries: 3,
       });
-      await conn.confirmTransaction(sig, 'confirmed');
+      await confirmSignatureHttp(conn, sig);
       return sig;
     },
     'primary'

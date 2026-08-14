@@ -10,6 +10,7 @@ import {
   type ScannerCandidate,
 } from './marketScanner';
 import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 import { isStrategyEnabledGlobal } from './strategies';
 import {
   isSmartBotProfilesEnabled,
@@ -132,6 +133,19 @@ const NO_LEVELS_FUNNEL_DEDUP_MS = 20 * 60_000;
 const unwatchCooldownUntil = new Map<string, number>();
 /** mint → last H1-vol rotation eviction/admit (debounce) */
 const lastRotationAt = new Map<string, number>();
+const WATCH_SIDECAR_CAP = 500;
+
+function capDipWatchSidecars(): Record<string, number> {
+  trimMapToCap(lastOhlcvRefreshAt, WATCH_SIDECAR_CAP);
+  trimMapToCap(unwatchCooldownUntil, WATCH_SIDECAR_CAP);
+  trimMapToCap(lastRotationAt, WATCH_SIDECAR_CAP);
+  trimMapToCap(noLevelsFunnelNotedAt, WATCH_SIDECAR_CAP);
+  return {
+    dipOhlcvRefresh: lastOhlcvRefreshAt.size,
+    dipUnwatchCooldown: unwatchCooldownUntil.size,
+  };
+}
+registerCacheSweep(capDipWatchSidecars);
 
 /** Rolling Dip admit / fire funnel (session counters). */
 const dipFunnel = {
@@ -380,6 +394,8 @@ function deleteDipWatch(mint: string): void {
   watches.delete(mint);
   lastMcRefreshAt.delete(mint);
   noLevelsFunnelNotedAt.delete(mint);
+  lastOhlcvRefreshAt.delete(mint);
+  lastRotationAt.delete(mint);
 }
 
 function activeWatches(bucket: DipWatchBucket): DipWatchEntry[] {

@@ -305,6 +305,24 @@ export async function assertLiveTradingReady(
       minSol,
     });
   }
+  try {
+    const { isRpcIdleIsolationActive } =
+      require('./connection') as typeof import('./connection');
+    if (isRpcIdleIsolationActive()) {
+      return finishReady({
+        ok: true,
+        reason: 'idle isolation — skipped live balance probe',
+        walletId: slot.id,
+        walletName: slot.name,
+        publicKey: pub,
+        hasKey: true,
+        balanceSol: cachedLiveReady?.balanceSol ?? null,
+        minSol,
+      });
+    }
+  } catch {
+    /* */
+  }
   const balanceSol = await getLiveBalanceSol(slot.id);
   if (balanceSol == null || !Number.isFinite(balanceSol)) {
     return finishReady({

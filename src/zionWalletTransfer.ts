@@ -15,6 +15,7 @@ import { config, usesRealFunds } from './config';
 import {
   getKeypair,
   withRpc,
+  confirmSignatureHttp,
 } from './connection';
 import { dataFile, ensureDataDir } from './dataDir';
 import { logger } from './logger';
@@ -909,10 +910,7 @@ async function executeTransfer(p: PendingTransfer): Promise<string> {
           skipPreflight: false,
           maxRetries: 3,
         });
-        await conn.confirmTransaction(
-          { signature, blockhash, lastValidBlockHeight },
-          'confirmed'
-        );
+        await confirmSignatureHttp(conn, signature);
         return signature;
       },
       'primary'

@@ -216,8 +216,18 @@ export const RPC_WORKLOAD_CATALOG: readonly RpcWorkloadDef[] = [
   },
 ] as const;
 
+const CORE_DEFAULT_ON: ReadonlySet<RpcWorkloadId> = new Set([
+  'trade_entry',
+  'live_balance',
+  'priority_fee',
+  'zion_place_trade',
+  'open_mark',
+  'health_probe',
+  'bonding_curve',
+]);
+
 const enabled = new Map<RpcWorkloadId, boolean>(
-  RPC_WORKLOAD_CATALOG.map((w) => [w.id, true])
+  RPC_WORKLOAD_CATALOG.map((w) => [w.id, CORE_DEFAULT_ON.has(w.id)])
 );
 
 const FEATURE_TO_WORKLOAD: Record<string, RpcWorkloadId> = {
@@ -231,12 +241,14 @@ const FEATURE_TO_WORKLOAD: Record<string, RpcWorkloadId> = {
   zion_place_trade: 'zion_place_trade',
   sendRawTransaction: 'trade_entry',
   sendLegacy: 'trade_entry',
+  zionTransferSend: 'zion_place_trade',
   market_scanner: 'market_scanner',
   dip_setup_watch: 'dip_setup_watch',
   trend_setup_watch: 'trend_setup_watch',
   majors_armed_watch: 'majors_armed_watch',
   alpha_scan: 'alpha_scan',
   zion: 'zion_scanner',
+  zion_scanner: 'zion_scanner',
   token_metrics: 'token_metrics',
   anti_rug: 'anti_rug',
   open_mark: 'open_mark',
@@ -267,13 +279,31 @@ export function isRpcWorkloadDisabledError(err: unknown): err is RpcWorkloadDisa
   );
 }
 
+export const CORE_RPC_WORKLOAD_IDS: readonly RpcWorkloadId[] = [
+  'trade_entry',
+  'zion_place_trade',
+  'priority_fee',
+  'live_balance',
+  'open_mark',
+] as const;
+
+const CORE_SET = new Set<RpcWorkloadId>(CORE_RPC_WORKLOAD_IDS);
+
+export function isCoreRpcWorkload(id: RpcWorkloadId): boolean {
+  return CORE_SET.has(id);
+}
+
 export function resolveWorkloadId(feature: string | undefined | null): RpcWorkloadId | null {
   if (!feature) return null;
   const key = String(feature).trim();
   if (!key) return null;
   if (FEATURE_TO_WORKLOAD[key]) return FEATURE_TO_WORKLOAD[key]!;
-  for (const [k, id] of Object.entries(FEATURE_TO_WORKLOAD)) {
-    if (key === k || key.startsWith(k)) return id;
+  if (RPC_WORKLOAD_CATALOG.some((w) => w.id === key)) return key as RpcWorkloadId;
+  // Longest exact-prefix first; skip short keys like "zion" / "mev" that collide.
+  const keys = Object.keys(FEATURE_TO_WORKLOAD).sort((a, b) => b.length - a.length);
+  for (const k of keys) {
+    if (k.length < 8) continue;
+    if (key.startsWith(k)) return FEATURE_TO_WORKLOAD[k]!;
   }
   return null;
 }
@@ -286,6 +316,12 @@ export function anyBackgroundFeatureWorkloadEnabled(): boolean {
   return BACKGROUND_FEATURE_WORKLOAD_IDS.some((id) => isRpcWorkloadEnabled(id));
 }
 
+export function allWorkloadGroupsOff(): boolean {
+  return (Object.keys(RPC_WORKLOAD_GROUPS) as RpcWorkloadGroupId[]).every(
+    (id) => getRpcWorkloadGroupState(id) === 'off'
+  );
+}
+
 /** True when every catalog workload except health_probe is OFF. */
 export function allFeatureWorkloadsOff(): boolean {
   return RPC_WORKLOAD_CATALOG.every(
@@ -293,21 +329,39 @@ export function allFeatureWorkloadsOff(): boolean {
   );
 }
 
+/** Idle when UI groups are all OFF, or every non-core catalog id is OFF. */
+export function shouldIdleIsolate(): boolean {
+  if (allWorkloadGroupsOff()) return true;
+  return RPC_WORKLOAD_CATALOG.every(
+    (w) => isCoreRpcWorkload(w.id) || w.id === 'health_probe' || !isRpcWorkloadEnabled(w.id)
+  );
+}
+
+export function isRpcWorkloadEffectivelyEnabled(id: RpcWorkloadId): boolean {
+  if (shouldIdleIsolate() && !isCoreRpcWorkload(id)) return false;
+  return isRpcWorkloadEnabled(id);
+}
+
 export function assertRpcWorkloadEnabled(featureOrId: string): void {
   const id =
     (RPC_WORKLOAD_CATALOG.some((w) => w.id === featureOrId)
       ? (featureOrId as RpcWorkloadId)
       : null) || resolveWorkloadId(featureOrId);
-  if (!id) return;
-  if (!isRpcWorkloadEnabled(id)) {
+  if (!id) {
+    if (shouldIdleIsolate()) {
+      throw new RpcWorkloadDisabledError('health_probe');
+    }
+    return;
+  }
+  if (!isRpcWorkloadEffectivelyEnabled(id)) {
     throw new RpcWorkloadDisabledError(id);
   }
 }
 
 function syncScannerTimersForWorkloads(): void {
-  const featuresOff = allFeatureWorkloadsOff();
-  const marketOn = !featuresOff && isRpcWorkloadEnabled('market_scanner');
-  const zionOn = !featuresOff && isRpcWorkloadEnabled('zion_scanner');
+  const isolated = shouldIdleIsolate();
+  const marketOn = !isolated && isRpcWorkloadEnabled('market_scanner');
+  const zionOn = !isolated && isRpcWorkloadEnabled('zion_scanner');
   try {
     const { stopMarketScanner, startMarketScanner } =
       require('./marketScanner') as typeof import('./marketScanner');

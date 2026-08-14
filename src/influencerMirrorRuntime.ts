@@ -19,12 +19,27 @@ import {
 import { assignTradeProfile, stampFromAssignment } from './tradeProfiles';
 import { evaluateAntiRug, summarizeAntiRug } from './antiRug';
 import { fetchTokenMetrics, summarizeTokenMetrics } from './tokenMetrics';
+import { trimMapToCap, trimSetToCap, registerCacheSweep } from './mapCap';
 
 /** mint+wallet → last event ms (spam / delay window) */
 const recentMirrorEvents = new Map<string, number>();
 /** sig+mint+wallet dedupe */
 const seenMirrorSigs = new Set<string>();
 const SEEN_SIG_CAP = 4_000;
+const MIRROR_EVENT_CAP = 1000;
+
+function capInfluencerMaps(): Record<string, number> {
+  trimMapToCap(recentMirrorEvents, MIRROR_EVENT_CAP);
+  trimSetToCap(seenMirrorSigs, SEEN_SIG_CAP);
+  trimMapToCap(holdingsCache, MIRROR_EVENT_CAP);
+  trimMapToCap(tokenEvents, MIRROR_EVENT_CAP);
+  return {
+    influencerEvents: recentMirrorEvents.size,
+    influencerHoldings: holdingsCache.size,
+    influencerTokenEvents: tokenEvents.size,
+  };
+}
+registerCacheSweep(capInfluencerMaps);
 
 export interface MirrorBuyInput {
   wallet: SmartWallet;
