@@ -447,7 +447,17 @@ export function startMigrationListener(): void {
   }
   unsubscribeAll();
 
-  void pollMigrations();
+  let cadenceOff = 0;
+  try {
+    const { heavyJobCadenceOffsetMs } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    cadenceOff = heavyJobCadenceOffsetMs('migration');
+  } catch {
+    cadenceOff = 23_000;
+  }
+  setTimeout(() => {
+    void pollMigrations();
+  }, cadenceOff);
   migrationTimer = setInterval(() => {
     void pollMigrations();
   }, POLL_MS);
@@ -761,10 +771,20 @@ async function pollMigrations(): Promise<void> {
         ? POLL_MS_WARM
         : POLL_MS;
   if (lastMigrationPollAt && Date.now() - lastMigrationPollAt < minGap) return;
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    if (!tryAcquireHeavyJob('migration')) return;
+    heavyHeld = true;
+  } catch {
+    /* proceed */
+  }
   lastMigrationPollAt = Date.now();
 
   const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
-  return runWithRpcRole(role, async () => {
+  try {
+    return await runWithRpcRole(role, async () => {
   const pollT0 = Date.now();
   let earlyBootSoft = seedOnly;
   try {
@@ -870,6 +890,17 @@ async function pollMigrations(): Promise<void> {
     }
   }
   }, 'migration');
+  } finally {
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('migration');
+      } catch {
+        /* */
+      }
+    }
+  }
 }
 
 /** @returns false when rate-limited (caller should abort this poll cycle) */

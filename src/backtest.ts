@@ -3391,6 +3391,8 @@ export function exportLastBacktestJson(): string | null {
   return JSON.stringify(report, null, 2);
 }
 
+let paperMarkInFlight = false;
+
 /**
  * Refresh open paper positions with live DexScreener prices
  * when live market data is forced (paper useLiveData or Live Simulation).
@@ -3399,6 +3401,18 @@ export async function refreshPaperPricesFromLive(
   trader: PaperTrader = paperTrader
 ): Promise<number> {
   if (!config.paper.useLiveData && config.mode !== 'liveSimulation') return 0;
+  if (paperMarkInFlight) return 0;
+  paperMarkInFlight = true;
+  try {
+    return await refreshPaperPricesFromLiveInner(trader);
+  } finally {
+    paperMarkInFlight = false;
+  }
+}
+
+async function refreshPaperPricesFromLiveInner(
+  trader: PaperTrader
+): Promise<number> {
 
   const open = trader.getOpenPositions();
   let updated = 0;

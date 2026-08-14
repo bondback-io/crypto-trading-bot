@@ -1992,21 +1992,29 @@ export function startMonitor(): void {
   const softBoot =
     isSoftThrottleRpcUrl(getRpcUrl()) ||
     (shareBoot && getRpcRoleFor('wallet_poll', true) === 'background');
-  // BootPhase B: favourites soft-watch not before ~180s uptime (Trading→Scanners first).
+  // Favourites first poll ≥150s (unbunched from GitHub 180s / migration 210s).
   let bootSeqFloorMs = 0;
   try {
     const { getProcessUptimeMs } =
       require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
-    const { PHASE_BACKGROUND_MS } =
+    const { FAVOURITES_FIRST_POLL_MS } =
       require('./bootPhase') as typeof import('./bootPhase');
-    bootSeqFloorMs = Math.max(0, PHASE_BACKGROUND_MS - getProcessUptimeMs());
+    bootSeqFloorMs = Math.max(0, FAVOURITES_FIRST_POLL_MS - getProcessUptimeMs());
   } catch {
-    bootSeqFloorMs = Math.max(0, 180_000);
+    bootSeqFloorMs = Math.max(0, 150_000);
+  }
+  let cadenceOff = 0;
+  try {
+    const { heavyJobCadenceOffsetMs } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    cadenceOff = heavyJobCadenceOffsetMs('favourites');
+  } catch {
+    cadenceOff = 11_000;
   }
   const firstPollDelayMs = Math.max(
     softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000,
     bootSeqFloorMs
-  );
+  ) + cadenceOff;
   if (softWatchBootTimer) clearTimeout(softWatchBootTimer);
   softWatchBootTimer = setTimeout(() => {
     softWatchBootTimer = null;
@@ -2174,6 +2182,18 @@ async function pollAllWallets(): Promise<void> {
   }
 
   pollInFlight = true;
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    if (!tryAcquireHeavyJob('favourites')) {
+      pollInFlight = false;
+      return;
+    }
+    heavyHeld = true;
+  } catch {
+    /* */
+  }
   const cycleStarted = Date.now();
   try {
     // Soft-yield if buy queue already deep — don't block the whole cycle on enrich
@@ -2321,6 +2341,15 @@ async function pollAllWallets(): Promise<void> {
     }
   } finally {
     pollInFlight = false;
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('favourites');
+      } catch {
+        /* */
+      }
+    }
   }
 }
 
@@ -8799,7 +8828,7 @@ function pushActivityFeed(event: WalletBuyEvent): void {
     const { noteSignalAdmitted } =
       require('./signalIntakeStats') as typeof import('./signalIntakeStats');
     // Count early scanner/hybrid intake for 15m admitted / signals/min.
-    if (event.entrySource === 'scanner' || event.entrySource === 'hybrid') {
+    if (event.entrySource === 'scanner' || event.entrySource === 'hybrid' || event.entrySource === 'wallet' || !event.entrySource) {
       noteSignalAdmitted();
     }
   } catch {
@@ -9241,9 +9270,12 @@ export function getMonitorStatus(): {
   pollRotationOffset: number;
   signalIntake: {
     signalsRpcHealthy: boolean;
+    signals_rpc_healthy: boolean;
     signalsAdmitted15m: number;
     signalsBlockedByGate15m: number;
+    signals_blocked_by_gate: number;
     signalsPerMin: number;
+    signals_admitted_per_min: number;
     lastSignalAgeMs: number | null;
     topBlockReasons: Array<{ reason: string; count: number }>;
   };
@@ -9328,9 +9360,12 @@ export function getMonitorStatus(): {
     pollRotationOffset,
     signalIntake: {
       signalsRpcHealthy,
+      signals_rpc_healthy: signalsRpcHealthy,
       signalsAdmitted15m: intake.signalsAdmitted15m,
       signalsBlockedByGate15m: intake.signalsBlockedByGate15m,
+      signals_blocked_by_gate: intake.signalsBlockedByGate15m,
       signalsPerMin: intake.signalsPerMin,
+      signals_admitted_per_min: intake.signalsPerMin,
       lastSignalAgeMs: signalLight.ageMs ?? null,
       topBlockReasons: intake.topBlockReasons,
     },

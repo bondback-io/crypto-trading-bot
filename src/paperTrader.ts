@@ -259,8 +259,9 @@ const HARD_SL_MAX_GAP_SLIPPAGE = 0.04; // 4% beyond SL threshold
 
 /** Live Simulation polls marks more often so SL/TP see gaps sooner. */
 const LIVE_SIM_CHECK_INTERVAL_MS = 2_000;
-/** First 180s after auto-check start: slower marks to cut post-deploy RPC overlap. */
-const LIVE_SIM_WARMUP_MS = 180_000;
+/** <90s: 15s marks; after that 5s only if Trading EWMA recovered. */
+const LIVE_SIM_SOFT_WARMUP_MS = 90_000;
+const LIVE_SIM_SOFT_INTERVAL_MS = 15_000;
 const LIVE_SIM_WARMUP_INTERVAL_MS = 5_000;
 
 export type PositionStatus = 'open' | 'closed' | 'partial';
@@ -5729,24 +5730,33 @@ export class PaperTrader {
     if (config.mode === 'liveSimulation') {
       const scheduleNext = (): void => {
         if (this.autoCheckStartedAt <= 0) return;
-        const elapsed = Date.now() - this.autoCheckStartedAt;
-        let processWarm = false;
+        let uptimeMs = Date.now() - this.autoCheckStartedAt;
         try {
           const { getProcessUptimeMs } =
             require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
-          processWarm = getProcessUptimeMs() < 180_000;
+          uptimeMs = getProcessUptimeMs();
         } catch {
           /* optional */
         }
+        let ewmaOk = false;
+        try {
+          const { isTradingEwmaRecovered } =
+            require('./connection') as typeof import('./connection');
+          ewmaOk = isTradingEwmaRecovered();
+        } catch {
+          /* */
+        }
         const openCount = this.positions?.size ?? 0;
-        // Under load: never drop below 5s marks (cuts Dex/Jupiter storm).
         const loadedFloor =
           openCount >= 3 ? LIVE_SIM_WARMUP_INTERVAL_MS : steadyInterval;
-        const inWarmup =
-          elapsed < LIVE_SIM_WARMUP_MS || processWarm;
-        const nextMs = inWarmup
-          ? LIVE_SIM_WARMUP_INTERVAL_MS
-          : Math.max(loadedFloor, steadyInterval);
+        let nextMs: number;
+        if (uptimeMs < LIVE_SIM_SOFT_WARMUP_MS) {
+          nextMs = LIVE_SIM_SOFT_INTERVAL_MS;
+        } else if (ewmaOk) {
+          nextMs = Math.max(loadedFloor, LIVE_SIM_WARMUP_INTERVAL_MS);
+        } else {
+          nextMs = LIVE_SIM_SOFT_INTERVAL_MS;
+        }
         this.checkTimer = setTimeout(() => {
           if (this.autoCheckStartedAt <= 0) return;
           runTick();
@@ -5756,7 +5766,7 @@ export class PaperTrader {
       runTick();
       scheduleNext();
       console.log(
-        `[paper] Auto position check started (warmup ${LIVE_SIM_WARMUP_INTERVAL_MS}ms for ${LIVE_SIM_WARMUP_MS / 1000}s or until process uptime≥180s, then ${steadyInterval}ms; ≥3 open → ${LIVE_SIM_WARMUP_INTERVAL_MS}ms floor) [LIVE SIM]`
+        `[paper] Auto position check started (warmup ${LIVE_SIM_SOFT_INTERVAL_MS}ms for ${LIVE_SIM_SOFT_WARMUP_MS / 1000}s, then ${LIVE_SIM_WARMUP_INTERVAL_MS}ms if Trading EWMA recovered else ${LIVE_SIM_SOFT_INTERVAL_MS}ms; ≥3 open → ${LIVE_SIM_WARMUP_INTERVAL_MS}ms floor) [LIVE SIM]`
       );
       return;
     }

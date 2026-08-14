@@ -34,6 +34,11 @@ export interface DashboardState {
 
 let cached: DashboardState | null = null;
 let buildEnsureDone = false;
+/** This-process Overview timer — survives GitHub restore rewriting dashboardState.json. */
+let processBootTimer: {
+  lastDashboardResetAt: number;
+  lastBuildId: string;
+} | null = null;
 
 function normalize(raw: Partial<DashboardState> | null): DashboardState {
   const ts =
@@ -106,11 +111,14 @@ export function ensureDashboardResetTimerForBuild(
       );
     }
     buildEnsureDone = true;
+    processBootTimer = { lastDashboardResetAt: ts, lastBuildId: buildId };
     return ts;
   }
 
   buildEnsureDone = true;
-  return state.lastDashboardResetAt as number;
+  const aligned = state.lastDashboardResetAt as number;
+  processBootTimer = { lastDashboardResetAt: aligned, lastBuildId: buildId };
+  return aligned;
 }
 
 /** Epoch ms of last Overview Reset (after build-align). Never null once ensured. */
@@ -129,7 +137,54 @@ export function markDashboardReset(atMs: number = Date.now()): number {
     lastBuildId: prev.lastBuildId ?? getBuildId(),
     skipFavouritesAutoImport: prev.skipFavouritesAutoImport === true,
   });
+  processBootTimer = {
+    lastDashboardResetAt: ts,
+    lastBuildId: prev.lastBuildId ?? getBuildId(),
+  };
   return ts;
+}
+
+/**
+ * When restoring dashboardState.json from a site backup, keep this process's
+ * Overview elapsed timer / build id so GitHub import cannot jump the clock.
+ */
+export function mergeDashboardStateForRestore(incoming: unknown): DashboardState {
+  const fromBackup = normalize(
+    incoming && typeof incoming === 'object'
+      ? (incoming as Partial<DashboardState>)
+      : null
+  );
+  const pin = processBootTimer;
+  if (!pin) {
+    try {
+      ensureDashboardResetTimerForBuild();
+    } catch {
+      /* */
+    }
+  }
+  const keep = processBootTimer;
+  if (!keep) return fromBackup;
+  return {
+    version: 1,
+    updatedAt: Date.now(),
+    lastDashboardResetAt: keep.lastDashboardResetAt,
+    lastBuildId: keep.lastBuildId,
+    skipFavouritesAutoImport: fromBackup.skipFavouritesAutoImport === true,
+  };
+}
+
+/** Re-write pinned timer after restore reloaded disk (cache was cleared). */
+export function restoreDashboardResetTimerAfterImport(): void {
+  if (!processBootTimer) return;
+  cached = null;
+  saveDashboardState({
+    version: 1,
+    updatedAt: Date.now(),
+    lastDashboardResetAt: processBootTimer.lastDashboardResetAt,
+    lastBuildId: processBootTimer.lastBuildId,
+    skipFavouritesAutoImport: loadDashboardState().skipFavouritesAutoImport === true,
+  });
+  buildEnsureDone = true;
 }
 
 export function getSkipFavouritesAutoImport(): boolean {

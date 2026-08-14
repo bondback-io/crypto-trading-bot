@@ -628,14 +628,18 @@ export function createServer(): express.Application {
       let payload: unknown = null;
       if (Buffer.isBuffer(body)) {
         try {
-          payload = JSON.parse(body.toString('utf8'));
+          const { decodeSiteBackupPayload } =
+            require('./siteBackup') as typeof import('./siteBackup');
+          payload = await decodeSiteBackupPayload(body);
         } catch {
           res.status(400).json({ ok: false, error: 'Upload is not valid JSON' });
           return;
         }
       } else if (typeof body === 'string') {
         try {
-          payload = JSON.parse(body);
+          const { decodeSiteBackupPayload } =
+            require('./siteBackup') as typeof import('./siteBackup');
+          payload = await decodeSiteBackupPayload(body);
         } catch {
           res.status(400).json({ ok: false, error: 'Upload is not valid JSON' });
           return;
@@ -765,8 +769,12 @@ export function createServer(): express.Application {
             : result.skippedUnchanged
             ? `Skipped unchanged GitHub PUT (${result.bytes} bytes, ${result.fileCount} files)`
             : result.coalesced
-              ? 'Upload coalesced — another upload was already in progress'
-              : `Uploaded to GitHub (${result.bytes} bytes, ${result.fileCount} files)`,
+              ? result.deferred
+                ? 'Upload deferred — Trading busy or a heavy job holds the slot; will retry on the next scheduled tick'
+                : 'Upload coalesced — another upload was already in progress'
+              : `Uploaded to GitHub (${result.bytes} bytes${
+                  result.gzipBytes != null ? `, ${result.gzipBytes} gzip` : ''
+                }, ${result.fileCount} files)`,
       });
     } catch (err) {
       res.status(400).json({
@@ -8599,12 +8607,13 @@ export function startServer(port?: number, host?: string): void {
     }
 
     // Defer GitHub auto-import until BootPhase background (≥180s).
-    const GITHUB_AUTO_IMPORT_MIN_UPTIME_MS = 180_000;
     setTimeout(() => {
       void (async () => {
         try {
           const { getProcessUptimeMs } =
             require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+          const { GITHUB_AUTO_IMPORT_MIN_UPTIME_MS } =
+            require('./bootPhase') as typeof import('./bootPhase');
           const waitMs = Math.max(
             0,
             GITHUB_AUTO_IMPORT_MIN_UPTIME_MS - getProcessUptimeMs()

@@ -351,7 +351,18 @@ export function annotateScannerCandidate(
 
 function pushFeed(row: ScannerCandidate): void {
   feed.unshift(row);
-  if (feed.length > MAX_FEED) feed.length = MAX_FEED;
+  if (feed.length > MAX_FEED) {
+    let worstI = feed.length - 1;
+    let worstScore = Number(feed[worstI]?.rankScore) || 0;
+    for (let i = 1; i < feed.length; i++) {
+      const s = Number(feed[i]?.rankScore) || 0;
+      if (s < worstScore) {
+        worstScore = s;
+        worstI = i;
+      }
+    }
+    feed.splice(worstI, 1);
+  }
 }
 
 function hardFloorsOk(event: LaunchEvent): boolean {
@@ -1504,7 +1515,6 @@ export async function runScannerPollOnce(): Promise<number> {
     const snap = getRpcLoadControlSnapshot();
     if (
       isLaneRateLimited('secondary') ||
-      !isSignalsRpcHealthy() ||
       (snap.secondarySkipsRecent ?? 0) > 5
     ) {
       baseInterval = Math.max(35_000, baseInterval);
@@ -1559,6 +1569,19 @@ export async function runScannerPollOnce(): Promise<number> {
     );
   }
   pollInFlight = true;
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    if (!tryAcquireHeavyJob('market_scanner')) {
+      pollInFlight = false;
+      lastSkipReason = 'heavy job deferred — data lane busy';
+      return 0;
+    }
+    heavyHeld = true;
+  } catch {
+    /* */
+  }
   const t0 = Date.now();
   try {
     const { noteBootTimeline } =
@@ -1601,6 +1624,18 @@ export async function runScannerPollOnce(): Promise<number> {
       `[marketScanner] poll ${universe.length} launches → ${picked.length} candidates ` +
         `(handed ${handed}) in ${lastPollMs}ms`
     );
+
+    let skipSide = false;
+    try {
+      const { shouldSkipScannerSideWork } =
+        require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+      skipSide = shouldSkipScannerSideWork().skip;
+    } catch {
+      /* */
+    }
+    if (skipSide) {
+      return handed;
+    }
 
     // Curve-first graduation watches (no TA gate) — pump / Jupiter universe
     try {
@@ -1810,6 +1845,15 @@ export async function runScannerPollOnce(): Promise<number> {
     return 0;
   } finally {
     pollInFlight = false;
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('market_scanner');
+      } catch {
+        /* */
+      }
+    }
     try {
       const { noteBootTimeline } =
         require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');

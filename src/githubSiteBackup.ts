@@ -13,7 +13,10 @@ import {
 } from './dataDir';
 import {
   buildSiteBackupForGithubUpload,
+  bufferToBase64Yielding,
   computeDataDirBackupFingerprint,
+  decodeSiteBackupPayload,
+  gzipUtf8Json,
   isValidSiteBackup,
   restoreSiteBackup,
   saveSiteBackup,
@@ -82,11 +85,14 @@ export type GithubUploadPhaseTimings = {
   buildMs: number;
   writeMs: number;
   encodeMs: number;
+  gzipMs?: number;
+  gzipBytes?: number;
   putMs: number;
   totalMs: number;
   skippedUnchanged?: boolean;
   skippedFingerprint?: boolean;
   coalesced?: boolean;
+  deferred?: boolean;
   reason: string;
   at: number;
 };
@@ -673,6 +679,22 @@ async function githubApi<T>(
   return { ok: res.ok, status: res.status, json, text };
 }
 
+async function gzipJsonForGithubPut(compactJson: string): Promise<{
+  content: string;
+  gzipBytes: number;
+  gzipMs: number;
+}> {
+  const t0 = Date.now();
+  const gzipBuf = await gzipUtf8Json(compactJson);
+  await new Promise<void>((r) => setImmediate(r));
+  const content = await bufferToBase64Yielding(gzipBuf);
+  return {
+    content,
+    gzipBytes: gzipBuf.length,
+    gzipMs: Date.now() - t0,
+  };
+}
+
 async function fetchRemoteSha(
   owner: string,
   repo: string,
@@ -718,8 +740,10 @@ export async function uploadSiteBackupToGithub(opts?: {
   skippedUnchanged?: boolean;
   skippedFingerprint?: boolean;
   coalesced?: boolean;
+  deferred?: boolean;
   dryRun?: boolean;
   phases?: GithubUploadPhaseTimings;
+  gzipBytes?: number;
 }> {
   const reason = opts?.reason || 'manual';
   const dryRun = opts?.dryRun === true;
@@ -750,6 +774,58 @@ export async function uploadSiteBackupToGithub(opts?: {
       coalesced: true,
       phases: lastUploadPhases,
     };
+  }
+  const scheduled =
+    reason === 'scheduled' ||
+    reason.startsWith('coalesced:') ||
+    reason.startsWith('critical:');
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob, GITHUB_MANUAL_WAIT_MS } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    const waitT0 = Date.now();
+    const waitMs = scheduled ? 0 : GITHUB_MANUAL_WAIT_MS;
+    const forceAfterWait = !scheduled;
+    for (;;) {
+      const elapsed = Date.now() - waitT0;
+      const ignoreEwma = forceAfterWait && elapsed >= waitMs;
+      if (tryAcquireHeavyJob('github_upload', { ignoreEwma })) {
+        heavyHeld = true;
+        break;
+      }
+      if (!forceAfterWait) {
+        console.log(
+          `[github-backup] deferred (${reason}) — trading busy or heavy slot held`
+        );
+        lastUploadPhases = {
+          reconcileMs: 0,
+          buildMs: 0,
+          writeMs: 0,
+          encodeMs: 0,
+          putMs: 0,
+          totalMs: Date.now() - waitT0,
+          coalesced: true,
+          deferred: true,
+          reason: `deferred:${reason}`,
+          at: Date.now(),
+        };
+        return {
+          ok: true,
+          exportedAt: new Date().toISOString(),
+          fileCount: 0,
+          bytes: 0,
+          path: resolveGithubBackupTarget().path,
+          sha: '',
+          reason,
+          coalesced: true,
+          deferred: true,
+          phases: lastUploadPhases,
+        };
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  } catch {
+    /* proceed without mutex */
   }
   uploadInFlight = true;
   const totalT0 = Date.now();
@@ -831,32 +907,35 @@ export async function uploadSiteBackupToGithub(opts?: {
       exported;
 
     if (dryRun) {
-      const content = Buffer.from(compactJson, 'utf8').toString('base64');
+      const gz = await gzipJsonForGithubPut(compactJson);
       const phases: GithubUploadPhaseTimings = {
         ...exportPhases,
-        encodeMs: exportPhases.encodeMs,
+        encodeMs: exportPhases.encodeMs + gz.gzipMs,
+        gzipMs: gz.gzipMs,
+        gzipBytes: gz.gzipBytes,
         putMs: 0,
         totalMs: Date.now() - totalT0,
         reason: `dry:${reason}`,
         at: Date.now(),
       };
-      void content.length;
+      void gz.content.length;
       lastUploadPhases = phases;
       // Fingerprint after export so concurrent writers during build don't poison skip.
       s.lastUploadDirFingerprint = computeDataDirBackupFingerprint();
       s.lastUploadContentSha = contentSha256;
-      s.lastUploadBytes = bytes;
+      s.lastUploadBytes = gz.gzipBytes;
       saveGithubBackupSettings(s);
       console.log(
-        `[github-backup] dry-run export ok (${bytes} bytes, ${backup.fileCount} files) ` +
+        `[github-backup] dry-run export ok (${bytes} json bytes, ${gz.gzipBytes} gzip, ${backup.fileCount} files) ` +
           `phases reconcile=${phases.reconcileMs}ms build=${phases.buildMs}ms ` +
-          `encode=${phases.encodeMs}ms write=${phases.writeMs}ms total=${phases.totalMs}ms`
+          `encode=${phases.encodeMs}ms gzip=${gz.gzipMs}ms write=${phases.writeMs}ms total=${phases.totalMs}ms`
       );
       return {
         ok: true,
         exportedAt: backup.exportedAt,
         fileCount: backup.fileCount,
         bytes,
+        gzipBytes: gz.gzipBytes,
         path: target.path,
         sha: '',
         reason,
@@ -913,8 +992,9 @@ export async function uploadSiteBackupToGithub(opts?: {
     }
 
     const encodeT0 = Date.now();
-    const content = Buffer.from(compactJson, 'utf8').toString('base64');
+    const gz = await gzipJsonForGithubPut(compactJson);
     const encodeExtraMs = Date.now() - encodeT0;
+    const content = gz.content;
 
     const sha = await fetchRemoteSha(
       target.owner,
@@ -954,6 +1034,8 @@ export async function uploadSiteBackupToGithub(opts?: {
       buildMs: exportPhases.buildMs,
       writeMs: exportPhases.writeMs,
       encodeMs: exportPhases.encodeMs + encodeExtraMs,
+      gzipMs: gz.gzipMs,
+      gzipBytes: gz.gzipBytes,
       putMs,
       totalMs: Date.now() - totalT0,
       reason,
@@ -966,7 +1048,7 @@ export async function uploadSiteBackupToGithub(opts?: {
       lastUploadAtMs: Date.now(),
       lastUploadOk: true,
       lastUploadError: null,
-      lastUploadBytes: bytes,
+      lastUploadBytes: gz.gzipBytes,
       lastRemoteSha: newSha || null,
       lastUploadContentSha: contentSha256,
       lastUploadDirFingerprint: computeDataDirBackupFingerprint(),
@@ -979,9 +1061,9 @@ export async function uploadSiteBackupToGithub(opts?: {
 
     console.log(
       `[github-backup] uploaded ${target.owner}/${target.repo}/${target.path} ` +
-        `(${bytes} bytes, ${backup.fileCount} files, ${reason}) ` +
+        `(${bytes} json bytes, ${gz.gzipBytes} gzip, ${backup.fileCount} files, ${reason}) ` +
         `phases reconcile=${phases.reconcileMs}ms build=${phases.buildMs}ms ` +
-        `encode=${phases.encodeMs}ms write=${phases.writeMs}ms put=${phases.putMs}ms total=${phases.totalMs}ms`
+        `encode=${phases.encodeMs}ms gzip=${gz.gzipMs}ms write=${phases.writeMs}ms put=${phases.putMs}ms total=${phases.totalMs}ms`
     );
 
     return {
@@ -989,6 +1071,7 @@ export async function uploadSiteBackupToGithub(opts?: {
       exportedAt: backup.exportedAt,
       fileCount: backup.fileCount,
       bytes,
+      gzipBytes: gz.gzipBytes,
       path: target.path,
       sha: newSha,
       reason,
@@ -1018,6 +1101,15 @@ export async function uploadSiteBackupToGithub(opts?: {
     throw err;
   } finally {
     uploadInFlight = false;
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('github_upload');
+      } catch {
+        /* */
+      }
+    }
     if (pendingUploadReason) {
       const r = pendingUploadReason;
       pendingUploadReason = null;
@@ -1051,6 +1143,28 @@ export async function restoreSiteBackupFromGithub(): Promise<{
     throw new Error('GitHub owner/repo not configured');
   }
 
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob, GITHUB_MANUAL_WAIT_MS } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    const waitT0 = Date.now();
+    for (;;) {
+      const elapsed = Date.now() - waitT0;
+      if (
+        tryAcquireHeavyJob('github_restore', {
+          ignoreEwma: elapsed >= GITHUB_MANUAL_WAIT_MS,
+        })
+      ) {
+        heavyHeld = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  } catch {
+    /* proceed */
+  }
+
+  try {
   const enc = target.path
     .split('/')
     .map((p) => encodeURIComponent(p))
@@ -1077,32 +1191,31 @@ export async function restoreSiteBackupFromGithub(): Promise<{
     );
   }
 
-  let rawText: string;
-  if (get.json.encoding === 'base64' && get.json.content) {
-    rawText = Buffer.from(
-      get.json.content.replace(/\n/g, ''),
-      'base64'
-    ).toString('utf8');
-  } else if (get.json.download_url) {
-    const dl = await fetch(get.json.download_url, {
-      headers: {
-        Authorization: `Bearer ${target.token}`,
-        'User-Agent': 'crypto-trading-bot-site-backup',
-      },
-    });
-    if (!dl.ok) {
-      throw new Error(`GitHub download_url failed (${dl.status})`);
-    }
-    rawText = await dl.text();
-  } else {
-    throw new Error('GitHub response missing file content');
-  }
-
   let parsed: unknown;
   try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    throw new Error('Remote file is not valid JSON');
+    let buf: Buffer;
+    if (get.json.encoding === 'base64' && get.json.content) {
+      buf = Buffer.from(get.json.content.replace(/\n/g, ''), 'base64');
+    } else if (get.json.download_url) {
+      const dl = await fetch(get.json.download_url, {
+        headers: {
+          Authorization: `Bearer ${target.token}`,
+          'User-Agent': 'crypto-trading-bot-site-backup',
+        },
+      });
+      if (!dl.ok) {
+        throw new Error(`GitHub download_url failed (${dl.status})`);
+      }
+      buf = Buffer.from(await dl.arrayBuffer());
+    } else {
+      throw new Error('GitHub response missing file content');
+    }
+    parsed = await decodeSiteBackupPayload(buf);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      msg.includes('GitHub') ? msg : `Remote file is not valid JSON (${msg})`
+    );
   }
   if (!isValidSiteBackup(parsed)) {
     throw new Error('Remote file is not a valid site-backup (kind/version)');
@@ -1134,6 +1247,17 @@ export async function restoreSiteBackupFromGithub(): Promise<{
     path: target.path,
     sha,
   };
+  } finally {
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('github_restore');
+      } catch {
+        /* */
+      }
+    }
+  }
 }
 
 function recordAutoImportSkip(reason: string): void {

@@ -148,10 +148,12 @@ let backgroundIdx = 0;
 let tradingHardFailStreak = 0;
 let tradingRecoverAt = 0;
 let lastHealthProbeAt = 0;
-/** Skip first Trading getSlot EWMA (cold TLS after deploy). */
-let tradingColdProbeSkipped = false;
-/** Reset Trading EWMA once after boot settle on a healthy probe. */
-let tradingEwmaBootReset = false;
+/** Consecutive Trading getSlot probes < 400ms (need 2 to heal ghost EWMA). */
+let tradingFastProbeStreak = 0;
+/** Consecutive Data getSlot probes < 400ms. */
+let dataFastProbeStreak = 0;
+let tradingEwmaRecovered = false;
+let dataEwmaRecovered = false;
 /** Hard pause of non-essential RPC when all feature workloads are OFF. */
 let idleIsolationActive = false;
 /** Migration was started this process and should resume when isolation ends. */
@@ -743,10 +745,63 @@ export function isLaneRateLimited(role: RpcRole = 'primary'): boolean {
   return Boolean(bg && isRateLimited(bg));
 }
 
+function rpcHostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function rpcKeyHint(url: string): string {
+  try {
+    const u = new URL(url);
+    const q = u.searchParams.get('api-key') || u.searchParams.get('apiKey');
+    if (q && q.length >= 8) return q;
+    const last = u.pathname.split('/').filter(Boolean).pop() || '';
+    return last.length >= 20 ? last : '';
+  } catch {
+    return '';
+  }
+}
+
 export function lanesShareEndpoint(): boolean {
   ensureEndpoints();
   if (!tradingPref || !dataPref) return true;
   return tradingPref.endpoint.url === dataPref.endpoint.url;
+}
+
+/** Same URL, same host, or same API key reused across Trading and Data. */
+export function lanesShareProviderOrKey(): boolean {
+  if (lanesShareEndpoint()) return true;
+  if (!tradingPref || !dataPref) return true;
+  const th = rpcHostOf(tradingPref.endpoint.url);
+  const dh = rpcHostOf(dataPref.endpoint.url);
+  if (th && dh && th === dh) return true;
+  const tk = rpcKeyHint(tradingPref.endpoint.url);
+  const dk = rpcKeyHint(dataPref.endpoint.url);
+  if (tk && dk && tk === dk) return true;
+  return false;
+}
+
+function shouldSkipTradingGetSlot(): boolean {
+  try {
+    const { getProcessUptimeMs } =
+      require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
+    const { TRADING_GETSLOT_SKIP_MS } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    return getProcessUptimeMs() < TRADING_GETSLOT_SKIP_MS;
+  } catch {
+    return false;
+  }
+}
+
+export function isTradingEwmaRecovered(): boolean {
+  return tradingEwmaRecovered;
+}
+
+export function isDataEwmaRecovered(): boolean {
+  return dataEwmaRecovered;
 }
 
 function normalizeRole(role: RpcRole | undefined): NormalizedRpcRole {
@@ -910,44 +965,91 @@ function recordSuccess(
   st.lastCallLatencyMs = latencyMs;
 
   const tradingProbe = Boolean(opts?.fromProbe && tradingPref && st === tradingPref);
-  if (tradingProbe && !tradingColdProbeSkipped) {
-    tradingColdProbeSkipped = true;
-    st.probeLatencyMs = latencyMs;
-    st.healthy = true;
-    st.unhealthySince = null;
-    rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
-    refreshRpcLoadSignalsFromLanes();
-    return;
-  }
+  const dataProbe = Boolean(opts?.fromProbe && dataPref && st === dataPref);
+  const FAST_MS = 400;
 
-  let applyEwma = true;
-  if (tradingProbe && !tradingEwmaBootReset && latencyMs < 400) {
-    try {
-      const { isBootSettling } =
-        require('./bootPhase') as typeof import('./bootPhase');
-      if (!isBootSettling()) {
-        tradingEwmaBootReset = true;
+  if (opts?.fromProbe && (tradingProbe || dataProbe)) {
+    const fast = latencyMs < FAST_MS;
+    if (tradingProbe) {
+      tradingFastProbeStreak = fast ? tradingFastProbeStreak + 1 : 0;
+      if (!tradingEwmaRecovered && tradingFastProbeStreak >= 2) {
+        tradingEwmaRecovered = true;
         st.latencyMs = latencyMs;
         st.probeLatencyMs = latencyMs;
-        applyEwma = false;
+        st.healthy = true;
+        st.unhealthySince = null;
+        rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
+        refreshRpcLoadSignalsFromLanes();
+        console.log(
+          `[rpc] Trading EWMA recovered after 2 probes <${FAST_MS}ms (${Math.round(latencyMs)}ms)`
+        );
+        return;
       }
-    } catch {
-      /* */
+      if (!tradingEwmaRecovered) {
+        let settling = true;
+        try {
+          const { isBootSettling } =
+            require('./bootPhase') as typeof import('./bootPhase');
+          settling = isBootSettling();
+        } catch {
+          /* */
+        }
+        if (settling) {
+          st.healthy = true;
+          st.unhealthySince = null;
+          rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
+          refreshRpcLoadSignalsFromLanes();
+          return;
+        }
+        tradingEwmaRecovered = true;
+      }
+    }
+    if (dataProbe) {
+      dataFastProbeStreak = fast ? dataFastProbeStreak + 1 : 0;
+      if (!dataEwmaRecovered && dataFastProbeStreak >= 2) {
+        dataEwmaRecovered = true;
+        st.latencyMs = latencyMs;
+        st.probeLatencyMs = latencyMs;
+        st.healthy = true;
+        st.unhealthySince = null;
+        rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
+        refreshRpcLoadSignalsFromLanes();
+        console.log(
+          `[rpc] Data EWMA recovered after 2 probes <${FAST_MS}ms (${Math.round(latencyMs)}ms)`
+        );
+        return;
+      }
+      if (!dataEwmaRecovered) {
+        let settling = true;
+        try {
+          const { isBootSettling } =
+            require('./bootPhase') as typeof import('./bootPhase');
+          settling = isBootSettling();
+        } catch {
+          /* */
+        }
+        if (settling) {
+          st.healthy = true;
+          st.unhealthySince = null;
+          rateLimitStreakByLabel.delete(st.endpoint.label || st.endpoint.url);
+          refreshRpcLoadSignalsFromLanes();
+          return;
+        }
+        dataEwmaRecovered = true;
+      }
     }
   }
 
-  if (applyEwma) {
-    st.latencyMs =
-      st.latencyMs == null
+  st.latencyMs =
+    st.latencyMs == null
+      ? latencyMs
+      : LATENCY_EWMA_ALPHA * latencyMs + (1 - LATENCY_EWMA_ALPHA) * st.latencyMs;
+  if (opts?.fromProbe) {
+    st.probeLatencyMs =
+      st.probeLatencyMs == null
         ? latencyMs
-        : LATENCY_EWMA_ALPHA * latencyMs + (1 - LATENCY_EWMA_ALPHA) * st.latencyMs;
-    if (opts?.fromProbe) {
-      st.probeLatencyMs =
-        st.probeLatencyMs == null
-          ? latencyMs
-          : LATENCY_EWMA_ALPHA * latencyMs +
-            (1 - LATENCY_EWMA_ALPHA) * st.probeLatencyMs;
-    }
+        : LATENCY_EWMA_ALPHA * latencyMs +
+          (1 - LATENCY_EWMA_ALPHA) * st.probeLatencyMs;
   }
   st.healthy = true;
   st.unhealthySince = null;
@@ -1445,8 +1547,8 @@ function refreshRpcLoadSignalsFromLanes(): void {
     const bActive = bgFeatureOn ? laneState('background') : null;
     const gate = getRpcGateSnapshot();
     updateRpcLoadSignals({
-      primaryLatencyMs: tActive?.latencyMs ?? null,
-      secondaryLatencyMs: dActive?.latencyMs ?? null,
+      primaryLatencyMs: tradingEwmaRecovered ? tActive?.latencyMs ?? null : null,
+      secondaryLatencyMs: dataEwmaRecovered ? dActive?.latencyMs ?? null : null,
       backgroundLatencyMs: bgFeatureOn ? bActive?.latencyMs ?? null : null,
       tradingOnEmergency: tradingHop >= 1 && Boolean(emergencyPublic),
       dataHealthy: Boolean(dActive?.healthy),
@@ -1629,9 +1731,9 @@ function buildRpcStats() {
       'Trading/Data unhealthy — check assigned Mains or hop to Emergency.';
   } else if (tradingOnEmergency) {
     warning = `Trading on Emergency (${tActive?.endpoint.label || 'em'}) — Main recovering.`;
-  } else if (lanesShareEndpoint()) {
+  } else if (lanesShareProviderOrKey()) {
     warning =
-      'Trading and Data share a URL — assign distinct inventory ids.';
+      'Trading and Data share a provider or API key — assign distinct Alchemy vs Helius.';
   } else if (controlPlaneThrash) {
     warning =
       'Control-plane thrash: feature workloads OFF but probes still high — check health_probe rate.';
@@ -1792,7 +1894,7 @@ function buildRpcStats() {
     },
     scannersB: null,
     metrics: null,
-    lanesShareEndpoint: lanesShareEndpoint(),
+    lanesShareEndpoint: lanesShareProviderOrKey(),
     supports: {
       classicShare: false as const,
       multiLane: false as const,
@@ -1890,15 +1992,41 @@ function buildRpcStats() {
       }
     })(),
     controlPlaneThrash,
+    ...(() => {
+      try {
+        const { getHeavyJobSnapshot } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        const h = getHeavyJobSnapshot();
+        return {
+          heavyJobs: h,
+          heavy_job_running: h.heavy_job_running,
+          heavy_job_deferred: h.heavy_job_deferred,
+          last_heavy_collision_avoided: h.last_heavy_collision_avoided,
+          endpoint_pressure_by_lane: h.endpoint_pressure_by_lane,
+        };
+      } catch {
+        return {
+          heavyJobs: null,
+          heavy_job_running: null as string | null,
+          heavy_job_deferred: 0,
+          last_heavy_collision_avoided: null,
+          endpoint_pressure_by_lane: null,
+        };
+      }
+    })(),
     laneAssignments: asg,
     lanes: {
       trading: {
         label: tActive?.endpoint.label || (tradingPref ? tradingPref.endpoint.label : 'none'),
         url: tActive?.endpoint.url || '',
         healthy: tradingPref ? Boolean(tActive?.healthy) : false,
-        latencyMs: tActive?.probeLatencyMs ?? tActive?.latencyMs ?? null,
+        latencyMs: tradingEwmaRecovered
+          ? tActive?.probeLatencyMs ?? tActive?.latencyMs ?? null
+          : null,
         callLatencyMs: tActive?.latencyMs ?? null,
-        probeLatencyMs: tActive?.probeLatencyMs ?? null,
+        probeLatencyMs: tradingEwmaRecovered
+          ? tActive?.probeLatencyMs ?? null
+          : null,
         successRate: successRate(tActive),
         active: Boolean(tradingPref || emergencyPublic),
         mainId: asg.trading.main,
@@ -1916,9 +2044,13 @@ function buildRpcStats() {
         label: dActive?.endpoint.label || (dataPref ? dataPref.endpoint.label : 'none'),
         url: dActive?.endpoint.url || '',
         healthy: dataPref ? Boolean(dActive?.healthy) : false,
-        latencyMs: dActive?.probeLatencyMs ?? dActive?.latencyMs ?? null,
+        latencyMs: dataEwmaRecovered
+          ? dActive?.probeLatencyMs ?? dActive?.latencyMs ?? null
+          : null,
         callLatencyMs: dActive?.latencyMs ?? null,
-        probeLatencyMs: dActive?.probeLatencyMs ?? null,
+        probeLatencyMs: dataEwmaRecovered
+          ? dActive?.probeLatencyMs ?? null
+          : null,
         successRate: successRate(dActive),
         active: Boolean(dataPref || dataFailover),
         mainId: asg.data.main,
@@ -2267,6 +2399,10 @@ export async function testConnection(): Promise<boolean> {
   } catch {
     /* */
   }
+  if (shouldSkipTradingGetSlot()) {
+    console.log('[connection] Skipping Trading getSlot — warming (uptime < 60s)');
+    return true;
+  }
   const pref = tradingPref;
   if (!pref) {
     console.error('[connection] No Trading RPC configured');
@@ -2313,7 +2449,7 @@ export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>
     /* */
   }
   const probeList: EndpointState[] = [];
-  if (tradingPref) probeList.push(tradingPref);
+  if (tradingPref && !shouldSkipTradingGetSlot()) probeList.push(tradingPref);
   if (dataPref) probeList.push(dataPref);
   if (wantBackgroundHot() && backgroundPref) probeList.push(backgroundPref);
   if (tradingHop >= 1 && emergencyPublic) probeList.push(emergencyPublic);
@@ -2363,10 +2499,12 @@ export function startRpcHealthMonitor(): void {
       lastHealthProbeAt = now;
 
       // One lightweight getSlot per active lane only — skip rate-limited endpoints.
+      // Skip Trading getSlot for first 60s (cold TLS seeds a ghost EWMA / false panic).
       if (
         tradingPref &&
         !isHardFailed(tradingPref) &&
-        !isRateLimited(tradingPref)
+        !isRateLimited(tradingPref) &&
+        !shouldSkipTradingGetSlot()
       ) {
         await probeState(tradingPref, 8_000);
       }

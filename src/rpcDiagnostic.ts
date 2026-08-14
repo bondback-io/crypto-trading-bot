@@ -325,7 +325,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   }
   if (rpc.lanesShareEndpoint) {
     chokeHints.push(
-      'Trading and Data share one URL — set distinct ALCHEMY_API_KEY vs HELIUS_API_KEY.'
+      'Trading and Data share a provider or API key — set distinct ALCHEMY_API_KEY vs HELIUS_API_KEY.'
     );
   }
   if (rpc.warning) {

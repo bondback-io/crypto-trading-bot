@@ -5114,10 +5114,112 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       align-self: flex-start;
       margin-left: auto;
     }
-    .ov-reset-meta {
-      text-align: right;
+    .ov-boot-section {
+      position: relative;
+    }
+    .ov-boot-overlay {
+      position: sticky;
+      top: 4.5rem;
+      z-index: 45;
+      display: none;
+      justify-content: center;
+      pointer-events: none;
+      margin: 0 0 -0.25rem;
+    }
+    .ov-boot-overlay.is-visible {
+      display: flex;
+    }
+    .ov-boot-section.is-booting > *:not(#ov-boot-overlay) {
+      filter: blur(2.5px);
+      opacity: 0.42;
+      transition: filter 0.25s ease, opacity 0.25s ease;
+    }
+    .ov-boot-card {
+      pointer-events: auto;
+      width: min(28rem, calc(100% - 1.5rem));
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.94));
+      border: 1px solid rgba(52, 211, 153, 0.45);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(16, 185, 129, 0.12);
+      border-radius: 14px;
+      padding: 1.05rem 1.15rem 1.15rem;
+    }
+    .ov-boot-kicker {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #34d399;
+      font-weight: 700;
+      margin-bottom: 0.2rem;
+    }
+    .ov-boot-title {
+      font-size: 1.05rem;
+      font-weight: 750;
+      color: #ecfdf5;
       line-height: 1.25;
-      min-width: 0;
+    }
+    .ov-boot-count {
+      margin-top: 0.45rem;
+      font-variant-numeric: tabular-nums;
+      color: #a7f3d0;
+      font-size: 0.92rem;
+      font-weight: 650;
+    }
+    .ov-boot-bar {
+      margin-top: 0.7rem;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.35);
+      overflow: hidden;
+    }
+    .ov-boot-bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #059669, #34d399);
+      transition: width 0.4s ease;
+    }
+    .ov-boot-pct {
+      margin-top: 0.28rem;
+      font-size: 11px;
+      color: #94a3b8;
+      font-variant-numeric: tabular-nums;
+    }
+    .ov-boot-phases {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.75rem;
+    }
+    .ov-boot-phase {
+      font-size: 10px;
+      font-weight: 650;
+      padding: 0.18rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      color: #64748b;
+      background: rgba(15, 23, 42, 0.6);
+    }
+    .ov-boot-phase.is-done {
+      color: #6ee7b7;
+      border-color: rgba(52, 211, 153, 0.35);
+    }
+    .ov-boot-phase.is-active {
+      color: #ecfdf5;
+      background: rgba(16, 185, 129, 0.22);
+      border-color: #34d399;
+    }
+    .ov-boot-warn {
+      display: none;
+      margin-top: 0.7rem;
+      font-size: 11px;
+      color: #fbbf24;
+      line-height: 1.35;
+    }
+    .ov-boot-warn.is-on { display: block; }
+    @media (max-width: 640px) {
+      .ov-boot-overlay { top: 3.6rem; }
+      .ov-boot-title { font-size: 0.95rem; }
     }
     .ov-reset-elapsed {
       font-size: 12px;
@@ -7622,7 +7724,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
-    <section data-tab-panel="overview" class="space-y-4">
+    <section data-tab-panel="overview" class="space-y-4 ov-boot-section" id="ov-boot-section">
+      <div id="ov-boot-overlay" class="ov-boot-overlay" hidden aria-live="polite">
+        <div class="ov-boot-card">
+          <div class="ov-boot-kicker">System</div>
+          <div class="ov-boot-title" id="ov-boot-title">System Booting / Dashboard Settling</div>
+          <div class="ov-boot-count" id="ov-boot-count">Settling…</div>
+          <div class="ov-boot-bar" aria-hidden="true"><span id="ov-boot-bar-fill"></span></div>
+          <div class="ov-boot-pct" id="ov-boot-pct">0%</div>
+          <div class="ov-boot-phases">
+            <span class="ov-boot-phase" data-boot-phase="warming_trading">Warming Trading</span>
+            <span class="ov-boot-phase" data-boot-phase="starting_scanners">Starting Scanners</span>
+            <span class="ov-boot-phase" data-boot-phase="background">Background</span>
+            <span class="ov-boot-phase" data-boot-phase="ready">Ready</span>
+          </div>
+          <div class="ov-boot-warn" id="ov-boot-warn"></div>
+        </div>
+      </div>
       <div class="card" style="padding:0.65rem 0.85rem">
         <details class="ov-active-profiles-details" id="ov-active-profiles-details">
           <summary class="ov-active-profiles-summary">
@@ -10994,9 +11112,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div class="backup-actions">
             <button type="button" class="btn btn-primary" onclick="backupSite()" title="Export a stamped full-site backup (settings, wallets, profiles, learning, notifications)">Backup Site</button>
-            <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Pick a downloaded site-backup-*.json file from your computer to restore">Load Backup</button>
+            <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Pick a downloaded site-backup-*.json (or .json.gz) file from your computer to restore">Load Backup</button>
             <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
-            <input type="file" id="site-backup-file" accept="application/json,.json" style="display:none" onchange="importSiteBackupFile(this)" />
+            <input type="file" id="site-backup-file" accept="application/json,.json,.json.gz,application/gzip" style="display:none" onchange="importSiteBackupFile(this)" />
           </div>
         </div>
         <div class="mint text-sm mt-1" id="persist-reset-msg"></div>
@@ -26253,9 +26371,85 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
-    function tickDashboardResetTimer() {
+    let _bootSnap = null;
+    let _bootSnapAt = 0;
+
+    function fmtBootCountdown(ms) {
+      if (ms == null || !Number.isFinite(ms) || ms <= 0) return '0s';
+      const sec = Math.max(0, Math.ceil(ms / 1000));
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      if (m > 0) return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+      return s + 's';
+    }
+
+    function paintBootOverlayFromSnap(snap, ageMs) {
+      const overlay = document.getElementById('ov-boot-overlay');
+      const section = document.getElementById('ov-boot-section');
+      if (!overlay || !section) return;
+      const visible = snap && snap.overlayVisible === true;
+      overlay.hidden = !visible;
+      overlay.classList.toggle('is-visible', visible);
+      section.classList.toggle('is-booting', visible);
+      if (!snap) return;
+      const uptime = (Number(snap.uptimeMs) || 0) + (ageMs || 0);
+      const readyAt = Number(snap.phaseReadyAtMs) || 210000;
+      const untilReady = Math.max(0, readyAt - uptime);
+      const nextAt =
+        uptime < (snap.phaseScannersAtMs || 90000)
+          ? snap.phaseScannersAtMs || 90000
+          : uptime < (snap.phaseBackgroundAtMs || 180000)
+            ? snap.phaseBackgroundAtMs || 180000
+            : readyAt;
+      const untilNext = Math.max(0, nextAt - uptime);
+      const pct = Math.max(0, Math.min(100, Math.round((uptime / readyAt) * 100)));
+      const ui = snap.uiPhase || 'warming_trading';
+      const title = document.getElementById('ov-boot-title');
+      if (title) {
+        title.textContent =
+          ui === 'ready'
+            ? 'Dashboard Ready'
+            : 'System Booting / Dashboard Settling';
+      }
+      const count = document.getElementById('ov-boot-count');
+      if (count) {
+        if (ui === 'ready') {
+          count.textContent = 'Ready — overlay closing';
+        } else {
+          count.textContent =
+            'Next: ' + fmtBootCountdown(untilNext) +
+            ' · Fully ready in ' + fmtBootCountdown(untilReady);
+        }
+      }
+      const fill = document.getElementById('ov-boot-bar-fill');
+      if (fill) fill.style.width = Math.min(100, pct) + '%';
+      const pctEl = document.getElementById('ov-boot-pct');
+      if (pctEl) pctEl.textContent = Math.min(100, pct) + '%';
+      const order = ['warming_trading', 'starting_scanners', 'background', 'ready'];
+      const idx = order.indexOf(ui);
+      document.querySelectorAll('.ov-boot-phase').forEach(function (el) {
+        const key = el.getAttribute('data-boot-phase');
+        const i = order.indexOf(key);
+        el.classList.toggle('is-active', i === idx);
+        el.classList.toggle('is-done', i >= 0 && i < idx);
+      });
+      const warn = document.getElementById('ov-boot-warn');
+      if (warn) {
+        const share = snap.lanesShareProvider === true;
+        warn.classList.toggle('is-on', share);
+        warn.textContent = share
+          ? 'Trading and Data share a provider or API key — latency will stack. Use distinct Alchemy vs Helius.'
+          : '';
+      }
+    }
+
+    function paintBootOverlayTick() {
+      if (!_bootSnap) return;
+      paintBootOverlayFromSnap(_bootSnap, Date.now() - _bootSnapAt);
+    }
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       paintDashboardResetTimer();
+      paintBootOverlayTick();
     }
 
     async function resetDashboardSession() {
@@ -26894,6 +27088,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (status.lastDashboardResetAt !== undefined) {
         setLastDashboardResetAt(status.lastDashboardResetAt);
       }
+      (function paintBootFromStatus() {
+        const rpcObj = status.rpc || {};
+        const bp = rpcObj.bootPhase || null;
+        if (bp) {
+          _bootSnap = {
+            overlayVisible: bp.overlayVisible === true,
+            uiPhase: bp.uiPhase,
+            uptimeMs: bp.uptimeMs,
+            phaseScannersAtMs: bp.phaseScannersAtMs,
+            phaseBackgroundAtMs: bp.phaseBackgroundAtMs,
+            phaseReadyAtMs: bp.phaseReadyAtMs,
+            lanesShareProvider: rpcObj.lanesShareEndpoint === true,
+          };
+          _bootSnapAt = Date.now();
+          paintBootOverlayFromSnap(_bootSnap, 0);
+        }
+      })();
 
       const availEl = document.getElementById('ov-available');
       if (availEl) {
@@ -27055,6 +27266,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const bootSettling = rpcObj.bootSettling === true;
           const rpc60 =
             rpcObj.rpc_calls_last_60s != null ? rpcObj.rpc_calls_last_60s : '—';
+          const heavyRun =
+            rpcObj.heavy_job_running != null && rpcObj.heavy_job_running !== ''
+              ? String(rpcObj.heavy_job_running)
+              : 'none';
+          const heavyDef =
+            rpcObj.heavy_job_deferred != null ? rpcObj.heavy_job_deferred : 0;
+          const lastCol = rpcObj.last_heavy_collision_avoided;
+          const colNote =
+            lastCol && lastCol.at
+              ? ' last-avoid=' +
+                String(lastCol.deferred || '') +
+                '>' +
+                String(lastCol.running || '')
+              : '';
           cp.textContent =
             (idleOn ? 'IDLE ISOLATION · ' : '') +
             (bootSettling
@@ -27083,6 +27308,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ' · Data ' +
             (d && d.latencyMs != null ? Math.round(d.latencyMs) + 'ms' : '—') +
             (rpcObj.background_idle_when_workloads_off ? ' · bg idle' : '') +
+            ' · heavy=' +
+            heavyRun +
+            ' deferred=' +
+            heavyDef +
+            colNote +
             ' · heap=' +
             (rpcObj.heap_used_mb != null ? rpcObj.heap_used_mb + 'MB' : '—') +
             (rpcObj.active_timers_count != null
@@ -27113,7 +27343,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (rpcWrap) {
         rpcWrap.classList.remove('rpc-ok', 'rpc-bad', 'rpc-unknown');
-        if (rpc.ok === false || critLane.healthy === false) rpcWrap.classList.add('rpc-bad');
+        const bootWarm = rpc.bootSettling === true || (rpc.bootPhase && rpc.bootPhase.bootSettling);
+        if (bootWarm && (rpc.lanes && rpc.lanes.trading && rpc.lanes.trading.latencyMs == null)) {
+          rpcWrap.classList.add('rpc-unknown');
+        } else if (rpc.ok === false || critLane.healthy === false) rpcWrap.classList.add('rpc-bad');
         else if (critLane.failover) rpcWrap.classList.add('rpc-unknown');
         else if (rpc.ok === true) rpcWrap.classList.add('rpc-ok');
         else rpcWrap.classList.add('rpc-unknown');
@@ -27192,7 +27425,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (b.healthy === false ? ' · down' : '') +
           ' · Emergency: ' + (e.label || 'public') +
           (e.active ? ' ACTIVE' : ' idle') +
-          (rpc.lanesShareEndpoint ? ' · SHARED Trading/Data URL' : '');
+          (rpc.lanesShareEndpoint ? ' · SHARED Trading/Data provider' : '');
       }
       const gateEl = document.getElementById('rpc-gate-status');
       if (gateEl) {
@@ -37527,7 +37760,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (
         !confirm(
           'Load a site backup from your computer?\\n\\n' +
-            'Pick a previously downloaded site-backup-*.json file.\\n' +
+            'Pick a previously downloaded site-backup-*.json (or .json.gz) file.\\n' +
             'This OVERWRITES current config, wallets, profiles, learning, and notifications on disk.'
         )
       )
@@ -37542,7 +37775,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const file = input && input.files && input.files[0];
       if (!file) return;
       try {
-        const text = await file.text();
+        const buf = await file.arrayBuffer();
+        const u8 = new Uint8Array(buf);
+        let text;
+        if (u8.length >= 2 && u8[0] === 0x1f && u8[1] === 0x8b) {
+          const ds = new DecompressionStream('gzip');
+          const stream = new Blob([u8]).stream().pipeThrough(ds);
+          text = await new Response(stream).text();
+        } else {
+          text = new TextDecoder().decode(u8);
+        }
         const backup = JSON.parse(text);
         if (!backup || backup.kind !== 'site-backup') {
           throw new Error('File is not a site-backup export');

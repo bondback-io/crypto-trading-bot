@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.351',
+    title: 'Boot overlay, signal intake, and heavy-job anti-collision',
+    sections: ['overview', 'scanners', 'execution', 'backup'],
+    items: [
+      'Overview boot overlay (progress, countdown, phase chips) hides ~5s after Ready at 210s; header Trading ms stays unknown — not red — while getSlot is skipped for 60s.',
+      'Boot work unbunched: Market Scanner +90s, Zion +120s, Favourites +150s, GitHub import +180s, migration +210s; Trading/Data EWMA heal only after two consecutive probes under 400ms.',
+      'After scanners open, unrecovered boot EWMA no longer starves Market/Alpha/Zion intake; LIVE count/age uses a 15-minute admission window.',
+      'One HEAVY job per lane at a time (scanners, Zion, Favourites, migration, GitHub, metrics fanout); trade send/exit always bypass. Stats RPC shows heavy_job_running / deferred.',
+      'GitHub backup PUT is gzip with dual-read restore (legacy JSON still imports); export caps ring/closedPositions, denies rebuildable caches, and yields so upload cannot pin Trading ms. Dashboard Load Backup stays uncompressed JSON.',
+    ],
+  },
+  {
     version: '1.2.350',
     title: 'Contain post-deploy Trading-lane lag',
     sections: ['execution', 'overview', 'scanners'],

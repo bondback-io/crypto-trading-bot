@@ -77,6 +77,19 @@ export function isSignalsRpcHealthy(
   // CU/s cooldown wins over EWMA — do not keep hammering Alchemy during 429.
   if (lastSignals.dataRateLimited) return false;
   if (!lastSignals.dataHealthy) return false;
+  try {
+    const { getBootPhase } =
+      require('./bootPhase') as typeof import('./bootPhase');
+    const { isDataEwmaRecovered } =
+      require('./connection') as typeof import('./connection');
+    const phase = getBootPhase();
+    // Once scanners are open, unrecovered boot ghost EWMA must not starve intake.
+    if (phase !== 'trading' && !isDataEwmaRecovered()) {
+      return true;
+    }
+  } catch {
+    /* */
+  }
   if (secondaryLatencyMs == null || !Number.isFinite(secondaryLatencyMs)) {
     return true;
   }

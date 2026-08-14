@@ -10,6 +10,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import zlib from 'zlib';
+import { promisify } from 'util';
 import {
   atomicWriteJson,
   dataFile,
@@ -54,16 +56,35 @@ const BACKUP_DENY_NAME_PARTS = [
   'rpc-boot-timeline',
   'rpc-cold-boot',
   'rpc-idle',
+  'rpc-on-isolate',
+  'rpc-bottleneck',
+  'rpc-workload',
   'github-upload-cost',
   'github-backup-lag',
   'stats-report-probe',
-  'rpc-workload',
+  'nansen-wallets-cache',
+  'zion-kol-universe',
 ];
 
 /** Truncate high-churn rings in backup payload only (disk originals untouched). */
 const BACKUP_RING_CAP = 200;
-const BACKUP_CAP_BASENAMES = new Set(['lane-outcomes.json']);
+const BACKUP_CAP_BASENAMES = new Set([
+  'lane-outcomes.json',
+  'paperBalance.json',
+  'agent-decisions.json',
+  'dashboard-notifications.json',
+]);
 const BACKUP_CAP_PREFIXES = ['profile-learning/', 'learning/'];
+const BACKUP_CAP_KEYS = [
+  'episodes',
+  'outcomes',
+  'events',
+  'rows',
+  'history',
+  'ring',
+  'closedPositions',
+  'items',
+];
 
 export interface SiteBackup {
   version: typeof SITE_BACKUP_VERSION;
@@ -160,17 +181,17 @@ function maybeCapBackupPayload(rel: string, data: unknown): unknown {
     BACKUP_CAP_PREFIXES.some(
       (p) => cleaned === p.replace(/\/$/, '') || cleaned.startsWith(p)
     );
-  if (!shouldCap || data == null) return data;
+  if (data == null) return data;
 
   if (Array.isArray(data)) {
-    return data.length > BACKUP_RING_CAP
+    return shouldCap && data.length > BACKUP_RING_CAP
       ? data.slice(-BACKUP_RING_CAP)
       : data;
   }
   if (typeof data === 'object') {
     const obj = data as Record<string, unknown>;
     const out: Record<string, unknown> = { ...obj };
-    for (const key of ['episodes', 'outcomes', 'events', 'rows', 'history']) {
+    for (const key of BACKUP_CAP_KEYS) {
       const v = out[key];
       if (Array.isArray(v) && v.length > BACKUP_RING_CAP) {
         out[key] = v.slice(-BACKUP_RING_CAP);
@@ -422,6 +443,15 @@ function prepareRestoreFileData(safeRel: string, data: unknown): unknown {
       return data;
     }
   }
+  if (safeRel === 'dashboardState.json') {
+    try {
+      const { mergeDashboardStateForRestore } =
+        require('./dashboardState') as typeof import('./dashboardState');
+      return mergeDashboardStateForRestore(data);
+    } catch {
+      return data;
+    }
+  }
   return data;
 }
 
@@ -599,6 +629,13 @@ export async function restoreSiteBackup(
   await yieldEventLoop();
   await reloadPersistedRuntimeFromDisk();
   try {
+    const { restoreDashboardResetTimerAfterImport } =
+      require('./dashboardState') as typeof import('./dashboardState');
+    restoreDashboardResetTimerAfterImport();
+  } catch {
+    /* */
+  }
+  try {
     const { pushDashboardNotification } =
       require('./dashboardNotifications') as typeof import('./dashboardNotifications');
     pushDashboardNotification({
@@ -647,6 +684,93 @@ function yieldEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+const gzipAsync = promisify(zlib.gzip);
+const gunzipAsync = promisify(zlib.gunzip);
+
+export function isGzipBuffer(buf: Buffer): boolean {
+  return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+}
+
+/** Decode GitHub/local backup bytes: gzip (magic 1f 8b) or UTF-8 JSON. */
+export async function decodeSiteBackupPayload(
+  input: Buffer | string
+): Promise<unknown> {
+  const buf = Buffer.isBuffer(input)
+    ? input
+    : Buffer.from(input.replace(/^\uFEFF/, ''), 'utf8');
+  let jsonText: string;
+  if (isGzipBuffer(buf)) {
+    const unzipped = await gunzipAsync(buf);
+    jsonText = unzipped.toString('utf8').replace(/^\uFEFF/, '');
+  } else {
+    jsonText = buf.toString('utf8').replace(/^\uFEFF/, '');
+  }
+  return JSON.parse(jsonText) as unknown;
+}
+
+export async function gzipUtf8Json(json: string): Promise<Buffer> {
+  return gzipAsync(Buffer.from(json, 'utf8'));
+}
+
+/** Base64 in 3-byte-aligned chunks so concatenation stays valid. */
+export async function bufferToBase64Yielding(
+  buf: Buffer,
+  chunkBytes = 48 * 1024
+): Promise<string> {
+  const step = Math.max(3, chunkBytes - (chunkBytes % 3));
+  const parts: string[] = [];
+  for (let i = 0; i < buf.length; i += step) {
+    if (i > 0) await yieldEventLoop();
+    parts.push(buf.subarray(i, Math.min(i + step, buf.length)).toString('base64'));
+  }
+  return parts.join('');
+}
+
+/** Per-file stringify with event-loop yields (avoids one 6–7MB sync JSON.stringify). */
+export async function stringifySiteBackupYielding(
+  backup: SiteBackup,
+  yieldEvery = 6
+): Promise<string> {
+  const files = backup.files || {};
+  const keys = Object.keys(files);
+  const head =
+    `{"version":${JSON.stringify(backup.version)}` +
+    `,"kind":${JSON.stringify(backup.kind)}` +
+    `,"exportedAt":${JSON.stringify(backup.exportedAt)}` +
+    `,"exportedAtMs":${backup.exportedAtMs}` +
+    `,"appVersion":${JSON.stringify(backup.appVersion)}` +
+    `,"dataDir":${JSON.stringify(backup.dataDir)}` +
+    `,"fileCount":${backup.fileCount}` +
+    `,"files":{`;
+  const chunks: string[] = [head];
+  for (let i = 0; i < keys.length; i++) {
+    if (i > 0 && i % yieldEvery === 0) await yieldEventLoop();
+    const k = keys[i]!;
+    chunks.push(
+      (i === 0 ? '' : ',') + JSON.stringify(k) + ':' + JSON.stringify(files[k])
+    );
+  }
+  chunks.push('}}');
+  return chunks.join('');
+}
+
+export async function stableSiteBackupContentShaAsync(
+  backup: SiteBackup
+): Promise<string> {
+  const hash = crypto.createHash('sha256');
+  const files = backup.files || {};
+  const keys = Object.keys(files).sort();
+  for (let i = 0; i < keys.length; i++) {
+    if (i % 8 === 0) await yieldEventLoop();
+    const k = keys[i]!;
+    hash.update(k);
+    hash.update('\0');
+    hash.update(JSON.stringify(files[k]));
+    hash.update('\n');
+  }
+  return hash.digest('hex');
+}
+
 /** Stable hash of backup file payloads (ignores exportedAt so unchanged DATA_DIR skips PUT). */
 export function stableSiteBackupContentSha(backup: SiteBackup): string {
   return crypto
@@ -660,6 +784,8 @@ export type GithubUploadExportPhases = {
   buildMs: number;
   writeMs: number;
   encodeMs: number;
+  gzipMs?: number;
+  gzipBytes?: number;
 };
 
 /**
@@ -671,6 +797,7 @@ export async function buildSiteBackupForGithubUpload(): Promise<{
   compactJson: string;
   contentSha256: string;
   bytes: number;
+  gzipBytes?: number;
   latestPath: string;
   phases: GithubUploadExportPhases;
 }> {
@@ -699,8 +826,9 @@ export async function buildSiteBackupForGithubUpload(): Promise<{
   await yieldEventLoop();
 
   t0 = Date.now();
-  const contentSha256 = stableSiteBackupContentSha(backup);
-  const compactJson = JSON.stringify(backup);
+  const contentSha256 = await stableSiteBackupContentShaAsync(backup);
+  await yieldEventLoop();
+  const compactJson = await stringifySiteBackupYielding(backup);
   const bytes = Buffer.byteLength(compactJson, 'utf8');
   phases.encodeMs = Date.now() - t0;
   await yieldEventLoop();

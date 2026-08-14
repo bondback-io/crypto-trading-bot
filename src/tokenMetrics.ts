@@ -715,11 +715,38 @@ async function fetchOnChainHolderMetrics(
 ): Promise<Partial<TokenMetrics>> {
   // Share load: keep heavy holder RPCs off Utility (Favourites soft-watch).
   // Public utility was timing out ~15s on getTokenLargestAccounts.
-  const role = getRpcRoleFor(
-    'token_metrics',
-    Boolean(config.rpc?.shareLoad)
-  );
-  return runWithRpcRole(role, () => fetchOnChainHolderMetricsInner(mint), 'token_metrics');
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    if (!tryAcquireHeavyJob('token_metrics')) {
+      return {};
+    }
+    heavyHeld = true;
+  } catch {
+    /* proceed */
+  }
+  try {
+    const role = getRpcRoleFor(
+      'token_metrics',
+      Boolean(config.rpc?.shareLoad)
+    );
+    return await runWithRpcRole(
+      role,
+      () => fetchOnChainHolderMetricsInner(mint),
+      'token_metrics'
+    );
+  } finally {
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('token_metrics');
+      } catch {
+        /* */
+      }
+    }
+  }
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {

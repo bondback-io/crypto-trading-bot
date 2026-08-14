@@ -828,6 +828,19 @@ export async function runZionScannerPollOnce(): Promise<void> {
     return;
   }
   pollInFlight = true;
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    if (!tryAcquireHeavyJob('zion_scanner')) {
+      pollInFlight = false;
+      lastError = 'heavy job deferred — data lane busy';
+      return;
+    }
+    heavyHeld = true;
+  } catch {
+    /* */
+  }
   try {
     if (!universe.length) loadUniverseCache();
     await refreshUniverse(false);
@@ -849,6 +862,15 @@ export async function runZionScannerPollOnce(): Promise<void> {
     }
   } finally {
     pollInFlight = false;
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('zion_scanner');
+      } catch {
+        /* */
+      }
+    }
   }
 }
 
@@ -927,10 +949,11 @@ export function startZionKolScanner(): void {
     `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}` +
       (share ? ' (shared RPC lane — throttled)' : '')
   );
+  // Boot-seq already waits until +120s; first poll can run immediately.
   firstPollTimer = setTimeout(() => {
     firstPollTimer = null;
     void runZionScannerPollOnce();
-  }, 18_000);
+  }, 1_000);
   pollTimer = setInterval(() => {
     void runZionScannerPollOnce();
   }, interval);

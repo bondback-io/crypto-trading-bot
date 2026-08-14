@@ -750,6 +750,22 @@ export async function buildSmartMirrorWatchlist(opts?: {
   } = require('./influencerMirror') as typeof import('./influencerMirror');
   const topN = Math.min(Math.max(opts?.topN ?? 10, 1), 15);
   const per = Math.min(Math.max(opts?.tokensPerWallet ?? 3, 1), 8);
+  let heavyHeld = false;
+  try {
+    const { tryAcquireHeavyJob } =
+      require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+    if (!tryAcquireHeavyJob('influencer_holdings')) {
+      return {
+        influencers: [],
+        fetchedAt: Date.now(),
+        error: 'heavy job deferred',
+      };
+    }
+    heavyHeld = true;
+  } catch {
+    /* proceed */
+  }
+  try {
   const wallets = listTopInfluencerWallets(topN);
   const openMints = new Set(
     paperTrader.getOpenPositions().map((p) => p.mint)
@@ -956,6 +972,17 @@ export async function buildSmartMirrorWatchlist(opts?: {
   });
 
   return { influencers, fetchedAt: Date.now() };
+  } finally {
+    if (heavyHeld) {
+      try {
+        const { releaseHeavyJob } =
+          require('./heavyJobScheduler') as typeof import('./heavyJobScheduler');
+        releaseHeavyJob('influencer_holdings');
+      } catch {
+        /* */
+      }
+    }
+  }
 }
 
 /**
