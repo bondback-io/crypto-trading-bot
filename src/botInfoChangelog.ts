@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.337',
+    title: 'Workloads-ON latency isolator (status path clean)',
+    sections: ['execution', 'overview'],
+    items: [
+      'scripts/rpcWorkloadLatencyIsolate.cjs (npm run probe:rpc-on): phases OFF → scanners → watches → favourites → migration/control → all ON; ranks status p95 deltas.',
+      'Local isolate run: /api/status stayed ~110–220ms in every phase; feat/min peaked at 8 with all ON; no phase produced a meaningful status-latency spike vs trimmed OFF baseline.',
+      'Verdict: dashboard status path is not the lag source — production CU/CF lag under sustained feature load remains the 1.2.335 gate target. Ranking trims one baseline outlier so cold spikes do not invert deltas.',
+      'Market Scanner first poll after start: 12s → 2s so workload re-enable / isolator phases actually exercise Data-lane CU sooner.',
+    ],
+  },
+  {
     version: '1.2.336',
     title: 'RPC-off idle isolation probe + clean residual proof',
     sections: ['execution', 'overview'],

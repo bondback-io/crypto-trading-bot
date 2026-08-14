@@ -1805,7 +1805,7 @@ export function startMarketScanner(): void {
   );
   setTimeout(() => {
     void runScannerPollOnce();
-  }, 12_000);
+  }, 2_000);
   // Wake timer only — runScannerPollOnce enforces ≥~22s adaptive spacing.
   // Keep wake ≤ pollInterval so we do not busy-wake every 5s under load.
   const wakeMs = Math.max(
