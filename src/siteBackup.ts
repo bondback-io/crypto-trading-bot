@@ -9,6 +9,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
 import {
   atomicWriteJson,
   dataFile,
@@ -38,6 +39,7 @@ const BACKUP_DENY_EXACT = new Set([
 
 const BACKUP_DENY_PREFIXES = [
   'backups/',
+  'rpc-idle-probe-run/',
 ];
 
 const BACKUP_DENY_SUFFIXES = [
@@ -49,6 +51,12 @@ const BACKUP_DENY_SUFFIXES = [
 const BACKUP_DENY_NAME_PARTS = [
   'calibrateRiskRecipes',
   'recipeCalibration',
+  'rpc-cold-boot-',
+  'github-upload-cost-',
+  'github-backup-lag-',
+  'rpc-idle-probe-',
+  'rpc-on-isolate-',
+  'stats-report-probe-',
 ];
 
 export interface SiteBackup {
@@ -229,8 +237,8 @@ export function saveSiteBackup(backup: SiteBackup): {
   const filename = stampFilename(backup.exportedAtMs);
   const stampedPath = path.join(dir, filename);
   const latestPath = path.join(dir, LATEST_NAME);
-  atomicWriteJson(stampedPath, backup);
-  atomicWriteJson(latestPath, backup);
+  atomicWriteJson(stampedPath, JSON.stringify(backup));
+  atomicWriteJson(latestPath, JSON.stringify(backup));
   pruneOldStampedBackups();
   return { stampedPath, latestPath, filename };
 }
@@ -299,6 +307,28 @@ export function isValidSiteBackup(raw: unknown): raw is SiteBackup {
     typeof b.files === 'object' &&
     !Array.isArray(b.files)
   );
+}
+
+export function isGzipBuffer(buf: Buffer | Uint8Array): boolean {
+  return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+}
+
+/** Dual-format import: gzip magic 1f 8b → inflate, else UTF-8 JSON. */
+export function parseSiteBackupBytes(buf: Buffer | Uint8Array): SiteBackup {
+  let bytes = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  if (isGzipBuffer(bytes)) {
+    bytes = zlib.gunzipSync(bytes);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+  } catch {
+    throw new Error('Backup is not valid JSON');
+  }
+  if (!isValidSiteBackup(parsed)) {
+    throw new Error('Invalid site-backup (need kind=site-backup version=1)');
+  }
+  return parsed;
 }
 
 function safeRelPath(rel: string): string | null {
@@ -450,11 +480,16 @@ export function createAndSaveSiteBackup(): {
  * Used to seed a fresh/wiped DATA_DIR before migrations write code defaults.
  */
 export function resolveBundledRepoSiteBackupPath(): string | null {
-  const candidates = [
-    path.join(process.cwd(), 'site-backups', LATEST_NAME),
-    path.join(__dirname, '..', 'site-backups', LATEST_NAME),
-    path.join(__dirname, '..', '..', 'site-backups', LATEST_NAME),
+  const names = [LATEST_NAME, 'site-backup-latest.json.gz'];
+  const roots = [
+    path.join(process.cwd(), 'site-backups'),
+    path.join(__dirname, '..', 'site-backups'),
+    path.join(__dirname, '..', '..', 'site-backups'),
   ];
+  const candidates: string[] = [];
+  for (const root of roots) {
+    for (const name of names) candidates.push(path.join(root, name));
+  }
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) return p;
@@ -484,9 +519,7 @@ export function loadBundledRepoSiteBackup(): SiteBackup | null {
     ) {
       return bundledRepoBackupCache.backup;
     }
-    const raw = JSON.parse(
-      fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '')
-    ) as unknown;
+    const raw = parseSiteBackupBytes(fs.readFileSync(filePath));
     if (!isValidSiteBackup(raw)) return null;
     bundledRepoBackupCache = { path: filePath, mtimeMs, backup: raw };
     return raw;

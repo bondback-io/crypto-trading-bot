@@ -5399,6 +5399,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .setup-watch-chip.is-nolevel { color: #fca5a5; border-color: #b91c1c; }
     .setup-watch-chip.is-lowmov { color: #fdba74; border-color: #c2410c; }
     .setup-watch-chip.is-rotating { color: #e2e8f0; border-color: #64748b; }
+    .setup-watch-chip.is-volup { color: #86efac; border-color: #16a34a; }
+    .setup-watch-chip.is-voldown { color: #fdba74; border-color: #c2410c; }
+    .setup-watch-chip.is-deadvol { color: #fca5a5; border-color: #b91c1c; }
+    .setup-watch-chip.is-decay { color: #fbbf24; border-color: #a16207; }
+    .setup-watch-score {
+      font-variant-numeric: tabular-nums;
+      color: #cbd5e1;
+      margin-left: 0.35rem;
+      font-size: 10px;
+      font-weight: 650;
+    }
     .setup-watch-row.is-terminal {
       opacity: 0.72;
     }
@@ -10183,7 +10194,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
 
         <div class="card">
-          <div class="section-title">MEV / RPC <span class="tip" tabindex="0" data-tip="Jito tips, sandwich protection, and Solana RPC health for live execution."></span></div>
+          <div class="section-title">MEV <span class="tip" tabindex="0" data-tip="Jito tips, sandwich protection, and related live-execution knobs. RPC health lives under Stats → RPC."></span></div>
           <div class="mint mb-2" id="mev-status">—</div>
           <p class="mint mb-2">Master switch: Settings → MEV Protection.</p>
           <div class="toggle-row"><span title="Send swaps via Jito bundles when possible">Jito bundles</span><label class="switch"><input type="checkbox" id="useJitoBundles" checked /><span class="slider"></span></label></div>
@@ -10196,41 +10207,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <label class="ctl ctl-sm"><span>Max buyers <span class="tip" tabindex="0" data-tip="Recent same-block buyers before sandwich abort."></span></span><input type="number" id="sandwichMaxRecentBuys" value="3" /></label>
           </div>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveMevConfig()" title="Save MEV / tip settings">Save MEV</button></div>
-          <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
-          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
-          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
-            <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
-              <span>Soft watch cap</span>
-              <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
-            </label>
-            <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
-            <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
-          </div>
-          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
-            <div class="mb-1"><strong style="color:#a78bfa">Watchers → Alchemy backup</strong> — setup watch / arm / trigger (<code>ALCHEMY_API_KEY_BACKUP</code>)</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
-          </div>
-          <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Watchers</strong> — Setup watch / arm / trigger. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>. Emergency public/utility if unset — never Trading or Scanners.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
-          </div>
-          <div id="rpc-summary" class="mint mb-2">—</div>
-          <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
-          <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
-          <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
-          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
-          <div class="mt-3 flex flex-wrap gap-2 items-center">
-            <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
-            <span class="mint text-xs" id="rpc-diag-status">—</span>
-          </div>
-          <div id="rpc-diag-panel" class="mint text-xs mt-2" style="display:none;line-height:1.5;color:#94a3b8"></div>
           <div class="mint mt-2" id="jito-status"></div>
           <p class="mint text-xs mt-1" id="jito-turbo-tip" style="color:#64748b;line-height:1.4">Turbo Mode raises priority fee + buy slip; Jito bundles only if MEV “Jito bundles” (or rpc.jito) is on. Live Sim never sends real bundles.</p>
         </div>
@@ -10382,7 +10358,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" style="padding-bottom:0.55rem">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, Learning Metrics, Decision Log, and Export Data — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
+            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, Learning Metrics, Decision Log, Export Data, and RPC — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
             <p class="text-xs text-slate-400 mb-0">Tune bots on <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button>. Recovery stages live under Micro Bots → Learning.</p>
           </div>
         </div>
@@ -10396,6 +10372,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
             <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
             <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-exportdata" data-botperf-tab="exportdata" aria-selected="false" aria-controls="botperf-panel-exportdata" onclick="setBotPerfTab('exportdata')">Export Data</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-rpc" data-botperf-tab="rpc" aria-selected="false" aria-controls="botperf-panel-rpc" onclick="setBotPerfTab('rpc')">RPC</button>
           </div>
           <button type="button" class="botperf-tab-arrow" id="botperf-tab-arrow-right" aria-label="Scroll Stats tabs to end" title="Jump to end of tabs" onclick="scrollBotPerfTabs('end')">›</button>
         </div>
@@ -10819,6 +10796,46 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <pre id="learning-report-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate Learning Report to build a package…</pre>
         </div>
       </div>
+
+      <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
+        <div class="card">
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
+          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
+              <span>Soft watch cap</span>
+              <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
+            </label>
+            <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
+            <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
+          </div>
+          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
+            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
+            <div class="mb-1"><strong style="color:#a78bfa">Watchers → Alchemy backup</strong> — setup watch / arm / trigger (<code>ALCHEMY_API_KEY_BACKUP</code>)</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
+          </div>
+          <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
+            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Watchers</strong> — Setup watch / arm / trigger. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>. Emergency public/utility if unset — never Trading or Scanners.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
+          </div>
+          <div id="rpc-summary" class="mint mb-2">—</div>
+          <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
+          <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
+          <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
+          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
+          <div class="mt-3 flex flex-wrap gap-2 items-center">
+            <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
+            <span class="mint text-xs" id="rpc-diag-status">—</span>
+          </div>
+          <div id="rpc-diag-panel" class="mint text-xs mt-2" style="display:none;line-height:1.5;color:#94a3b8"></div>
+        </div>
+      </div>
     </section>
 
     <!-- ========== TAB: Back Up ========== -->
@@ -10833,7 +10850,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="btn btn-primary" onclick="backupSite()" title="Export a stamped full-site backup (settings, wallets, profiles, learning, notifications)">Backup Site</button>
             <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Pick a downloaded site-backup-*.json file from your computer to restore">Load Backup</button>
             <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
-            <input type="file" id="site-backup-file" accept="application/json,.json" style="display:none" onchange="importSiteBackupFile(this)" />
+            <input type="file" id="site-backup-file" accept="application/json,.json,.gz,application/gzip" style="display:none" onchange="importSiteBackupFile(this)" />
           </div>
         </div>
         <div class="mint text-sm mt-1" id="persist-reset-msg"></div>
@@ -10875,9 +10892,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span>Repo</span>
             <input type="text" id="github-backup-repo" placeholder="my-bot-backups" onchange="saveGithubBackupSettings()" autocomplete="off" />
           </label>
-          <label class="ctl ctl-lg" title="File path in the repo (default site-backups/site-backup-latest.json)">
+          <label class="ctl ctl-lg" title="File path in the repo (default site-backups/site-backup-latest.json.gz)">
             <span>Path</span>
-            <input type="text" id="github-backup-path" placeholder="site-backups/site-backup-latest.json" onchange="saveGithubBackupSettings()" autocomplete="off" />
+            <input type="text" id="github-backup-path" placeholder="site-backups/site-backup-latest.json.gz" onchange="saveGithubBackupSettings()" autocomplete="off" />
           </label>
         </div>
         <div class="mint text-xs mt-1" id="github-backup-status">GitHub backup: —</div>
@@ -13671,6 +13688,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           wp.orphan_example_mc != null && Number(wp.orphan_example_mc) > 0
             ? ' e.g. $' + Math.round(Number(wp.orphan_example_mc)).toLocaleString()
             : '';
+        const avgScores = wp.avg_watch_score_by_profile || {};
+        const avgBits = Object.keys(avgScores)
+          .slice(0, 4)
+          .map(function (k) {
+            return k.replace(/_.*$/, '').slice(0, 6) + ' ' + avgScores[k];
+          })
+          .join(' ');
+        const topQ = Number(wp.armed_from_top_quartile_rate);
+        const topTxt = Number.isFinite(topQ)
+          ? Math.round(topQ * 1000) / 10 + '%'
+          : '—';
         el.textContent =
           'Pipeline: inserts ' +
           (wp.watch_insert_attempts || 0) +
@@ -13679,7 +13707,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ' · orphan MC ' +
           orphanN +
           orphanEx +
-          (topRej ? ' · reject ' + topRej : '');
+          (topRej ? ' · reject ' + topRej : '') +
+          (avgBits ? ' · score ' + avgBits : '') +
+          ' · topQ ' +
+          topTxt +
+          ' · skip ' +
+          (wp.skipped_low_score_count || 0) +
+          ' · decay ' +
+          (wp.decay_events_count || 0) +
+          ' · demote ' +
+          (wp.demoted_from_armed_count || 0) +
+          ' · stagnant ' +
+          (wp.expired_stagnant_count || 0) +
+          ' · volX ' +
+          (wp.expired_from_volume_collapse_count || 0);
       })();
       const scalperCount = document.getElementById('scalper-watch-count');
       const scalperList = document.getElementById('scalper-watch-list');
@@ -13782,7 +13823,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         return out.slice(0, 6);
       }
 
-      function watchRowHtml(kind, e, panelProfileId) {
+      function sortWatchRowsByScore(rows) {
+        return (rows || []).slice().sort(function (a, b) {
+          const sa = Number(a && a.watchScore);
+          const sb = Number(b && b.watchScore);
+          const fa = Number.isFinite(sa) ? sa : -1;
+          const fb = Number.isFinite(sb) ? sb : -1;
+          if (fb !== fa) return fb - fa;
+          return (Number(b && b.createdAt) || 0) - (Number(a && a.createdAt) || 0);
+        });
+      }
+
+      function watchScoreChipClass(label) {
+        const s = String(label || '').toLowerCase();
+        if (s === 'vol↑' || s.indexOf('vol↑') >= 0) return ' is-volup';
+        if (s === 'vol↓' || s.indexOf('vol↓') >= 0) return ' is-voldown';
+        if (s.indexOf('dead vol') >= 0) return ' is-deadvol';
+        if (s.indexOf('decaying') >= 0 || s.indexOf('stagnant') >= 0 || s === 'stale')
+          return ' is-decay';
+        if (s.indexOf('near') >= 0 || s.indexOf('fire') >= 0 || s.indexOf('curve') >= 0)
+          return ' is-near';
+        if (s.indexOf('late') >= 0) return ' is-nolevel';
+        if (s === 'armed' || s.indexOf('trigger') >= 0) return ' is-armed';
+        if (s === 'vol ok') return ' is-level';
+        return '';
+      }
+
+      function watchRowHtml(kind, e, panelProfileId, rankOverride) {
         const mint = String(e.mint || '').trim();
         const sym = escHtml(e.symbol || mint.slice(0, 6) || '?');
         const status = String(e.status || 'watching');
@@ -13950,6 +14017,61 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '<span class="setup-watch-chips">' + chipBits.join('') + '</span>';
           }
         }
+        const rankN =
+          rankOverride != null && isFinite(Number(rankOverride))
+            ? Math.round(Number(rankOverride))
+            : e.watchRank != null && isFinite(Number(e.watchRank))
+              ? Math.round(Number(e.watchRank))
+              : null;
+        const scoreN = Number(e.watchScore);
+        const bd = e.watchScoreBreakdown || {};
+        const lastImpMs =
+          e.lastImprovementAt != null && isFinite(Number(e.lastImprovementAt))
+            ? Date.now() - Number(e.lastImprovementAt)
+            : null;
+        const scoreTip = [
+          'setup ' + (bd.setup != null ? bd.setup : '—'),
+          'timing ' + (bd.timing != null ? bd.timing : '—'),
+          'activity ' + (bd.activity != null ? bd.activity : '—'),
+          'risk −' + (bd.risk != null ? bd.risk : '—'),
+          'decay −' + (bd.decay != null ? bd.decay : '—'),
+          lastImpMs != null && lastImpMs >= 0
+            ? 'last improve ' + Math.max(0, Math.round(lastImpMs / 60000)) + 'm'
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        const scoreHtml = Number.isFinite(scoreN)
+          ? '<span class="setup-watch-score" title="' +
+            escAttr(scoreTip) +
+            '">' +
+            (rankN != null ? '#' + rankN + ' · ' : '') +
+            Math.round(scoreN) +
+            '</span>'
+          : rankN != null
+            ? '<span class="setup-watch-score">#' + rankN + '</span>'
+            : '';
+        const scoreChipBits = [];
+        const rawChips = Array.isArray(e.watchScoreChips) ? e.watchScoreChips : [];
+        rawChips.forEach(function (c) {
+          const label = String(c || '').trim();
+          if (!label) return;
+          scoreChipBits.push(
+            '<span class="setup-watch-chip' +
+              watchScoreChipClass(label) +
+              '">' +
+              escHtml(label) +
+              '</span>'
+          );
+        });
+        if (status === 'armed' && qualityChips.indexOf('is-armed') < 0) {
+          scoreChipBits.push(
+            '<span class="setup-watch-chip is-armed">armed</span>'
+          );
+        }
+        const scoreChips = scoreChipBits.length
+          ? '<span class="setup-watch-chips">' + scoreChipBits.join('') + '</span>'
+          : '';
         const actions =
           status === 'watching' || status === 'armed'
             ? '<div class="setup-watch-actions">' +
@@ -13993,10 +14115,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '">' +
           escHtml(status) +
           '</span>' +
+          scoreHtml +
           (tradeOpened
             ? '<span class="setup-watch-chip is-opened" title="Open position assigned to this micro-bot">Trade Opened</span>'
             : '') +
           qualityChips +
+          scoreChips +
           (kind === 'dip' &&
           panelPid !== 'dip_buyer' &&
           String(e.source || '') === 'majors'
@@ -14275,11 +14399,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         if (scalperCount) scalperCount.textContent = (sw.active || 0) + ' active';
         if (scalperList) {
-          const rows = (sw.entries || [])
-            .filter(function (e) {
+          const rows = sortWatchRowsByScore(
+            (sw.entries || []).filter(function (e) {
               return e.status === 'watching' || e.status === 'armed';
             })
-            .slice(0, 16);
+          ).slice(0, 16);
           const terminal = pickWatchTerminal(
             sw.entries || [],
             sw.recentTerminal || [],
@@ -14287,8 +14411,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           );
           const htmlParts = [];
           if (rows.length) {
-            rows.forEach(function (e) {
-              htmlParts.push(watchRowHtml('scalper', e, 'scalper'));
+            rows.forEach(function (e, i) {
+              htmlParts.push(watchRowHtml('scalper', e, 'scalper', i + 1));
             });
           } else {
             let emptyMsg = 'No active scalper-family setups';
@@ -14337,11 +14461,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         if (trendCount) trendCount.textContent = (tw.active || 0) + ' active';
         if (trendList) {
-          const rows = (tw.entries || [])
-            .filter(function (e) {
+          const rows = sortWatchRowsByScore(
+            (tw.entries || []).filter(function (e) {
               return e.status === 'watching' || e.status === 'armed';
             })
-            .slice(0, 16);
+          ).slice(0, 16);
           const terminal = pickWatchTerminal(
             tw.entries || [],
             tw.recentTerminal || [],
@@ -14349,8 +14473,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           );
           const htmlParts = [];
           if (rows.length) {
-            rows.forEach(function (e) {
-              htmlParts.push(watchRowHtml('trend', e, 'trend_rider'));
+            rows.forEach(function (e, i) {
+              htmlParts.push(watchRowHtml('trend', e, 'trend_rider', i + 1));
             });
           } else {
             htmlParts.push(
@@ -14391,15 +14515,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (f.activeArmed || 0);
         }
         if (gradList) {
-          const rows = (gw.entries || [])
-            .filter(function (e) {
+          const rows = sortWatchRowsByScore(
+            (gw.entries || []).filter(function (e) {
               return (
                 e.status === 'watching' ||
                 e.status === 'armed' ||
                 e.status === 'triggered'
               );
             })
-            .slice(0, 16);
+          ).slice(0, 16);
           const terminal = (gw.recentTerminal || [])
             .filter(function (e) {
               return e.status === 'expired' || e.status === 'invalidated';
@@ -14407,8 +14531,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             .slice(0, 4);
           const htmlParts = [];
           if (rows.length) {
-            rows.forEach(function (e) {
-              htmlParts.push(watchRowHtml('grad', e, 'migration_sniper'));
+            rows.forEach(function (e, i) {
+              htmlParts.push(watchRowHtml('grad', e, 'migration_sniper', i + 1));
             });
           } else {
             htmlParts.push(
@@ -14482,15 +14606,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             zm;
         }
         if (!listEl && !countEl) return;
-        const active = (inv.entries || []).filter(function (e) {
-          return e.status === 'watching' || e.status === 'armed';
-        });
+        const active = sortWatchRowsByScore(
+          (inv.entries || []).filter(function (e) {
+            return e.status === 'watching' || e.status === 'armed';
+          })
+        );
         const terminal = pickWatchTerminal(inv.entries || [], [], pid);
         if (listEl) {
           const htmlParts = [];
           if (active.length) {
-            active.forEach(function (e) {
-              htmlParts.push(watchRowHtml(kind, e, pid));
+            active.forEach(function (e, i) {
+              htmlParts.push(watchRowHtml(kind, e, pid, i + 1));
             });
           } else {
             let emptyMsg = opts.empty || 'No active setups';
@@ -20046,6 +20172,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         'learningmetrics',
         'decisions',
         'exportdata',
+        'rpc',
       ];
       const next = allowed.indexOf(tab) >= 0 ? tab : 'performance';
       const shouldLoad = !opts || opts.load !== false;
@@ -20091,6 +20218,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { loadAgentDecisionLog(); } catch (_) {}
         } else if (next === 'exportdata') {
           /* Manual Generate only — auto-build was timing out on busy hosts. */
+        } else if (next === 'rpc') {
+          /* RPC ids are filled by the global refresh() poll. */
         }
       }
       // Charts in newly shown panels need a resize pass
@@ -21378,7 +21507,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             stored === 'tradecraft' ||
             stored === 'learning' ||
             stored === 'learningmetrics' ||
-            stored === 'decisions'
+            stored === 'decisions' ||
+            stored === 'exportdata' ||
+            stored === 'rpc'
           ) {
             sub = stored;
           }
@@ -36860,17 +36991,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.refreshSiteBackupStatus = refreshSiteBackupStatus;
 
     function downloadSiteBackupJson(backup, filename) {
-      const blob = new Blob([JSON.stringify(backup, null, 2)], {
-        type: 'application/json',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename || 'site-backup.json';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const compact = JSON.stringify(backup);
+      const fallback = function () {
+        const blob = new Blob([compact], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || 'site-backup.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
+      try {
+        if (typeof CompressionStream === 'undefined') {
+          fallback();
+          return;
+        }
+        const stream = new Blob([compact]).stream().pipeThrough(new CompressionStream('gzip'));
+        new Response(stream).blob().then(function (gz) {
+          const blob = new Blob([gz], { type: 'application/gzip' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = String(filename || 'site-backup.json').replace(/\.json$/i, '') + '.json.gz';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }).catch(function () { fallback(); });
+      } catch (_) {
+        fallback();
+      }
     }
 
     async function backupSite() {
@@ -36962,7 +37114,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (
         !confirm(
           'Load a site backup from your computer?\\n\\n' +
-            'Pick a previously downloaded site-backup-*.json file.\\n' +
+            'Pick a previously downloaded site-backup-*.json or .json.gz file.\\n' +
             'This OVERWRITES current config, wallets, profiles, learning, and notifications on disk.'
         )
       )
@@ -36972,13 +37124,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.loadLastBackup = loadLastBackup;
 
+    async function parseSiteBackupFile(file) {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+        if (typeof DecompressionStream === 'undefined') {
+          throw new Error('This browser cannot inflate .gz backups');
+        }
+        const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+        const text = await new Response(stream).text();
+        return JSON.parse(text);
+      }
+      return JSON.parse(new TextDecoder().decode(bytes));
+    }
+
     async function importSiteBackupFile(input) {
       const msg = document.getElementById('persist-reset-msg');
       const file = input && input.files && input.files[0];
       if (!file) return;
       try {
-        const text = await file.text();
-        const backup = JSON.parse(text);
+        const backup = await parseSiteBackupFile(file);
         if (!backup || backup.kind !== 'site-backup') {
           throw new Error('File is not a site-backup export');
         }
@@ -37021,7 +37186,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           repoEl.value = data.repo || '';
         }
         if (pathEl && document.activeElement !== pathEl) {
-          pathEl.value = data.path || 'site-backups/site-backup-latest.json';
+          pathEl.value = data.path || 'site-backups/site-backup-latest.json.gz';
         }
         if (!el) return;
         const parts = [];
@@ -37284,7 +37449,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '/' +
           (st.repo || '?') +
           '/' +
-          (st.path || 'site-backups/site-backup-latest.json');
+          (st.path || 'site-backups/site-backup-latest.json.gz');
         if (
           !confirm(
             'Load latest backup from GitHub?\\n\\n' +

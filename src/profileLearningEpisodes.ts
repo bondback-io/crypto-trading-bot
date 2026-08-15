@@ -91,6 +91,10 @@ export interface ProfileLearningEpisode {
   watchToArmMs?: number;
   armToTriggerMs?: number;
   confluenceCountAtTrigger?: number;
+  watchScoreAtArm?: number;
+  watchScoreAtTrigger?: number;
+  watchScoreComponents?: { setup?: number; timing?: number; activity?: number; risk?: number; decay?: number };
+  volumeStateAtWatch?: string;
   falseArmExpired?: boolean;
   zeroMfeAfterArmedOpen?: boolean;
   whaleStateAtEntry?: string;

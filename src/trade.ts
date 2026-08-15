@@ -377,6 +377,10 @@ export interface BuyOptions {
   watchToArmMs?: number;
   armToTriggerMs?: number;
   confluenceCountAtTrigger?: number;
+  watchScoreAtArm?: number;
+  watchScoreAtTrigger?: number;
+  watchScoreBreakdown?: { setup?: number; timing?: number; activity?: number; risk?: number; decay?: number };
+  volumeStateAtWatch?: string;
   falseArmExpired?: boolean;
   /** Specialty feed stamp for pump.fun-only bypass (majors/medium/jupiter/kolscan) */
   specialtyFeed?: string | null;
@@ -1198,6 +1202,10 @@ export async function executeBuy(
             : undefined,
         watchToArmMs: meta?.watchToArmMs,
         armToTriggerMs: meta?.armToTriggerMs,
+        watchScoreAtArm: meta?.watchScoreAtArm,
+        watchScoreAtTrigger: meta?.watchScoreAtTrigger,
+        watchScoreBreakdown: meta?.watchScoreBreakdown,
+        volumeStateAtWatch: meta?.volumeStateAtWatch,
         confluenceCountAtTrigger:
           meta?.confluenceCountAtTrigger != null
             ? Number(meta.confluenceCountAtTrigger)
@@ -1370,6 +1378,10 @@ export async function executeBuy(
             : undefined,
         watchToArmMs: meta?.watchToArmMs,
         armToTriggerMs: meta?.armToTriggerMs,
+        watchScoreAtArm: meta?.watchScoreAtArm,
+        watchScoreAtTrigger: meta?.watchScoreAtTrigger,
+        watchScoreBreakdown: meta?.watchScoreBreakdown,
+        volumeStateAtWatch: meta?.volumeStateAtWatch,
         confluenceCountAtTrigger:
           meta?.confluenceCountAtTrigger != null
             ? Number(meta.confluenceCountAtTrigger)

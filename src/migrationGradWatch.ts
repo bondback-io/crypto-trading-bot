@@ -28,6 +28,15 @@ import {
   getMigrationSniperMaxMcUsd,
 } from './tradeProfiles';
 import { trimMapToCap, registerCacheSweep } from './mapCap';
+import {
+  stampWatchPriority,
+  sortActiveWatchesByScore,
+  shouldSkipArmForCap,
+  countArmedWatches,
+  demoteArmedBeyondCap,
+  watchLifecycleAction,
+  WATCH_ARM_SCORE_FLOOR,
+} from './watchPriorityScore';
 
 export type GradWatchStatus =
   | 'watching'
@@ -64,6 +73,17 @@ export interface GradWatchEntry {
   completeSeenAtMs?: number | null;
   /** Touched fire band — used for touch→hold/reclaim confirm */
   touchedFireBand?: boolean;
+  watchScore?: number;
+  watchScoreBreakdown?: import('./watchPriorityScore').WatchScoreBreakdown;
+  volumeState?: string;
+  decayMultiplier?: number;
+  lastImprovementAt?: number;
+  scoreAtFloorSince?: number | null;
+  watchScoreChips?: string[];
+  watchRank?: number;
+  watchScoreAtArm?: number;
+  prevLevelDistancePct?: number | null;
+  prevConfluenceCount?: number | null;
 }
 
 const MAX_WATCHES = 32;
@@ -511,6 +531,10 @@ function buildHandoff(
       w.armedAt != null && w.createdAt > 0 ? Math.max(0, w.armedAt - w.createdAt) : undefined,
     armToTriggerMs:
       w.armedAt != null ? Math.max(0, now - w.armedAt) : undefined,
+    watchScoreAtArm: w.watchScoreAtArm,
+    watchScoreAtTrigger: w.watchScore,
+    watchScoreBreakdown: w.watchScoreBreakdown,
+    volumeStateAtWatch: w.volumeState,
     launch,
   };
 }
@@ -614,7 +638,26 @@ export async function tickMigrationGradWatches(): Promise<number> {
   let handed = 0;
   const fMin = fireMin();
 
-  for (const w of watches.values()) {
+  const stampGrad = (w: GradWatchEntry) => {
+    stampWatchPriority('migration_sniper', w, {
+      status: w.status,
+      createdAt: w.createdAt,
+      armedAt: w.armedAt,
+      lastImprovementAt: w.lastImprovementAt,
+      curveProgressPct: w.curveProgressPct,
+      volumeH1Usd: w.volumeH1Usd,
+      holderGrowthPct: w.holderGrowthPct,
+      buyPressureUsd: w.buyPressureUsd,
+      confluenceCount: w.confluenceCount,
+    }, now);
+  };
+  for (const row of watches.values()) {
+    if (row.status === 'watching' || row.status === 'armed') stampGrad(row);
+  }
+  const orderedGrad = sortActiveWatchesByScore([...watches.values()]);
+  demoteArmedBeyondCap(orderedGrad, 'migration_sniper', now);
+
+  for (const w of orderedGrad) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
 
     if (now >= w.expiresAt) {
@@ -720,13 +763,58 @@ export async function tickMigrationGradWatches(): Promise<number> {
     }
 
     const quality = qualitySoftOk(w);
+    stampGrad(w);
+    const lifeG = watchLifecycleAction(w, 'migration_sniper', now);
+    if (lifeG === 'demote' && w.status === 'armed') {
+      w.status = 'watching';
+      w.armedAt = null;
+      w.lastReason = 'demoted_from_armed';
+      try {
+        require('./watchPipeline').noteDemotedFromArmed();
+      } catch {
+        /* optional */
+      }
+    } else if (lifeG === 'expire_stagnant' || lifeG === 'expire_volume') {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason =
+        lifeG === 'expire_volume'
+          ? 'expired_from_volume_collapse'
+          : 'stagnant_decay_expired';
+      funnel.expired += 1;
+      try {
+        require('./watchPipeline').noteStagnantExpired(
+          lifeG === 'expire_volume' ? 'volume' : 'stagnant'
+        );
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
     if (w.status === 'watching' && quality) {
+      if (
+        shouldSkipArmForCap(
+          'migration_sniper',
+          countArmedWatches(watches.values())
+        ) ||
+        (w.watchScore ?? 0) < WATCH_ARM_SCORE_FLOOR
+      ) {
+        try {
+          require('./watchPipeline').noteSkippedLowScore();
+        } catch {
+          /* optional */
+        }
+        w.lastReason = 'skipped_low_score · arm cap';
+      } else {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
+      w.watchScoreAtArm = w.watchScore;
+      w.lastImprovementAt = now;
       w.lastReason = `armed @ ${progress.toFixed(0)}%`;
       funnel.armed += 1;
       console.log(`[grad-watch] ARMED ${w.symbol}`);
+      }
     }
 
     // Fire: ≥ fireMin while still on curve (no upper-band miss before complete)

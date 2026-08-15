@@ -28,6 +28,7 @@ export interface SetupWatchEvent {
   profileId?: string | null;
   reason?: string;
   qualityScore?: number | null;
+  watchScore?: number | null;
   entryStyle?: string | null;
 }
 
@@ -46,6 +47,7 @@ export function recordSetupWatchEvent(
     profileId: e.profileId ?? null,
     reason: e.reason ? String(e.reason).slice(0, 280) : undefined,
     qualityScore: e.qualityScore ?? null,
+    watchScore: e.watchScore ?? null,
     entryStyle: e.entryStyle ?? null,
   };
   if (!row.mint) return;

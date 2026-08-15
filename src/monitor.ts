@@ -1203,6 +1203,10 @@ export interface TradeSignal {
   watchToArmMs?: number;
   armToTriggerMs?: number;
   confluenceCountAtTrigger?: number;
+  watchScoreAtArm?: number;
+  watchScoreAtTrigger?: number;
+  watchScoreBreakdown?: { setup?: number; timing?: number; activity?: number; risk?: number; decay?: number };
+  volumeStateAtWatch?: string;
   entryStyleHint?: string;
   qualityScoreHint?: number;
   sizePlanSol?: number;
@@ -1372,6 +1376,28 @@ function applyProfileTaPlaybookGate(
       (buyOpts as { armToTriggerMs?: number }).armToTriggerMs = Number(
         signal.armToTriggerMs
       );
+    }
+    if (signal.watchScoreAtArm != null && Number.isFinite(Number(signal.watchScoreAtArm))) {
+      (buyOpts as { watchScoreAtArm?: number }).watchScoreAtArm = Number(
+        signal.watchScoreAtArm
+      );
+    }
+    if (
+      signal.watchScoreAtTrigger != null &&
+      Number.isFinite(Number(signal.watchScoreAtTrigger))
+    ) {
+      (buyOpts as { watchScoreAtTrigger?: number }).watchScoreAtTrigger = Number(
+        signal.watchScoreAtTrigger
+      );
+    }
+    if (signal.volumeStateAtWatch) {
+      (buyOpts as { volumeStateAtWatch?: string }).volumeStateAtWatch = String(
+        signal.volumeStateAtWatch
+      );
+    }
+    if (signal.watchScoreBreakdown) {
+      (buyOpts as { watchScoreBreakdown?: typeof signal.watchScoreBreakdown }).watchScoreBreakdown =
+        signal.watchScoreBreakdown;
     }
     if (
       Array.isArray(signal.scannerReasons) &&
@@ -3995,6 +4021,10 @@ async function handleScannerCandidate(
       watchToArmMs: candidate.watchToArmMs,
       armToTriggerMs: candidate.armToTriggerMs,
       confluenceCountAtTrigger: candidate.confluenceCountAtTrigger,
+      watchScoreAtArm: candidate.watchScoreAtArm,
+      watchScoreAtTrigger: candidate.watchScoreAtTrigger,
+      watchScoreBreakdown: candidate.watchScoreBreakdown,
+      volumeStateAtWatch: candidate.volumeStateAtWatch,
       setupWatchFamily:
         candidate.setupWatchFamily ||
         (candidate.dipWatchTriggered === true

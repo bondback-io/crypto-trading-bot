@@ -16,6 +16,15 @@ import {
   isSmartBotProfilesEnabled,
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
+import {
+  stampWatchPriority,
+  sortActiveWatchesByScore,
+  shouldSkipArmForCap,
+  countArmedWatches,
+  demoteArmedBeyondCap,
+  watchLifecycleAction,
+  WATCH_ARM_SCORE_FLOOR,
+} from './watchPriorityScore';
 
 export type TrendWatchStatus =
   | 'watching'
@@ -58,6 +67,17 @@ export interface TrendWatchEntry {
   sizePlanSol?: number | null;
   dnaHits?: number;
   volumeDecayState?: string | null;
+  watchScore?: number;
+  watchScoreBreakdown?: import('./watchPriorityScore').WatchScoreBreakdown;
+  volumeState?: string;
+  decayMultiplier?: number;
+  lastImprovementAt?: number;
+  scoreAtFloorSince?: number | null;
+  watchScoreChips?: string[];
+  watchRank?: number;
+  watchScoreAtArm?: number;
+  prevLevelDistancePct?: number | null;
+  prevConfluenceCount?: number | null;
 }
 
 const MAX_WATCHES = 12;
@@ -556,6 +576,17 @@ function buildHandoff(
     supportPriceSol: w.supportPriceSol ?? null,
     lastPriceSol: w.lastPriceSol ?? null,
     chartPatternIds: w.chartPatternIds,
+    playbookPassed: Array.isArray(w.playbookPassed) ? w.playbookPassed : undefined,
+    confluenceCountAtTrigger:
+      w.confluenceCount != null ? Number(w.confluenceCount) : undefined,
+    watchToArmMs:
+      w.armedAt != null && w.createdAt > 0 ? Math.max(0, w.armedAt - w.createdAt) : undefined,
+    armToTriggerMs:
+      w.armedAt != null ? Math.max(0, now - w.armedAt) : undefined,
+    watchScoreAtArm: w.watchScoreAtArm,
+    watchScoreAtTrigger: w.watchScore,
+    watchScoreBreakdown: w.watchScoreBreakdown,
+    volumeStateAtWatch: w.volumeState,
     launch,
   };
 }
@@ -606,7 +637,30 @@ export async function tickTrendSetupWatches(opts?: {
   const now = Date.now();
   let handed = 0;
 
-  for (const w of watches.values()) {
+  const stampTrend = (w: TrendWatchEntry) => {
+    stampWatchPriority('trend_rider', w, {
+      status: w.status,
+      createdAt: w.createdAt,
+      armedAt: w.armedAt,
+      lastImprovementAt: w.lastImprovementAt,
+      nearSupport: w.nearSupport,
+      nearKeyFib: w.nearKeyFib,
+      supportPriceSol: w.supportPriceSol,
+      lastPriceSol: w.lastPriceSol,
+      confluenceCount: w.confluenceCount,
+      dnaHits: w.dnaHits,
+      volumeM5Usd: w.volumeM5Usd,
+      volumeH1Usd: w.volumeH1Usd,
+      holderGrowthPct: w.holderGrowthPct,
+    }, now);
+  };
+  for (const row of watches.values()) {
+    if (row.status === 'watching' || row.status === 'armed') stampTrend(row);
+  }
+  const orderedTrend = sortActiveWatchesByScore([...watches.values()]);
+  demoteArmedBeyondCap(orderedTrend, 'trend_rider', now);
+
+  for (const w of orderedTrend) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
 
     if (now >= w.expiresAt) {
@@ -627,6 +681,34 @@ export async function tickTrendSetupWatches(opts?: {
     await refreshWatchMarket(w, now);
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
+    stampTrend(w);
+    const lifeT = watchLifecycleAction(w, 'trend_rider', now);
+    if (lifeT === 'demote' && w.status === 'armed') {
+      w.status = 'watching';
+      w.armedAt = null;
+      w.lastReason = 'demoted_from_armed';
+      try {
+        require('./watchPipeline').noteDemotedFromArmed();
+      } catch {
+        /* optional */
+      }
+    } else if (lifeT === 'expire_stagnant' || lifeT === 'expire_volume') {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason =
+        lifeT === 'expire_volume'
+          ? 'expired_from_volume_collapse'
+          : 'stagnant_decay_expired';
+      noteTrendFunnel('expired');
+      try {
+        require('./watchPipeline').noteStagnantExpired(
+          lifeT === 'expire_volume' ? 'volume' : 'stagnant'
+        );
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
 
     // Invalidate: MC collapsed under floor
     if (w.marketCapUsd != null && w.marketCapUsd < TREND_WATCH_MIN_MC_USD * 0.7) {
@@ -659,9 +741,22 @@ export async function tickTrendSetupWatches(opts?: {
         w.nearKeyFib === true ||
         (w.dnaHits ?? 0) >= 5)
     ) {
+      if (
+        shouldSkipArmForCap('trend_rider', countArmedWatches(watches.values())) ||
+        (w.watchScore ?? 0) < WATCH_ARM_SCORE_FLOOR
+      ) {
+        try {
+          require('./watchPipeline').noteSkippedLowScore();
+        } catch {
+          /* optional */
+        }
+        w.lastReason = 'skipped_low_score · arm cap';
+      } else {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
+      w.watchScoreAtArm = w.watchScore;
+      w.lastImprovementAt = now;
       w.lastReason = 'armed trend continuation';
       stampWatchPlan(w);
       stampTrendWatchEligibility(w);
@@ -673,6 +768,7 @@ export async function tickTrendSetupWatches(opts?: {
         /* optional */
       }
       noteTrendFunnel('armed');
+      }
     }
 
     if (w.status === 'armed') {

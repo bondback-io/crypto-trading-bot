@@ -103,6 +103,10 @@ export interface ScannerCandidate {
   watchToArmMs?: number;
   armToTriggerMs?: number;
   confluenceCountAtTrigger?: number;
+  watchScoreAtArm?: number;
+  watchScoreAtTrigger?: number;
+  watchScoreBreakdown?: { setup?: number; timing?: number; activity?: number; risk?: number; decay?: number };
+  volumeStateAtWatch?: string;
   entryStyleHint?: string;
   qualityScoreHint?: number;
   sizePlanSol?: number;

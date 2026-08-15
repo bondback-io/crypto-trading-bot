@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.372',
+    title: 'WatchScore rank, backup gzip, Stats RPC',
+    sections: ['microbots', 'scanners', 'tradecraft', 'backup'],
+    items: [
+      'Each setup watch now has a 0–100 WatchScore (setup + timing + activity − risk) with stagnation decay and a volume multiplier. Arm only the top 5 eligible per profile; trigger scans armed rows by score.',
+      'Stagnant or collapsed-volume armed rows demote or expire (stagnant_decay_expired / expired_from_volume_collapse). Late-chase still cannot arm or trigger. Watchlists show rank, score, volume chips, and a breakdown tooltip.',
+      'GitHub backups gzip the compact JSON and skip leftover rpc-idle-probe-run clones plus probe dump names. Restore accepts gzip or JSON. Local data/backups writes compact JSON.',
+      'RPC Status (Share load, lanes, endpoint table, diagnostic) moved to Stats → RPC. Config keeps MEV knobs and Jito status; header RPC pill stays global.',
+    ],
+  },
+  {
     version: '1.2.371',
     title: 'Fix watch/arm conversion quality',
     sections: ['microbots', 'scanners', 'tradecraft'],

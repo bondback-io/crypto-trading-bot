@@ -446,6 +446,10 @@ export interface Position {
   watchToArmMs?: number;
   armToTriggerMs?: number;
   confluenceCountAtTrigger?: number;
+  watchScoreAtArm?: number;
+  watchScoreAtTrigger?: number;
+  watchScoreBreakdown?: { setup?: number; timing?: number; activity?: number; risk?: number; decay?: number };
+  volumeStateAtWatch?: string;
   falseArmExpired?: boolean;
   /** Armed setup-watch handoff */
   armedWatch?: boolean;
@@ -906,6 +910,10 @@ function maybeRecordLearningEpisode(
       scalperWatchTriggered: position.scalperWatchTriggered === true,
       watchToArmMs: position.watchToArmMs,
       armToTriggerMs: position.armToTriggerMs,
+      watchScoreAtArm: position.watchScoreAtArm,
+      watchScoreAtTrigger: position.watchScoreAtTrigger,
+      watchScoreComponents: position.watchScoreBreakdown,
+      volumeStateAtWatch: position.volumeStateAtWatch,
       confluenceCountAtTrigger:
         position.confluenceCountAtTrigger != null
           ? Number(position.confluenceCountAtTrigger)
@@ -2206,6 +2214,10 @@ export class PaperTrader {
     watchToArmMs?: number;
     armToTriggerMs?: number;
     confluenceCountAtTrigger?: number;
+    watchScoreAtArm?: number;
+    watchScoreAtTrigger?: number;
+    watchScoreBreakdown?: { setup?: number; timing?: number; activity?: number; risk?: number; decay?: number };
+    volumeStateAtWatch?: string;
     falseArmExpired?: boolean;
     entryPath?: string;
     setupWatchFamily?: string;
@@ -2326,6 +2338,10 @@ export class PaperTrader {
           : undefined,
       watchToArmMs: input.watchToArmMs,
       armToTriggerMs: input.armToTriggerMs,
+      watchScoreAtArm: input.watchScoreAtArm,
+      watchScoreAtTrigger: input.watchScoreAtTrigger,
+      watchScoreBreakdown: input.watchScoreBreakdown,
+      volumeStateAtWatch: input.volumeStateAtWatch,
       confluenceCountAtTrigger:
         input.confluenceCountAtTrigger != null
           ? Number(input.confluenceCountAtTrigger)
@@ -2760,6 +2776,10 @@ export class PaperTrader {
       watchToArmMs?: number;
       armToTriggerMs?: number;
       confluenceCountAtTrigger?: number;
+      watchScoreAtArm?: number;
+      watchScoreAtTrigger?: number;
+      watchScoreBreakdown?: { setup?: number; timing?: number; activity?: number; risk?: number; decay?: number };
+      volumeStateAtWatch?: string;
       falseArmExpired?: boolean;
       entryPath?: string;
       setupWatchFamily?: string;
@@ -2966,6 +2986,10 @@ export class PaperTrader {
           : undefined,
       watchToArmMs: meta?.watchToArmMs,
       armToTriggerMs: meta?.armToTriggerMs,
+      watchScoreAtArm: meta?.watchScoreAtArm,
+      watchScoreAtTrigger: meta?.watchScoreAtTrigger,
+      watchScoreBreakdown: meta?.watchScoreBreakdown,
+      volumeStateAtWatch: meta?.volumeStateAtWatch,
       confluenceCountAtTrigger:
         meta?.confluenceCountAtTrigger != null
           ? Number(meta.confluenceCountAtTrigger)

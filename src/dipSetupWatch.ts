@@ -20,10 +20,44 @@ import {
 import { detectSupportReclaim } from './supportReclaim';
 import { analyzeSrConfluenceFromCandles } from './technicalLevels';
 import { noteWatcherPoll } from './watcherPollMetrics';
+import {
+  stampWatchPriority,
+  sortActiveWatchesByScore,
+  shouldSkipArmForCap,
+  countArmedWatchesForProfile,
+  demoteArmedBeyondCap,
+  watchLifecycleAction,
+  WATCH_ARM_SCORE_FLOOR,
+} from './watchPriorityScore';
 
 /** Fail-open: rpcWorkloadControl is not on this tree. */
 function isRpcWorkloadEnabled(_id: string): boolean {
   return true;
+}
+
+function stampDipPriority(w: DipWatchEntry, now: number): void {
+  stampWatchPriority(
+    w.preferredProfileId || 'dip_buyer',
+    w,
+    {
+      status: w.status,
+      createdAt: w.createdAt,
+      armedAt: w.armedAt,
+      lastImprovementAt: w.lastImprovementAt,
+      nearSupport: w.nearSupport,
+      nearKeyFib: w.nearKeyFib,
+      supportPriceSol: w.supportPriceSol,
+      fib05PriceSol: w.fib05PriceSol,
+      lastPriceSol: w.lastPriceSol,
+      confluenceCount: w.confluenceCount,
+      volumeH1Usd: w.volumeH1Usd,
+      movementActive: w.movementActive,
+      liquidityUsd: w.liquidityUsd,
+      dropFromPeakPct: w.dropFromPeakPct,
+      tokenAgeHours: w.tokenAgeHours,
+    },
+    now
+  );
 }
 
 export type DipWatchStatus =
@@ -94,6 +128,17 @@ export interface DipWatchEntry {
   softMovement?: boolean;
   /** Pump.fun preferred in Medium/Majors inventory / UI */
   isPumpFun?: boolean;
+  watchScore?: number;
+  watchScoreBreakdown?: import('./watchPriorityScore').WatchScoreBreakdown;
+  volumeState?: string;
+  decayMultiplier?: number;
+  lastImprovementAt?: number;
+  scoreAtFloorSince?: number | null;
+  watchScoreChips?: string[];
+  watchRank?: number;
+  watchScoreAtArm?: number;
+  prevLevelDistancePct?: number | null;
+  prevConfluenceCount?: number | null;
 }
 
 /** Unified Dip-family inventory (1M–500M + above-max Steady/HWR parks). */
@@ -1021,6 +1066,15 @@ function maybeArmQualityPark(
     ) {
       return false;
     }
+    if (
+      shouldSkipArmForCap(
+        verdict.profileId,
+        countArmedWatchesForProfile(watches.values(), verdict.profileId)
+      )
+    ) {
+      w.lastReason = 'skipped_low_score · arm cap';
+      return false;
+    }
     if (verdict.softMovement === true) {
       if (!registerSoftMovementArm(w.mint)) {
         noteDipFunnel('quality_low_movement');
@@ -1079,6 +1133,7 @@ function maybeArmQualityPark(
         profileId: verdict.profileId,
         reason: w.lastReason,
         qualityScore: w.qualityScore,
+        watchScore: w.watchScore,
         entryStyle: w.entryStyle,
       });
     } catch {
@@ -1109,6 +1164,14 @@ function scheduleEagerLevelSeed(w: DipWatchEntry): void {
       const nearTa = w.nearKeyFib === true || w.nearSupport === true;
       if (w.status === 'watching' && nearTa) {
         const now = Date.now();
+        if (
+          shouldSkipArmForCap(
+            'dip_buyer',
+            countArmedWatchesForProfile(watches.values(), 'dip_buyer')
+          )
+        ) {
+          return;
+        }
         w.status = 'armed';
         w.armedAt = now;
         w.updatedAt = now;
@@ -2069,6 +2132,10 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
       w.armedAt != null && w.createdAt > 0 ? Math.max(0, w.armedAt - w.createdAt) : undefined,
     armToTriggerMs:
       w.armedAt != null ? Math.max(0, now - w.armedAt) : undefined,
+    watchScoreAtArm: w.watchScoreAtArm,
+    watchScoreAtTrigger: w.watchScore,
+    watchScoreBreakdown: w.watchScoreBreakdown,
+    volumeStateAtWatch: w.volumeState,
     supportPriceSol: w.supportPriceSol ?? null,
     fib05PriceSol: w.fib05PriceSol ?? null,
     fib618PriceSol: w.fib618PriceSol ?? null,
@@ -2104,7 +2171,15 @@ export async function tickDipSetupWatches(opts?: {
   let handed = 0;
   fullRefreshBudget = MAX_FULL_REFRESH_PER_TICK;
 
-  for (const w of watches.values()) {
+  for (const row of watches.values()) {
+    if (row.status === 'watching' || row.status === 'armed') {
+      stampDipPriority(row, now);
+    }
+  }
+  const ordered = sortActiveWatchesByScore([...watches.values()]);
+  demoteArmedBeyondCap(ordered, 'dip_buyer', now);
+
+  for (const w of ordered) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
 
     if (now >= w.expiresAt) {
@@ -2158,6 +2233,40 @@ export async function tickDipSetupWatches(opts?: {
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
     w.targetDipEntries = buildTargetDipEntries(w);
+    stampDipPriority(w, now);
+    const life = watchLifecycleAction(
+      w,
+      w.preferredProfileId || 'dip_buyer',
+      now
+    );
+    if (life === 'demote' && w.status === 'armed') {
+      w.status = 'watching';
+      w.armedAt = null;
+      w.lastReason = 'demoted_from_armed';
+      try {
+        const { noteDemotedFromArmed } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        noteDemotedFromArmed();
+      } catch {
+        /* optional */
+      }
+    } else if (life === 'expire_stagnant' || life === 'expire_volume') {
+      releaseQualitySoftArm(w.mint);
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason =
+        life === 'expire_volume'
+          ? 'expired_from_volume_collapse'
+          : 'stagnant_decay_expired';
+      try {
+        const { noteStagnantExpired } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        noteStagnantExpired(life === 'expire_volume' ? 'volume' : 'stagnant');
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
 
     // Invalidate: flush past max dip — minors only.
     // Medium/Majors use dead-tape / name-exclude / MC-band rotate (flush % is
@@ -2227,9 +2336,28 @@ export async function tickDipSetupWatches(opts?: {
       if (inDipBand || !isQualityBandSource(w.source)) {
         w.preferredProfileId = 'dip_buyer';
       }
+      const pid = w.preferredProfileId || 'dip_buyer';
+      if (
+        shouldSkipArmForCap(
+          pid,
+          countArmedWatchesForProfile(watches.values(), pid)
+        ) ||
+        (w.watchScore ?? 0) < WATCH_ARM_SCORE_FLOOR
+      ) {
+        try {
+          const { noteSkippedLowScore } =
+            require('./watchPipeline') as typeof import('./watchPipeline');
+          noteSkippedLowScore();
+        } catch {
+          /* optional */
+        }
+        w.lastReason = 'skipped_low_score · arm cap';
+      } else {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
+      w.watchScoreAtArm = w.watchScore;
+      w.lastImprovementAt = now;
       w.lastReason = dropOk ? 'armed near Fib/S + dip' : 'armed near Fib/S';
       stampWatchPlan(w);
       noteDipFunnel('armed');
@@ -2248,10 +2376,18 @@ export async function tickDipSetupWatches(opts?: {
           profileId: w.preferredProfileId || 'dip_buyer',
           reason: w.lastReason,
           qualityScore: w.qualityScore,
+          watchScore: w.watchScore,
           entryStyle: w.entryStyle,
         });
+        const { noteArmedFromTopQuartile } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        const n = ordered.length;
+        noteArmedFromTopQuartile(
+          w.watchRank != null && n > 0 && w.watchRank <= Math.max(1, Math.ceil(n * 0.25))
+        );
       } catch {
         /* optional */
+      }
       }
     }
 

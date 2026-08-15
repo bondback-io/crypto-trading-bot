@@ -25,6 +25,15 @@ export interface WatchPipelineSnapshot {
   mc_gap_orphan_count: number;
   orphan_example_mc: number | null;
   rejected_by_all_mc_bands: number;
+  avg_watch_score_by_profile: Record<string, number>;
+  armed_from_top_quartile_rate: number;
+  skipped_low_score_count: number;
+  expired_stagnant_count: number;
+  decay_events_count: number;
+  demoted_from_armed_count: number;
+  expired_from_volume_collapse_count: number;
+  saved_from_decay_by_volume_expansion_count: number;
+  avg_time_to_decay_by_profile: Record<string, number>;
 }
 
 const WINDOW_MS = 60_000;
@@ -43,6 +52,16 @@ let watcherLaneLatency: number | string | null = '—';
 let mcGapOrphanCount = 0;
 let orphanExampleMc: number | null = null;
 let rejectedByAllMcBands = 0;
+const scoreSumByProfile: Record<string, { sum: number; n: number }> = {};
+let armedTopQuartileHits = 0;
+let armedTopQuartileN = 0;
+let skippedLowScoreCount = 0;
+let expiredStagnantCount = 0;
+let decayEventsCount = 0;
+let demotedFromArmedCount = 0;
+let expiredFromVolumeCollapseCount = 0;
+let savedFromDecayByVolumeExpansionCount = 0;
+const decayTimeByProfile: Record<string, { sum: number; n: number }> = {};
 
 function bump(map: Record<string, number>, reason: string): void {
   const key = String(reason || 'unknown').slice(0, 80);
@@ -91,6 +110,52 @@ export function noteMcGapOrphan(mcUsd?: number | null): void {
   if (Number.isFinite(n) && n > 0) orphanExampleMc = n;
 }
 
+export function noteWatchScoreDiagnostics(input: {
+  profileId?: string | null;
+  score?: number;
+  improved?: boolean;
+  volumeState?: string;
+  decayed?: boolean;
+  savedByVolume?: boolean;
+}): void {
+  const pid = String(input.profileId || '').trim() || 'unknown';
+  const score = Number(input.score);
+  if (Number.isFinite(score)) {
+    const row = scoreSumByProfile[pid] || { sum: 0, n: 0 };
+    row.sum += score;
+    row.n += 1;
+    scoreSumByProfile[pid] = row;
+  }
+  if (input.decayed) decayEventsCount += 1;
+  if (input.savedByVolume) savedFromDecayByVolumeExpansionCount += 1;
+}
+
+export function noteArmedFromTopQuartile(hit: boolean): void {
+  armedTopQuartileN += 1;
+  if (hit) armedTopQuartileHits += 1;
+}
+
+export function noteSkippedLowScore(): void {
+  skippedLowScoreCount += 1;
+}
+
+export function noteStagnantExpired(kind: 'stagnant' | 'volume' = 'stagnant'): void {
+  expiredStagnantCount += 1;
+  if (kind === 'volume') expiredFromVolumeCollapseCount += 1;
+}
+
+export function noteDemotedFromArmed(): void {
+  demotedFromArmedCount += 1;
+}
+
+export function noteTimeToDecay(profileId: string, ms: number): void {
+  const pid = String(profileId || 'unknown');
+  const row = decayTimeByProfile[pid] || { sum: 0, n: 0 };
+  row.sum += Math.max(0, ms);
+  row.n += 1;
+  decayTimeByProfile[pid] = row;
+}
+
 export function getWatchPipelineSnapshot(opts?: {
   activeByProfile?: Record<string, number>;
   armedByProfile?: Record<string, number>;
@@ -115,6 +180,14 @@ export function getWatchPipelineSnapshot(opts?: {
     armedSum += Number(row?.armed) || 0;
     openedSum += Number(row?.opened) || 0;
   }
+  const avgScore: Record<string, number> = {};
+  for (const [pid, row] of Object.entries(scoreSumByProfile)) {
+    avgScore[pid] = row.n > 0 ? Math.round((row.sum / row.n) * 10) / 10 : 0;
+  }
+  const avgDecay: Record<string, number> = {};
+  for (const [pid, row] of Object.entries(decayTimeByProfile)) {
+    avgDecay[pid] = row.n > 0 ? Math.round(row.sum / row.n) : 0;
+  }
   return {
     scanner_candidates_per_min: candidateAt.length,
     watch_insert_attempts: insertAttempts,
@@ -129,5 +202,16 @@ export function getWatchPipelineSnapshot(opts?: {
     mc_gap_orphan_count: mcGapOrphanCount,
     orphan_example_mc: orphanExampleMc,
     rejected_by_all_mc_bands: rejectedByAllMcBands,
+    avg_watch_score_by_profile: avgScore,
+    armed_from_top_quartile_rate:
+      armedTopQuartileN > 0 ? armedTopQuartileHits / armedTopQuartileN : 0,
+    skipped_low_score_count: skippedLowScoreCount,
+    expired_stagnant_count: expiredStagnantCount,
+    decay_events_count: decayEventsCount,
+    demoted_from_armed_count: demotedFromArmedCount,
+    expired_from_volume_collapse_count: expiredFromVolumeCollapseCount,
+    saved_from_decay_by_volume_expansion_count:
+      savedFromDecayByVolumeExpansionCount,
+    avg_time_to_decay_by_profile: avgDecay,
   };
 }

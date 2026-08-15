@@ -564,7 +564,7 @@ export function createServer(): express.Application {
         'Content-Disposition',
         `attachment; filename="${filename}"`
       );
-      res.send(JSON.stringify(backup, null, 2));
+      res.send(JSON.stringify(backup));
     } catch (err) {
       res.status(500).json({
         ok: false,
@@ -654,22 +654,23 @@ export function createServer(): express.Application {
       const {
         restoreSiteBackup,
         isValidSiteBackup,
+        parseSiteBackupBytes,
         getLatestSiteBackupMeta,
       } = require('./siteBackup') as typeof import('./siteBackup');
       const body = req.body as unknown;
       let payload: unknown = null;
       if (Buffer.isBuffer(body)) {
         try {
-          payload = JSON.parse(body.toString('utf8'));
+          payload = parseSiteBackupBytes(body);
         } catch {
-          res.status(400).json({ ok: false, error: 'Upload is not valid JSON' });
+          res.status(400).json({ ok: false, error: 'Upload is not a valid site-backup' });
           return;
         }
       } else if (typeof body === 'string') {
         try {
-          payload = JSON.parse(body);
+          payload = parseSiteBackupBytes(Buffer.from(body, 'utf8'));
         } catch {
-          res.status(400).json({ ok: false, error: 'Upload is not valid JSON' });
+          res.status(400).json({ ok: false, error: 'Upload is not a valid site-backup' });
           return;
         }
       } else if (body && typeof body === 'object') {

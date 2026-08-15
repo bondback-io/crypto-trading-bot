@@ -22,6 +22,15 @@ import {
 } from './technicalLevels';
 import { isMintOnActiveDipWatch } from './dipSetupWatch';
 import { detectSupportReclaim } from './supportReclaim';
+import {
+  stampWatchPriority,
+  sortActiveWatchesByScore,
+  shouldSkipArmForCap,
+  countArmedWatchesForProfile,
+  demoteArmedBeyondCap,
+  watchLifecycleAction,
+  WATCH_ARM_SCORE_FLOOR,
+} from './watchPriorityScore';
 
 export type ScalperWatchStatus =
   | 'watching'
@@ -76,6 +85,17 @@ export interface ScalperWatchEntry {
   entryStyle?: string;
   qualityScore?: number | null;
   sizePlanSol?: number | null;
+  watchScore?: number;
+  watchScoreBreakdown?: import('./watchPriorityScore').WatchScoreBreakdown;
+  volumeState?: string;
+  decayMultiplier?: number;
+  lastImprovementAt?: number;
+  scoreAtFloorSince?: number | null;
+  watchScoreChips?: string[];
+  watchRank?: number;
+  watchScoreAtArm?: number;
+  prevLevelDistancePct?: number | null;
+  prevConfluenceCount?: number | null;
 }
 
 const MAX_WATCHES = 24;
@@ -848,6 +868,17 @@ function buildHandoff(
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
     setupWatchFamily: 'scalper',
+    playbookPassed: Array.isArray(w.playbookPassed) ? w.playbookPassed : undefined,
+    confluenceCountAtTrigger:
+      w.confluenceCount != null ? Number(w.confluenceCount) : undefined,
+    watchToArmMs:
+      w.armedAt != null && w.createdAt > 0 ? Math.max(0, w.armedAt - w.createdAt) : undefined,
+    armToTriggerMs:
+      w.armedAt != null ? Math.max(0, now - w.armedAt) : undefined,
+    watchScoreAtArm: w.watchScoreAtArm,
+    watchScoreAtTrigger: w.watchScore,
+    watchScoreBreakdown: w.watchScoreBreakdown,
+    volumeStateAtWatch: w.volumeState,
     launch,
   };
 }
@@ -873,7 +904,29 @@ export async function tickScalperSetupWatches(opts?: {
   const now = Date.now();
   let handed = 0;
 
-  for (const w of watches.values()) {
+  const stampScalper = (w: ScalperWatchEntry) => {
+    stampWatchPriority(w.preferredProfileId, w, {
+      status: w.status,
+      createdAt: w.createdAt,
+      armedAt: w.armedAt,
+      lastImprovementAt: w.lastImprovementAt,
+      nearSupport: w.nearSupport,
+      nearMultiTfSupport: w.nearMultiTfSupport,
+      supportPriceSol: w.supportPriceSol,
+      lastPriceSol: w.lastPriceSol,
+      confluenceCount: w.confluenceCount,
+      srConfluenceScore: w.srConfluenceScore,
+      volumeM5Usd: w.volumeM5Usd,
+      volumeH1Usd: w.volumeH1Usd,
+    }, now);
+  };
+  for (const row of watches.values()) {
+    if (row.status === 'watching' || row.status === 'armed') stampScalper(row);
+  }
+  const orderedScalper = sortActiveWatchesByScore([...watches.values()]);
+  demoteArmedBeyondCap(orderedScalper, 'scalper', now);
+
+  for (const w of orderedScalper) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
 
     if (isMintOnActiveDipWatch(w.mint)) {
@@ -937,6 +990,33 @@ export async function tickScalperSetupWatches(opts?: {
 
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
+    stampScalper(w);
+    const lifeS = watchLifecycleAction(w, w.preferredProfileId, now);
+    if (lifeS === 'demote' && w.status === 'armed') {
+      w.status = 'watching';
+      w.armedAt = null;
+      w.lastReason = 'demoted_from_armed';
+      try {
+        require('./watchPipeline').noteDemotedFromArmed();
+      } catch {
+        /* optional */
+      }
+    } else if (lifeS === 'expire_stagnant' || lifeS === 'expire_volume') {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason =
+        lifeS === 'expire_volume'
+          ? 'expired_from_volume_collapse'
+          : 'stagnant_decay_expired';
+      try {
+        require('./watchPipeline').noteStagnantExpired(
+          lifeS === 'expire_volume' ? 'volume' : 'stagnant'
+        );
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
     w.targetEntries = buildTargetEntries(w);
 
     // Invalidate: graduated past Scalper mid-band ceiling
@@ -984,9 +1064,25 @@ export async function tickScalperSetupWatches(opts?: {
       (Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 2);
 
     if (w.status === 'watching' && nearConfluence) {
+      if (
+        shouldSkipArmForCap(
+          w.preferredProfileId,
+          countArmedWatchesForProfile(watches.values(), w.preferredProfileId)
+        ) ||
+        (w.watchScore ?? 0) < WATCH_ARM_SCORE_FLOOR
+      ) {
+        try {
+          require('./watchPipeline').noteSkippedLowScore();
+        } catch {
+          /* optional */
+        }
+        w.lastReason = 'skipped_low_score · arm cap';
+      } else {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
+      w.watchScoreAtArm = w.watchScore;
+      w.lastImprovementAt = now;
       w.lastReason = w.nearMultiTfSupport
         ? 'armed multi-TF support'
         : Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 2
@@ -1025,10 +1121,12 @@ export async function tickScalperSetupWatches(opts?: {
           profileId: w.preferredProfileId,
           reason: w.lastReason,
           qualityScore: w.qualityScore,
+          watchScore: w.watchScore,
           entryStyle: w.entryStyle,
         });
       } catch {
         /* optional */
+      }
       }
     }
 

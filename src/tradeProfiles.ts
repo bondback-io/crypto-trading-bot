@@ -405,6 +405,8 @@ export interface TradeProfileMatchRules {
    * 0 = off (no count gate). Distinct from playbook minConfluenceScore (0–100).
    */
   minTaPlaybookConfluences?: number;
+  /** Max concurrent armed watches for this profile (WatchScore top-K). Default 5. */
+  maxArmedWatches?: number;
 }
 
 /** Persisted user edits on top of official catalog defaults */
@@ -590,6 +592,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 1,
+      maxArmedWatches: 5,
     },
     exitRules: {
       forceScalp: true,
@@ -672,6 +675,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 2,
+      maxArmedWatches: 5,
     },
     exitRules: {
       shortTermStrategyId: 'post_run_dip',
@@ -763,6 +767,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 2,
+      maxArmedWatches: 5,
     },
     exitRules: {
       forceScalp: false,
@@ -833,6 +838,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 1,
+      maxArmedWatches: 5,
     },
     exitRules: {
       takeProfitPctMin: 10,
@@ -940,6 +946,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 2,
+      maxArmedWatches: 5,
     },
     exitRules: {
       takeProfitPctMin: 40,
@@ -1023,6 +1030,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 1,
+      maxArmedWatches: 5,
     },
     exitRules: {
       forceScalp: true,
@@ -1108,6 +1116,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 2,
+      maxArmedWatches: 5,
     },
     exitRules: {
       forceScalp: false,
@@ -1171,6 +1180,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 1,
+      maxArmedWatches: 5,
     },
     exitRules: {
       forceScalp: true,

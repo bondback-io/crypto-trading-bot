@@ -5,6 +5,7 @@
  */
 
 import fs from 'fs';
+import zlib from 'zlib';
 import {
   atomicWriteJson,
   dataFile,
@@ -13,10 +14,9 @@ import {
 } from './dataDir';
 import {
   createAndSaveSiteBackup,
-  isValidSiteBackup,
+  parseSiteBackupBytes,
   restoreSiteBackup,
   saveSiteBackup,
-  type SiteBackup,
 } from './siteBackup';
 
 export type GithubBackupInterval = 'none' | '1h' | '4h' | '12h' | '24h';
@@ -30,7 +30,8 @@ export const GITHUB_BACKUP_INTERVALS: readonly GithubBackupInterval[] = [
 ] as const;
 
 const SETTINGS_FILE = () => dataFile('github-backup-settings.json');
-const DEFAULT_REMOTE_PATH = 'site-backups/site-backup-latest.json';
+const DEFAULT_REMOTE_PATH = 'site-backups/site-backup-latest.json.gz';
+const LEGACY_REMOTE_PATH = 'site-backups/site-backup-latest.json';
 const TICK_MS = 60_000;
 
 const INTERVAL_MS: Record<Exclude<GithubBackupInterval, 'none'>, number> = {
@@ -363,6 +364,77 @@ async function fetchRemoteSha(
   return r.json?.sha || null;
 }
 
+function alternateRemoteBackupPaths(primary: string): string[] {
+  const paths = [primary];
+  if (/\.json\.gz$/i.test(primary)) {
+    paths.push(primary.replace(/\.json\.gz$/i, '.json'));
+  } else if (/\.json$/i.test(primary)) {
+    paths.push(`${primary}.gz`);
+  }
+  if (!paths.includes(LEGACY_REMOTE_PATH)) paths.push(LEGACY_REMOTE_PATH);
+  if (!paths.includes(DEFAULT_REMOTE_PATH)) paths.push(DEFAULT_REMOTE_PATH);
+  return [...new Set(paths.filter(Boolean))];
+}
+
+async function fetchRemoteBackupBytes(
+  owner: string,
+  repo: string,
+  filePath: string,
+  token: string
+): Promise<{
+  buf: Buffer;
+  sha: string | null;
+  path: string;
+  status: number;
+}> {
+  const enc = filePath
+    .split('/')
+    .map((p) => encodeURIComponent(p))
+    .join('/');
+  const get = await githubApi<{
+    content?: string;
+    encoding?: string;
+    sha?: string;
+    message?: string;
+    download_url?: string | null;
+  }>(
+    'GET',
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${enc}`,
+    token
+  );
+  if (!get.ok || !get.json) {
+    return {
+      buf: Buffer.alloc(0),
+      sha: null,
+      path: filePath,
+      status: get.status,
+    };
+  }
+  let buf: Buffer;
+  if (get.json.encoding === 'base64' && get.json.content) {
+    buf = Buffer.from(get.json.content.replace(/\n/g, ''), 'base64');
+  } else if (get.json.download_url) {
+    const dl = await fetch(get.json.download_url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'crypto-trading-bot-site-backup',
+      },
+    });
+    if (!dl.ok) {
+      throw new Error(`GitHub download_url failed (${dl.status})`);
+    }
+    buf = Buffer.from(await dl.arrayBuffer());
+  } else {
+    throw new Error('GitHub response missing file content');
+  }
+  return {
+    buf,
+    sha: get.json.sha ? String(get.json.sha) : null,
+    path: filePath,
+    status: get.status,
+  };
+}
+
 /**
  * Build local latest backup and push compact JSON to GitHub (overwrite path).
  */
@@ -398,8 +470,9 @@ export async function uploadSiteBackupToGithub(opts?: {
 
     const created = createAndSaveSiteBackup();
     const compact = JSON.stringify(created.backup);
-    const bytes = Buffer.byteLength(compact, 'utf8');
-    const content = Buffer.from(compact, 'utf8').toString('base64');
+    const gz = zlib.gzipSync(Buffer.from(compact, 'utf8'));
+    const bytes = gz.length;
+    const content = gz.toString('base64');
     const sha = await fetchRemoteSha(
       target.owner,
       target.repo,
@@ -491,69 +564,40 @@ export async function restoreSiteBackupFromGithub(): Promise<{
     throw new Error('GitHub owner/repo not configured');
   }
 
-  const enc = target.path
-    .split('/')
-    .map((p) => encodeURIComponent(p))
-    .join('/');
-  const get = await githubApi<{
-    content?: string;
-    encoding?: string;
-    sha?: string;
-    message?: string;
-    download_url?: string | null;
-  }>(
-    'GET',
-    `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/contents/${enc}`,
-    target.token
-  );
-
-  if (!get.ok || !get.json) {
+  const paths = alternateRemoteBackupPaths(target.path);
+  let fetched: {
+    buf: Buffer;
+    sha: string | null;
+    path: string;
+    status: number;
+  } | null = null;
+  let lastStatus = 0;
+  for (const p of paths) {
+    const row = await fetchRemoteBackupBytes(
+      target.owner,
+      target.repo,
+      p,
+      target.token
+    );
+    lastStatus = row.status;
+    if (row.status === 404 || row.buf.length === 0) continue;
+    fetched = row;
+    break;
+  }
+  if (!fetched) {
     throw new Error(
-      get.status === 404
-        ? `No backup at ${target.path} on ${target.owner}/${target.repo}`
-        : `GitHub GET failed (${get.status}): ${
-            get.json?.message || get.text.slice(0, 200)
-          }`
+      lastStatus === 404
+        ? `No backup at ${paths.join(' or ')} on ${target.owner}/${target.repo}`
+        : `GitHub GET failed (${lastStatus})`
     );
   }
 
-  let rawText: string;
-  if (get.json.encoding === 'base64' && get.json.content) {
-    rawText = Buffer.from(
-      get.json.content.replace(/\n/g, ''),
-      'base64'
-    ).toString('utf8');
-  } else if (get.json.download_url) {
-    const dl = await fetch(get.json.download_url, {
-      headers: {
-        Authorization: `Bearer ${target.token}`,
-        'User-Agent': 'crypto-trading-bot-site-backup',
-      },
-    });
-    if (!dl.ok) {
-      throw new Error(`GitHub download_url failed (${dl.status})`);
-    }
-    rawText = await dl.text();
-  } else {
-    throw new Error('GitHub response missing file content');
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    throw new Error('Remote file is not valid JSON');
-  }
-  if (!isValidSiteBackup(parsed)) {
-    throw new Error('Remote file is not a valid site-backup (kind/version)');
-  }
-
-  const backup = parsed as SiteBackup;
+  const backup = parseSiteBackupBytes(fetched.buf);
   // Keep a local copy so Load Last Backup works after a GitHub restore
   saveSiteBackup(backup);
   const result = restoreSiteBackup(backup);
 
-  const sha = get.json.sha ? String(get.json.sha) : null;
+  const sha = fetched.sha;
   const next = loadGithubBackupSettings();
   if (sha) {
     next.lastRemoteSha = sha;
@@ -570,7 +614,7 @@ export async function restoreSiteBackupFromGithub(): Promise<{
     written: result.written,
     exportedAt: result.exportedAt,
     fileCount: result.fileCount,
-    path: target.path,
+    path: fetched.path,
     sha,
   };
 }
