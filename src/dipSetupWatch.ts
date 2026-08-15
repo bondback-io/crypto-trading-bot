@@ -12,6 +12,8 @@ import {
 import { trimMapToCap, registerCacheSweep } from './mapCap';
 import { isStrategyEnabledGlobal } from './strategies';
 import {
+  isAboveDipBuyerMaxMc,
+  isInDipBuyerMcBand,
   isSmartBotProfilesEnabled,
   resolveTradeProfileDefinition,
 } from './tradeProfiles';
@@ -62,7 +64,7 @@ export interface DipWatchEntry {
   source?: string;
   /** Soft MC band when source is medium/majors ($20M / $50M / $100M / $200M / $250M / $500M / $1B+) */
   majorsBand?: string;
-  /** Soft prefer on handoff — dip_buyer default; medium/majors prefer steady_compounder / high_win_rate */
+  /** Soft prefer on handoff — dip_buyer inside $1M–$500M; Steady/HWR above Dip max */
   preferredProfileId?: string;
   /** Non-exclusive: profiles this row may appear under in the per-profile Watchlist. */
   eligibleProfileIds?: string[];
@@ -94,13 +96,8 @@ export interface DipWatchEntry {
   isPumpFun?: boolean;
 }
 
-/**
- * Separate caps so majors/medium (liberal admit + 10h TTL + frequent refresh)
- * cannot starve memecoin / scanner minors. Medium/Majors ≤80 (1.2.261).
- */
-const MAX_MAJORS_WATCHES = 50;
-const MAX_MEDIUM_WATCHES = 80;
-const MAX_MINORS_WATCHES = 16;
+/** Unified Dip-family inventory (1M–500M + above-max Steady/HWR parks). */
+const MAX_DIP_WATCHES = 80;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 /** High-MC majors/medium wait longer for Fib/S setups (8–12h band → 10h) */
 const MAJORS_TTL_MS = 10 * 60 * 60_000;
@@ -349,7 +346,7 @@ export function getDipFunnelCounters(): typeof dipFunnel & {
     majorsArmedNow,
     minorsWatchingNow,
     minorsArmedNow,
-    minorsCap: MAX_MINORS_WATCHES,
+    minorsCap: MAX_DIP_WATCHES,
   };
 }
 
@@ -400,7 +397,7 @@ export function getActiveDipWatchesSnapshot(): {
 }
 
 export function getDipMinorsCap(): number {
-  return MAX_MINORS_WATCHES;
+  return MAX_DIP_WATCHES;
 }
 
 function isMajorsSource(source: string | undefined): boolean {
@@ -422,14 +419,25 @@ function watchBucket(source: string | undefined): DipWatchBucket {
   return 'minors';
 }
 
-function bucketCap(bucket: DipWatchBucket): number {
-  if (bucket === 'majors') return MAX_MAJORS_WATCHES;
-  if (bucket === 'medium') return MAX_MEDIUM_WATCHES;
-  return MAX_MINORS_WATCHES;
-}
-
 function isActiveWatch(w: DipWatchEntry): boolean {
   return w.status === 'watching' || w.status === 'armed';
+}
+
+function allActiveWatches(): DipWatchEntry[] {
+  return [...watches.values()]
+    .filter((w) => isActiveWatch(w))
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+function enforceDipCap(max: number): void {
+  const ranked = allActiveWatches()
+    .map((w) => ({ w, score: qualityWatchScore(w) }))
+    .sort((a, b) => a.score - b.score);
+  while (ranked.length > max) {
+    const weakest = ranked.shift();
+    if (!weakest) break;
+    deleteDipWatch(weakest.w.mint);
+  }
 }
 
 function releaseQualitySoftArm(mint: string | null | undefined): void {
@@ -458,16 +466,6 @@ function activeWatches(bucket: DipWatchBucket): DipWatchEntry[] {
       return watchBucket(w.source) === bucket;
     })
     .sort((a, b) => a.createdAt - b.createdAt);
-}
-
-/** Evict oldest within a bucket until at/under cap. */
-function enforceBucketCap(bucket: DipWatchBucket, max: number): void {
-  const active = activeWatches(bucket);
-  while (active.length > max) {
-    const oldest = active.shift();
-    if (!oldest) break;
-    deleteDipWatch(oldest.mint);
-  }
 }
 
 function qualityWatchScore(w: DipWatchEntry): number {
@@ -566,11 +564,10 @@ function maybeRotateExcludedOrOutOfBandQualityWatch(
   if (Number.isFinite(mc) && mc > 0) {
     try {
       const {
-        MEDIUM_MIN_MC_USD,
         universeWatchBand,
         majorsMcBand,
       } = require('./majorsUniverse') as typeof import('./majorsUniverse');
-      if (mc < MEDIUM_MIN_MC_USD) {
+      if (!isInDipBuyerMcBand(mc) && !isAboveDipBuyerMaxMc(mc)) {
         const pid =
           w.preferredProfileId === 'high_win_rate'
             ? 'high_win_rate'
@@ -593,7 +590,7 @@ function maybeRotateExcludedOrOutOfBandQualityWatch(
         w.lastReason = `out_of_band_mc MC=$${Math.round(mc)}`;
         w.qualityChip = 'rotated_stale';
         console.log(
-          `[dip-watch] ROTATE ${w.symbol} [${w.source}] — MC below medium floor ` +
+          `[dip-watch] ROTATE ${w.symbol} [${w.source}] — MC below Dip min ` +
             `MC=$${Math.round(mc)}`
         );
         try {
@@ -618,23 +615,15 @@ function maybeRotateExcludedOrOutOfBandQualityWatch(
 }
 
 /**
- * True if a new admit for this bucket is allowed. Minors: drop oldest.
- * Medium/Majors: rotate lowest H1-vol score when incoming beats by ≥1.25×.
+ * True if a new admit is allowed under the unified Dip-family cap.
+ * Rotate lowest score when incoming beats weakest H1 vol by ≥1.25×.
  */
 function reserveAdmitSlot(
-  bucket: DipWatchBucket,
+  _bucket: DipWatchBucket,
   incoming?: { mint?: string; volumeH1Usd?: number }
 ): boolean {
-  const max = bucketCap(bucket);
-  const active = activeWatches(bucket);
-  if (active.length < max) return true;
-
-  if (bucket === 'minors') {
-    const oldest = active[0];
-    if (!oldest) return true;
-    deleteDipWatch(oldest.mint);
-    return true;
-  }
+  const active = allActiveWatches();
+  if (active.length < MAX_DIP_WATCHES) return true;
 
   const now = Date.now();
   const ranked = [...active]
@@ -661,7 +650,7 @@ function reserveAdmitSlot(
   lastRotationAt.set(outMint, now);
   if (inMint) lastRotationAt.set(inMint, now);
   console.log(
-    `[ROTATION] ${bucket} out=${weakest.w.symbol}(${outMint.slice(0, 6)}…) ` +
+    `[ROTATION] dip out=${weakest.w.symbol}(${outMint.slice(0, 6)}…) ` +
       `volH1=$${Math.round(weakVol)} score=${Math.round(weakest.score)} → ` +
       `in=${inMint ? inMint.slice(0, 6) + '…' : '?'} volH1=$${Math.round(inVol)}`
   );
@@ -681,6 +670,23 @@ function dipMatch() {
   return resolveTradeProfileDefinition('dip_buyer').match;
 }
 
+function mintHasOpenTrade(mint: string): boolean {
+  try {
+    const { paperTrader } =
+      require('./paperTrader') as typeof import('./paperTrader');
+    const key = String(mint || '').trim().toLowerCase();
+    if (!key) return false;
+    return (paperTrader.getOpenPositions() || []).some(
+      (p) =>
+        p &&
+        p.status !== 'closed' &&
+        String(p.mint || '').trim().toLowerCase() === key
+    );
+  } catch {
+    return false;
+  }
+}
+
 function stampWatchPlan(w: DipWatchEntry): void {
   const q =
     w.nearKeyFib && w.nearSupport
@@ -693,11 +699,13 @@ function stampWatchPlan(w: DipWatchEntry): void {
             ? 55
             : 45;
   w.qualityScore = q;
-  const preferHwr = w.preferredProfileId === 'high_win_rate';
+  const inDipBand = isInDipBuyerMcBand(w.marketCapUsd);
+  const preferHwr = !inDipBand && w.preferredProfileId === 'high_win_rate';
   const preferSteady =
-    preferHwr ||
-    w.preferredProfileId === 'steady_compounder' ||
-    isQualityBandSource(w.source);
+    !inDipBand &&
+    (preferHwr ||
+      w.preferredProfileId === 'steady_compounder' ||
+      isQualityBandSource(w.source));
   w.entryStyle = preferSteady
     ? 'quality_structure_reclaim'
     : 'support_dip_reclaim';
@@ -804,14 +812,12 @@ function pruneTerminal(): void {
       w.status === 'invalidated'
     ) {
       if (now - w.updatedAt > 30 * 60_000) {
+        if (w.status === 'triggered' && mintHasOpenTrade(mint)) continue;
         deleteDipWatch(mint);
       }
     }
   }
-  // Cap per bucket — never let majors/medium eviction steal minor slots
-  enforceBucketCap('majors', MAX_MAJORS_WATCHES);
-  enforceBucketCap('medium', MAX_MEDIUM_WATCHES);
-  enforceBucketCap('minors', MAX_MINORS_WATCHES);
+  enforceDipCap(MAX_DIP_WATCHES);
 }
 
 export function watchHasFibOrSupportLevels(w: DipWatchEntry): boolean {
@@ -935,6 +941,7 @@ function maybeArmQualityPark(
 ): boolean {
   if (w.status !== 'watching') return false;
   if (!isQualityBandSource(w.source)) return false;
+  if (isInDipBuyerMcBand(w.marketCapUsd)) return false;
   try {
     const { classifyQualityParkNameExclusion } =
       require('./qualityParkNameExclusions') as typeof import('./qualityParkNameExclusions');
@@ -1480,7 +1487,8 @@ export function considerDipWatchSetup(input: {
     return null;
   }
   const m = dipMatch();
-  const minMc = m.minMarketCapUsd ?? 500_000;
+  const minMc = m.minMarketCapUsd ?? 1_000_000;
+  const maxMc = m.maxMarketCapUsd ?? 500_000_000;
   const minHolders = m.minHolders ?? 80;
   const minVol = m.minVolumeH1Usd ?? 8_000;
   const minDrop = m.minDropFromPeakPct ?? 8;
@@ -1614,7 +1622,9 @@ export function considerDipWatchSetup(input: {
     if (isQuality) {
       existing.source = isMedium ? 'medium' : 'majors';
       existing.majorsBand = input.majorsBand ?? existing.majorsBand;
-      if (input.preferredProfileId) {
+      if (isInDipBuyerMcBand(existing.marketCapUsd)) {
+        existing.preferredProfileId = 'dip_buyer';
+      } else if (input.preferredProfileId) {
         existing.preferredProfileId = input.preferredProfileId;
       }
       // Keep quality TTL from sliding under 4h memecoin default on refresh
@@ -1642,10 +1652,17 @@ export function considerDipWatchSetup(input: {
   }
 
   const mc = input.marketCapUsd;
+  const inDipBand = isInDipBuyerMcBand(mc);
+  const aboveDipMax = isAboveDipBuyerMaxMc(mc);
   if (
     !isQuality &&
     (mc == null || !Number.isFinite(Number(mc)) || Number(mc) <= 0 || Number(mc) < minMc)
   ) {
+    noteDipFunnel('mc');
+    noteDipFunnel('vol_liq_mc');
+    return null;
+  }
+  if (!isQuality && Number.isFinite(Number(mc)) && Number(mc) > maxMc) {
     noteDipFunnel('mc');
     noteDipFunnel('vol_liq_mc');
     return null;
@@ -1702,9 +1719,9 @@ export function considerDipWatchSetup(input: {
   const now = Date.now();
   // Arm on Fib/S proximity; drop is soft preference (not forever AND-gated)
   const armed = nearTa;
-  // Soft-gate: Medium/Majors → Steady/HWR/Dip; minors always dip_buyer (1.2.262/263).
+  // Dip MC band owns dip_buyer identity. Above max, quality parks prefer Steady/HWR.
   let preferSafe: 'steady_compounder' | 'high_win_rate' | 'dip_buyer';
-  if (!isQuality) {
+  if (inDipBand || !isQuality) {
     if (
       input.preferredProfileId &&
       input.preferredProfileId !== 'dip_buyer'
@@ -1719,7 +1736,7 @@ export function considerDipWatchSetup(input: {
       prefer === 'steady_compounder' ||
       prefer === 'dip_buyer'
     ) {
-      preferSafe = prefer;
+      preferSafe = aboveDipMax && prefer === 'dip_buyer' ? 'steady_compounder' : prefer;
     } else {
       preferSafe = 'steady_compounder';
     }
@@ -2117,10 +2134,15 @@ export async function tickDipSetupWatches(opts?: {
       w.dropFromPeakPct >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
       w.dropFromPeakPct <= maxDrop;
 
-    // Arm: quality parks via Steady/HWR playbook; minors near Fib/S.
-    if (w.status === 'watching' && isQualityBandSource(w.source)) {
+    // Arm: above Dip max via Steady/HWR playbook; Dip band / scanner near Fib/S.
+    const aboveDipMax = isAboveDipBuyerMaxMc(w.marketCapUsd);
+    const inDipBand = isInDipBuyerMcBand(w.marketCapUsd);
+    if (w.status === 'watching' && isQualityBandSource(w.source) && aboveDipMax) {
       maybeArmQualityPark(w, now, dropOk);
     } else if (w.status === 'watching' && nearTa) {
+      if (inDipBand || !isQualityBandSource(w.source)) {
+        w.preferredProfileId = 'dip_buyer';
+      }
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
@@ -2244,7 +2266,8 @@ export async function tickDipSetupWatches(opts?: {
       if (!trigger) continue;
 
       stampWatchPlan(w);
-      const preferPid = !isQualityBandSource(w.source)
+      const inDipBandTrig = isInDipBuyerMcBand(w.marketCapUsd);
+      const preferPid = inDipBandTrig
         ? 'dip_buyer'
         : w.preferredProfileId || 'dip_buyer';
       try {
@@ -2258,8 +2281,8 @@ export async function tickDipSetupWatches(opts?: {
       }
       w.lastReason = reclaim ? 'reclaim trigger' : 'setup trigger';
       const c = buildHandoff(w);
-      // Force Dip floors on minor handoffs (never Steady soft-allow path).
-      if (!isQualityBandSource(w.source)) {
+      // Dip-band handoffs stay dip_buyer; MARL still picks the opener.
+      if (inDipBandTrig || !isQualityBandSource(w.source)) {
         c.preferredProfileId = 'dip_buyer';
         if (c.launch) c.launch.preferredProfileId = 'dip_buyer';
         w.preferredProfileId = 'dip_buyer';
@@ -2272,7 +2295,7 @@ export async function tickDipSetupWatches(opts?: {
         noteDipFunnel('triggered');
         noteQualityBandFunnel(w.source, 'triggered');
         noteQualityBandFunnel(w.source, 'opened');
-        if (!isQualityBandSource(w.source)) {
+        if (!isQualityBandSource(w.source) || inDipBandTrig) {
           noteMinorsFunnel('triggered');
           noteMinorsFunnel('opened');
         } else {
@@ -2297,13 +2320,13 @@ export async function tickDipSetupWatches(opts?: {
           }
         }
         const prefer =
-          isQualityBandSource(w.source)
-            ? w.preferredProfileId === 'high_win_rate'
+          inDipBandTrig || !isQualityBandSource(w.source)
+            ? 'dip_buyer'
+            : w.preferredProfileId === 'high_win_rate'
               ? 'high_win_rate'
               : w.preferredProfileId === 'dip_buyer'
                 ? 'dip_buyer'
-                : 'steady_compounder'
-            : 'dip_buyer';
+                : 'steady_compounder';
         console.log(
           `[dip-watch] TRIGGERED ${w.symbol} → ${prefer} (${w.lastReason})`
         );
@@ -2412,54 +2435,39 @@ export function getDipSetupWatchStatus(limit = 200): {
 } {
   pruneTerminal();
   const now = Date.now();
-  const majorsActive = activeWatches('majors').sort(
+  const allActive = allActiveWatches().sort(
     (a, b) => b.updatedAt - a.updatedAt
   );
-  const mediumActive = activeWatches('medium').sort(
-    (a, b) => b.updatedAt - a.updatedAt
-  );
-  const minorsActive = activeWatches('minors').sort(
-    (a, b) => b.updatedAt - a.updatedAt
-  );
-  // Reserve room for minors so quality parks cannot starve the status slice.
-  const minorReserve = Math.min(MAX_MINORS_WATCHES, minorsActive.length, limit);
-  const qualityBudget = Math.max(0, limit - minorReserve);
-  const entries: DipWatchEntry[] = [];
-  for (const e of mediumActive) {
-    if (entries.length >= qualityBudget) break;
-    entries.push(e);
-  }
-  for (const e of majorsActive) {
-    if (entries.length >= qualityBudget) break;
-    entries.push(e);
-  }
-  for (const e of minorsActive) {
-    if (entries.length >= limit) break;
-    entries.push(e);
-  }
+  const majorsActive = allActive.filter((e) => watchBucket(e.source) === 'majors');
+  const mediumActive = allActive.filter((e) => watchBucket(e.source) === 'medium');
+  const minorsActive = allActive.filter((e) => watchBucket(e.source) === 'minors');
+  const entries = allActive.slice(0, limit);
   for (const e of entries) {
     e.targetDipEntries = buildTargetDipEntries(e);
   }
   const terminalPool = [...watches.values()]
-    .filter(
-      (e) =>
-        (e.status === 'triggered' ||
-          e.status === 'expired' ||
-          e.status === 'invalidated') &&
-        now - e.updatedAt <= TERMINAL_UI_MS
-    )
+    .filter((e) => {
+      if (
+        e.status !== 'triggered' &&
+        e.status !== 'expired' &&
+        e.status !== 'invalidated'
+      ) {
+        return false;
+      }
+      if (now - e.updatedAt <= TERMINAL_UI_MS) return true;
+      return e.status === 'triggered' && mintHasOpenTrade(e.mint);
+    })
     .sort((a, b) => b.updatedAt - a.updatedAt);
   for (const e of terminalPool) {
     e.targetDipEntries = buildTargetDipEntries(e);
   }
   return {
-    active:
-      majorsActive.length + mediumActive.length + minorsActive.length,
+    active: allActive.length,
     activeMajors: majorsActive.length,
     activeMedium: mediumActive.length,
     activeMinors: minorsActive.length,
     entries,
-    recentTerminal: terminalPool.slice(0, 4),
+    recentTerminal: terminalPool.slice(0, 8),
   };
 }
 

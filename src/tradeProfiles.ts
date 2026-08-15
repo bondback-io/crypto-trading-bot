@@ -620,9 +620,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'TP 35–60% (partial + runner via trail)',
       'SL 12–18%',
       'Key levels: Fib 0.5 & 0.618 or clear support',
-      'Established tokens: MC ≥$500k (prefer ≥$2M) · holders ≥100 · top10 ≤38%',
-      'Dip ≥8% from peak (max ~45%) · watchlist → trigger on Fib/S',
-      'Overlap $500–800k with Scalper resolved by Fib dip watch vs support reclaim',
+      'Established tokens: MC $1M–$500M (prefer ≥$2M) · holders ≥100 · top10 ≤38%',
+      'Dip ≥8% from peak (max ~45%) · one watchlist → arm near Fib/S → trigger on reclaim',
+      'Min TA playbook confluence 1 at trigger · Arming ON',
+      'Overlap with Scalper resolved by Fib dip watch vs support reclaim',
       'Size: normal / slightly larger on high conviction',
     ],
     priority: 85,
@@ -642,7 +643,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 35,
       minWalletCount: 1,
       requireCluster: false,
-      minMarketCapUsd: 500_000,
+      minMarketCapUsd: 1_000_000,
+      maxMarketCapUsd: 500_000_000,
       preferMarketCapUsd: 2_000_000,
       minHolders: 100,
       maxTop10HoldPct: 38,
@@ -662,7 +664,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['level_momentum_expansion', 'late_chase'],
       hardLateChase: true,
       armingEnabled: true,
-      minTaPlaybookConfluences: 2,
+      minTaPlaybookConfluences: 1,
     },
     exitRules: {
       shortTermStrategyId: 'post_run_dip',
@@ -1055,7 +1057,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$50k (prefer ≥$20M medium) · top10 ≤35% (soft ≤68% if age≥90d + liq≥$10k; ≤90% age-unknown fallback)',
       'Quality holder gate: known high insider still hard-skip; unknown insider soft-pass; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
       'Specialty Jupiter/KOL/majors/medium can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
-      'Medium $20–200M + Majors ≥$200M dips soft-prefer Steady quality reclaim; Dip Buyer remains for true reclaim DNA on minors',
+      'Own watchlist + quality-structure playbook (not Dip leftovers). May overlap Dip’s $1M–$500M band; exclusive winner at open',
       'Armed-only / near-zero discretionary · maxConcurrent 1 · PCL ~28%/40% · RL Shadow until proven',
     ],
     priority: 70,
@@ -1856,14 +1858,57 @@ export function getMinTaPlaybookConfluences(
   }
 }
 
+export const DIP_BUYER_DEFAULT_MIN_MC_USD = 1_000_000;
+export const DIP_BUYER_DEFAULT_MAX_MC_USD = 500_000_000;
+/** Quality-park playbook MC floor — Steady/HWR multi-admit heuristic, not a Dip leftover band. */
+export const QUALITY_PARK_MULTI_ADMIT_MIN_MC_USD = 20_000_000;
+
+export function getDipBuyerMcBand(): { min: number; max: number } {
+  try {
+    const m = resolveTradeProfileDefinition('dip_buyer').match;
+    const min = Number(m.minMarketCapUsd);
+    const max = Number(m.maxMarketCapUsd);
+    return {
+      min:
+        Number.isFinite(min) && min > 0 ? min : DIP_BUYER_DEFAULT_MIN_MC_USD,
+      max:
+        Number.isFinite(max) && max > 0 ? max : DIP_BUYER_DEFAULT_MAX_MC_USD,
+    };
+  } catch {
+    return {
+      min: DIP_BUYER_DEFAULT_MIN_MC_USD,
+      max: DIP_BUYER_DEFAULT_MAX_MC_USD,
+    };
+  }
+}
+
+export function isInDipBuyerMcBand(
+  mc: number | null | undefined
+): boolean {
+  const n = Number(mc);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const { min, max } = getDipBuyerMcBand();
+  return n >= min && n <= max;
+}
+
+export function isAboveDipBuyerMaxMc(
+  mc: number | null | undefined
+): boolean {
+  const n = Number(mc);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  return n > getDipBuyerMcBand().max;
+}
+
 /**
  * Non-exclusive watch routing: enabled family profiles, plus preferred.
- * Dip minors stay dip_buyer-only so quality parks cannot steal minor seats.
+ * Dip Buyer owns $1M–$500M identity; Steady/HWR still multi-admit via playbook
+ * (not min-MC-only, not leftovers above $500M). Above Dip max, Dip is omitted.
  */
 export function resolveWatchEligibleProfileIds(opts: {
   family: WatchFamilyId;
   preferredProfileId?: string | null;
   dipQualityPark?: boolean;
+  marketCapUsd?: number | null;
 }): string[] {
   const familyIds = [...WATCH_FAMILY_PROFILE_IDS[opts.family]];
   let flags: Record<string, boolean> = {};
@@ -1873,18 +1918,48 @@ export function resolveWatchEligibleProfileIds(opts: {
     flags = {};
   }
   const enabled = familyIds.filter((id) => flags[id] !== false);
-  if (opts.family === 'dip' && opts.dipQualityPark !== true) {
-    return enabled.includes('dip_buyer') ? ['dip_buyer'] : ['dip_buyer'];
-  }
-  const out: string[] = [];
   const pref = String(opts.preferredProfileId || '').trim();
-  if (pref && (familyIds as string[]).includes(pref) && flags[pref] !== false) {
-    out.push(pref);
+
+  if (opts.family !== 'dip') {
+    const out: string[] = [];
+    if (pref && (familyIds as string[]).includes(pref) && flags[pref] !== false) {
+      out.push(pref);
+    }
+    for (const id of enabled) {
+      if (!out.includes(id)) out.push(id);
+    }
+    return out.length > 0 ? out : familyIds.slice(0, 1);
   }
-  for (const id of enabled) {
-    if (!out.includes(id)) out.push(id);
+
+  const mc = Number(opts.marketCapUsd);
+  const aboveMax = isAboveDipBuyerMaxMc(mc);
+  const qualityEligible =
+    opts.dipQualityPark === true ||
+    (Number.isFinite(mc) && mc >= QUALITY_PARK_MULTI_ADMIT_MIN_MC_USD);
+
+  const out: string[] = [];
+  if (!aboveMax && enabled.includes('dip_buyer')) {
+    out.push('dip_buyer');
   }
-  return out.length > 0 ? out : familyIds.slice(0, 1);
+  if (qualityEligible) {
+    for (const id of ['steady_compounder', 'high_win_rate'] as const) {
+      if (flags[id] !== false && !out.includes(id)) out.push(id);
+    }
+  }
+  if (
+    pref &&
+    (familyIds as string[]).includes(pref) &&
+    flags[pref] !== false &&
+    !(pref === 'dip_buyer' && aboveMax)
+  ) {
+    if (!out.includes(pref)) out.unshift(pref);
+    else {
+      out.splice(out.indexOf(pref), 1);
+      out.unshift(pref);
+    }
+  }
+  if (out.length > 0) return out;
+  return aboveMax ? ['steady_compounder'] : ['dip_buyer'];
 }
 
 export function setSmartBotProfilesEnabled(
@@ -3616,7 +3691,7 @@ function dipBuyerEasedFloors(
     Number.isFinite(m.minMarketCapUsd) &&
     m.minMarketCapUsd > 0
       ? Number(m.minMarketCapUsd)
-      : 500_000;
+      : 1_000_000;
   const baseH1 =
     m.minVolumeH1Usd != null &&
     Number.isFinite(m.minVolumeH1Usd) &&

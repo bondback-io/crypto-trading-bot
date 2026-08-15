@@ -5388,6 +5388,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       text-transform: lowercase;
     }
     .setup-watch-chip.is-armed { color: #fbbf24; border-color: #a16207; }
+    .setup-watch-chip.is-opened {
+      color: #6ee7b7;
+      border-color: #34d399;
+      font-weight: 700;
+      text-transform: none;
+    }
     .setup-watch-chip.is-near { color: #a5b4fc; border-color: #6366f1; }
     .setup-watch-chip.is-level { color: #86efac; border-color: #16a34a; }
     .setup-watch-chip.is-nolevel { color: #fca5a5; border-color: #b91c1c; }
@@ -8514,13 +8520,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip Buyer setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $20–200M + Majors ≥$200M prefer Steady. Pump.fun prioritized on Medium/Majors (~55% seats); non-pump secondary. Caps: minors ≤16 · medium ≤80 · majors ≤50. Vol/movement filters + dead-tape / no-levels rotate. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence 1. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
-              <div class="setup-watch-tabs" role="tablist" aria-label="Dip/Steady watch source">
-                <button type="button" role="tab" class="closed-filter-btn is-active" id="dip-watch-tab-minors" data-dip-watch-tab="minors" aria-selected="true" title="Memecoin / scanner dip watches">Minors <span class="setup-watch-tab-count" id="dip-watch-tab-minors-count">0</span></button>
-                <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-medium" data-dip-watch-tab="medium" aria-selected="false" title="Medium MC $20M–$200M Steady parks">Medium <span class="setup-watch-tab-count" id="dip-watch-tab-medium-count">0</span></button>
-                <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-majors" data-dip-watch-tab="majors" aria-selected="false" title="High-MC majors ≥$200M Steady/Dip watches">Majors <span class="setup-watch-tab-count" id="dip-watch-tab-majors-count">0</span></button>
-              </div>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8533,7 +8534,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Steady Compounder</span>
               <span class="setup-watch-title">Steady Compounder watchlist</span>
-              <p class="setup-watch-sub mb-0">Quality parks (medium/majors) eligible for Steady. Watch → arm → trigger. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Own list + quality-structure playbook. May overlap Dip’s $1M–$500M band. Watch → arm → trigger. Unwatch cools 15m.</p>
               <p id="steady-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
             </div>
             <span id="steady-watch-count" class="setup-watch-count mint">—</span>
@@ -8547,7 +8548,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">High Win-Rate</span>
               <span class="setup-watch-title">High Win-Rate watchlist</span>
-              <p class="setup-watch-sub mb-0">Quality parks eligible for HWR. Watch → arm → trigger with higher-TF confluence. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Own list + HWR quality playbook. May overlap Dip’s $1M–$500M band. Watch → arm → trigger. Unwatch cools 15m.</p>
               <p id="hwr-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
             </div>
             <span id="hwr-watch-count" class="setup-watch-count mint">—</span>
@@ -13642,8 +13643,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         data.watchReadiness = window._lastSetupWatches.watchReadiness;
       }
       renderWatchReadinessStrip(data);
-      const dipCount = document.getElementById('dip-watch-count');
-      const dipList = document.getElementById('dip-watch-list');
       const scalperCount = document.getElementById('scalper-watch-count');
       const scalperList = document.getElementById('scalper-watch-list');
       const trendCount = document.getElementById('trend-watch-count');
@@ -13697,10 +13696,61 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         );
       }
 
-      function watchRowHtml(kind, e) {
+      function hasPanelOpenTrade(e, panelPid) {
+        const mint = String(e.mint || '').trim().toLowerCase();
+        const pid = String(panelPid || '').trim();
+        if (!mint || !pid) return false;
+        const eligible =
+          Array.isArray(e.eligibleProfileIds) && e.eligibleProfileIds.length
+            ? e.eligibleProfileIds.map(function (x) {
+                return String(x);
+              })
+            : [String(e.preferredProfileId || pid)];
+        if (eligible.indexOf(pid) < 0) return false;
+        const opens = window._lastOpenPositions || [];
+        for (let i = 0; i < opens.length; i++) {
+          const p = opens[i];
+          if (!p || p.status === 'closed') continue;
+          if (String(p.mint || '').trim().toLowerCase() !== mint) continue;
+          if (String(p.tradeProfileId || '') === pid) return true;
+        }
+        return false;
+      }
+
+      function pickWatchTerminal(entries, extra, panelPid) {
+        const seen = {};
+        const out = [];
+        function push(e) {
+          const mint = String((e && e.mint) || '');
+          if (!mint || seen[mint]) return;
+          seen[mint] = true;
+          out.push(e);
+        }
+        (entries || []).forEach(function (e) {
+          if (e && e.status === 'triggered' && hasPanelOpenTrade(e, panelPid)) {
+            push(e);
+          }
+        });
+        (extra || []).concat(entries || []).forEach(function (e) {
+          if (
+            e &&
+            (e.status === 'triggered' ||
+              e.status === 'expired' ||
+              e.status === 'invalidated')
+          ) {
+            push(e);
+          }
+        });
+        return out.slice(0, 6);
+      }
+
+      function watchRowHtml(kind, e, panelProfileId) {
         const mint = String(e.mint || '').trim();
         const sym = escHtml(e.symbol || mint.slice(0, 6) || '?');
         const status = String(e.status || 'watching');
+        const panelPid = String(panelProfileId || e.preferredProfileId || '');
+        const tradeOpened =
+          status === 'triggered' && hasPanelOpenTrade(e, panelPid);
         const statusCls =
           'setup-watch-status' +
           (status === 'armed'
@@ -13795,10 +13845,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 escHtml(String(e.confluenceCount)) +
                 '</span>'
               : '';
-        // Medium/majors quality chips: armed / near / has-level / no-level / low-mov / rotating
+        // Quality chips on Steady/HWR panels only — Dip is a unified Fib/S list.
         let qualityChips = '';
         if (
           kind === 'dip' &&
+          panelPid !== 'dip_buyer' &&
           (String(e.source || '') === 'medium' ||
             String(e.source || '') === 'majors')
         ) {
@@ -13904,15 +13955,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '">' +
           escHtml(status) +
           '</span>' +
+          (tradeOpened
+            ? '<span class="setup-watch-chip is-opened" title="Open position assigned to this micro-bot">Trade Opened</span>'
+            : '') +
           qualityChips +
-          (kind === 'dip' && String(e.source || '') === 'majors'
+          (kind === 'dip' &&
+          panelPid !== 'dip_buyer' &&
+          String(e.source || '') === 'majors'
             ? '<span class="setup-watch-badge is-majors" title="High-MC majors feed (circulating MC)">' +
               (e.majorsBand
                 ? 'majors · ' + escHtml(String(e.majorsBand))
                 : 'majors') +
               '</span>'
-            : kind === 'dip' && String(e.source || '') === 'medium'
-              ? '<span class="setup-watch-badge is-majors" title="Medium MC $20–200M Steady band">' +
+            : kind === 'dip' &&
+                panelPid !== 'dip_buyer' &&
+                String(e.source || '') === 'medium'
+              ? '<span class="setup-watch-badge is-majors" title="Medium MC $20–200M quality park">' +
                 (e.majorsBand
                   ? 'medium · ' + escHtml(String(e.majorsBand))
                   : 'medium') +
@@ -13930,141 +13988,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           actions +
           '</div>'
         );
-      }
-
-      if (dipCount || dipList) {
-        const dw = data.dipWatch || { active: 0, entries: [] };
-        const tabRaw =
-          typeof window._dipWatchTab === 'string' ? window._dipWatchTab : 'minors';
-        const tab =
-          tabRaw === 'majors' || tabRaw === 'medium' ? tabRaw : 'minors';
-        const allActive = (dw.entries || []).filter(function (e) {
-          return e.status === 'watching' || e.status === 'armed';
-        });
-        const majorsN =
-          typeof dw.activeMajors === 'number'
-            ? dw.activeMajors
-            : allActive.filter(function (e) {
-                return String(e.source || '') === 'majors';
-              }).length;
-        const mediumN =
-          typeof dw.activeMedium === 'number'
-            ? dw.activeMedium
-            : allActive.filter(function (e) {
-                return String(e.source || '') === 'medium';
-              }).length;
-        const minorsN =
-          typeof dw.activeMinors === 'number'
-            ? dw.activeMinors
-            : allActive.filter(function (e) {
-                const s = String(e.source || '');
-                return s !== 'majors' && s !== 'medium';
-              }).length;
-        const minorsCountEl = document.getElementById('dip-watch-tab-minors-count');
-        const mediumCountEl = document.getElementById('dip-watch-tab-medium-count');
-        const majorsCountEl = document.getElementById('dip-watch-tab-majors-count');
-        if (minorsCountEl) minorsCountEl.textContent = String(minorsN);
-        if (mediumCountEl) mediumCountEl.textContent = String(mediumN);
-        if (majorsCountEl) majorsCountEl.textContent = String(majorsN);
-        if (dipList) {
-          const rows = allActive
-            .filter(function (e) {
-              const src = String(e.source || '');
-              if (tab === 'majors') return src === 'majors';
-              if (tab === 'medium') return src === 'medium';
-              return src !== 'majors' && src !== 'medium';
-            })
-            .sort(function (a, b) {
-              function hasLevel(e) {
-                return (
-                  (e.fib05PriceSol != null && Number(e.fib05PriceSol) > 0) ||
-                  (e.fib618PriceSol != null && Number(e.fib618PriceSol) > 0) ||
-                  (e.supportPriceSol != null && Number(e.supportPriceSol) > 0) ||
-                  e.nearKeyFib === true ||
-                  e.nearSupport === true ||
-                  (Number(e.multiTfSupportHits) || 0) > 0
-                );
-              }
-              function rank(e) {
-                if (e.status === 'armed') return 0;
-                var stagnant =
-                  e.movementActive === false ||
-                  e.qualityChip === 'low_movement' ||
-                  e.qualityChip === 'rotated_stale' ||
-                  e.qualityChip === 'no_level';
-                if (stagnant && !hasLevel(e)) return 5;
-                if (stagnant) return 4;
-                var near =
-                  e.nearKeyFib === true || e.nearSupport === true;
-                var mov =
-                  e.movementActive === true || e.qualityChip === 'active';
-                // has-level + movement before near-only / activity-only
-                if (hasLevel(e) && mov) return 1;
-                if (near) return 2;
-                if (mov) return 3;
-                if (hasLevel(e)) return 3;
-                return 4;
-              }
-              var ra = rank(a);
-              var rb = rank(b);
-              if (ra !== rb) return ra - rb;
-              // Medium/Majors: Pump.fun before non-pump at equal quality rank
-              if (tab === 'majors' || tab === 'medium') {
-                function isPumpRow(e) {
-                  if (e.isPumpFun === true) return true;
-                  var m = String(e.mint || '').toLowerCase();
-                  return m.endsWith('pump');
-                }
-                var pa = isPumpRow(a) ? 1 : 0;
-                var pb = isPumpRow(b) ? 1 : 0;
-                if (pb !== pa) return pb - pa;
-              }
-              var va = Number(a.volumeH1Usd) || 0;
-              var vb = Number(b.volumeH1Usd) || 0;
-              if (vb !== va) return vb - va;
-              var ma = Math.abs(Number(a.priceChangeH1Pct) || 0);
-              var mb = Math.abs(Number(b.priceChangeH1Pct) || 0);
-              return mb - ma;
-            })
-            .slice(0, tab === 'majors' || tab === 'medium' ? 80 : 16);
-          const terminal = (dw.recentTerminal || []).filter(function (e) {
-            const src = String(e.source || '');
-            if (tab === 'majors') return src === 'majors';
-            if (tab === 'medium') return src === 'medium';
-            return src !== 'majors' && src !== 'medium';
-          }).slice(0, 2);
-          const htmlParts = [];
-          if (rows.length) {
-            rows.forEach(function (e) {
-              htmlParts.push(watchRowHtml('dip', e));
-            });
-          } else {
-            htmlParts.push(
-              '<div class="setup-watch-empty">' +
-                (tab === 'majors'
-                  ? 'No active majors Dip/Steady setups'
-                  : tab === 'medium'
-                    ? 'No active medium Steady setups'
-                    : 'No active minors dip setups') +
-                '</div>'
-            );
-          }
-          terminal.forEach(function (e) {
-            htmlParts.push(watchRowHtml('dip', e));
-          });
-          dipList.innerHTML = htmlParts.join('');
-          if (dipCount) {
-            dipCount.textContent =
-              rows.length +
-              ' ' +
-              tab +
-              ' · ' +
-              (dw.active || majorsN + mediumN + minorsN) +
-              ' total';
-          }
-        } else if (dipCount) {
-          dipCount.textContent = (dw.active || 0) + ' active';
-        }
       }
 
       if (scalperCount || scalperList) {
@@ -14320,11 +14243,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               return e.status === 'watching' || e.status === 'armed';
             })
             .slice(0, 16);
-          const terminal = (sw.recentTerminal || []).slice(0, 2);
+          const terminal = pickWatchTerminal(
+            sw.entries || [],
+            sw.recentTerminal || [],
+            'scalper'
+          );
           const htmlParts = [];
           if (rows.length) {
             rows.forEach(function (e) {
-              htmlParts.push(watchRowHtml('scalper', e));
+              htmlParts.push(watchRowHtml('scalper', e, 'scalper'));
             });
           } else {
             let emptyMsg = 'No active scalper-family setups';
@@ -14342,7 +14269,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             );
           }
           terminal.forEach(function (e) {
-            htmlParts.push(watchRowHtml('scalper', e));
+            htmlParts.push(watchRowHtml('scalper', e, 'scalper'));
           });
           scalperList.innerHTML = htmlParts.join('');
         }
@@ -14378,11 +14305,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               return e.status === 'watching' || e.status === 'armed';
             })
             .slice(0, 16);
-          const terminal = (tw.recentTerminal || []).slice(0, 2);
+          const terminal = pickWatchTerminal(
+            tw.entries || [],
+            tw.recentTerminal || [],
+            'trend_rider'
+          );
           const htmlParts = [];
           if (rows.length) {
             rows.forEach(function (e) {
-              htmlParts.push(watchRowHtml('trend', e));
+              htmlParts.push(watchRowHtml('trend', e, 'trend_rider'));
             });
           } else {
             htmlParts.push(
@@ -14390,7 +14321,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             );
           }
           terminal.forEach(function (e) {
-            htmlParts.push(watchRowHtml('trend', e));
+            htmlParts.push(watchRowHtml('trend', e, 'trend_rider'));
           });
           trendList.innerHTML = htmlParts.join('');
         }
@@ -14440,7 +14371,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const htmlParts = [];
           if (rows.length) {
             rows.forEach(function (e) {
-              htmlParts.push(watchRowHtml('grad', e));
+              htmlParts.push(watchRowHtml('grad', e, 'migration_sniper'));
             });
           } else {
             htmlParts.push(
@@ -14448,7 +14379,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             );
           }
           terminal.forEach(function (e) {
-            htmlParts.push(watchRowHtml('grad', e));
+            htmlParts.push(watchRowHtml('grad', e, 'migration_sniper'));
           });
           gradList.innerHTML = htmlParts.join('');
         }
@@ -14506,18 +14437,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const active = (inv.entries || []).filter(function (e) {
           return e.status === 'watching' || e.status === 'armed';
         });
-        const terminal = (inv.entries || []).filter(function (e) {
-          return (
-            e.status === 'triggered' ||
-            e.status === 'expired' ||
-            e.status === 'invalidated'
-          );
-        }).slice(0, 3);
+        const terminal = pickWatchTerminal(inv.entries || [], [], pid);
         if (listEl) {
           const htmlParts = [];
           if (active.length) {
             active.forEach(function (e) {
-              htmlParts.push(watchRowHtml(kind, e));
+              htmlParts.push(watchRowHtml(kind, e, pid));
             });
           } else {
             htmlParts.push(
@@ -14527,13 +14452,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             );
           }
           terminal.forEach(function (e) {
-            htmlParts.push(watchRowHtml(kind, e));
+            htmlParts.push(watchRowHtml(kind, e, pid));
           });
           listEl.innerHTML = htmlParts.join('');
         }
         if (countEl) countEl.textContent = (inv.active || active.length) + ' active';
       }
 
+      fillProfileWatchPanel({
+        profileId: 'dip_buyer',
+        listId: 'dip-watch-list',
+        countId: 'dip-watch-count',
+        funnelId: 'dip-watch-funnel',
+        kind: 'dip',
+        empty: 'No active dip setups',
+      });
       fillProfileWatchPanel({
         profileId: 'steady_compounder',
         listId: 'steady-watch-list',
@@ -14566,19 +14499,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         kind: 'scalper',
         empty: 'No active Reversal setups',
       });
-      const dipFunnelEl = document.getElementById('dip-watch-funnel');
-      if (dipFunnelEl && data.byProfile && data.byProfile.funnels && data.byProfile.funnels.dip_buyer) {
-        const f = data.byProfile.funnels.dip_buyer;
-        dipFunnelEl.textContent =
-          'Funnel: watch ' +
-          (f.sent_to_watch || 0) +
-          ' → arm ' +
-          (f.armed || 0) +
-          ' → ready ' +
-          (f.trigger_ready || 0) +
-          ' → open ' +
-          (f.opened || 0);
-      }
       const trendFunnelEl = document.getElementById('trend-watch-funnel');
       if (trendFunnelEl && data.byProfile && data.byProfile.funnels && data.byProfile.funnels.trend_rider) {
         const f = data.byProfile.funnels.trend_rider;
@@ -14610,78 +14530,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         refreshSmartMirrorWatchlist().catch(function () {});
       }
     }
-    // Must be on window before bindDipWatchSourceTabs / first applyTab.
     window.refreshSetupWatches = refreshSetupWatches;
-
-    (function bindDipWatchSourceTabs() {
-      const KEY_TAB = 'dipWatchTab';
-      const minorsBtn = document.getElementById('dip-watch-tab-minors');
-      const mediumBtn = document.getElementById('dip-watch-tab-medium');
-      const majorsBtn = document.getElementById('dip-watch-tab-majors');
-      if (!minorsBtn || !majorsBtn) return;
-      if (minorsBtn.dataset.bound === '1') return;
-      minorsBtn.dataset.bound = '1';
-      majorsBtn.dataset.bound = '1';
-      if (mediumBtn) mediumBtn.dataset.bound = '1';
-      function applyTab(tab) {
-        const t =
-          tab === 'majors' || tab === 'medium' ? tab : 'minors';
-        window._dipWatchTab = t;
-        minorsBtn.classList.toggle('is-active', t === 'minors');
-        majorsBtn.classList.toggle('is-active', t === 'majors');
-        if (mediumBtn) mediumBtn.classList.toggle('is-active', t === 'medium');
-        minorsBtn.setAttribute('aria-selected', t === 'minors' ? 'true' : 'false');
-        majorsBtn.setAttribute('aria-selected', t === 'majors' ? 'true' : 'false');
-        if (mediumBtn) {
-          mediumBtn.setAttribute(
-            'aria-selected',
-            t === 'medium' ? 'true' : 'false'
-          );
-        }
-        try {
-          localStorage.setItem(KEY_TAB, t);
-        } catch (_) {}
-        if (typeof window.refreshSetupWatches === 'function') {
-          window.refreshSetupWatches();
-        } else if (
-          typeof renderSetupWatchLists === 'function' &&
-          window._lastSetupWatches
-        ) {
-          renderSetupWatchLists(window._lastSetupWatches);
-        }
-      }
-      try {
-        let stored = localStorage.getItem(KEY_TAB);
-        // Migrate legacy checkbox / majors-only prefs → tab
-        if (stored !== 'majors' && stored !== 'minors' && stored !== 'medium') {
-          const legacyOnly = localStorage.getItem('dipWatchMajorsOnly');
-          const legacyMajors = localStorage.getItem('dipWatchShowMajors');
-          const legacyNormal = localStorage.getItem('dipWatchShowNormal');
-          if (
-            legacyOnly === '1' ||
-            (legacyMajors === '1' && legacyNormal === '0')
-          ) {
-            stored = 'majors';
-          } else {
-            stored = 'minors';
-          }
-        }
-        applyTab(stored || 'minors');
-      } catch (_) {
-        applyTab('minors');
-      }
-      minorsBtn.addEventListener('click', function () {
-        applyTab('minors');
-      });
-      if (mediumBtn) {
-        mediumBtn.addEventListener('click', function () {
-          applyTab('medium');
-        });
-      }
-      majorsBtn.addEventListener('click', function () {
-        applyTab('majors');
-      });
-    })();
 
     async function refreshEntrySkipDiag() {
       const el = document.getElementById('entry-skip-diag');
@@ -22757,6 +22606,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (typeof paintOpenPositionsTables === 'function') {
         paintOpenPositionsTables();
+      }
+      if (typeof renderSetupWatchLists === 'function' && window._lastSetupWatches) {
+        renderSetupWatchLists(window._lastSetupWatches);
       }
       if (typeof renderZionOpenTrades === 'function') {
         renderZionOpenTrades();

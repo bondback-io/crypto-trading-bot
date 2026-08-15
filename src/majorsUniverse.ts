@@ -1,6 +1,7 @@
 /**
  * Mid-MC + high-MC discovery — Jupiter multi-category merge.
- * Medium $20M–$200M + Majors ≥$200M → Dip/Steady watch (prefer Steady quality reclaim).
+ * Medium $20M–$200M + Majors ≥$200M → Dip family watch (Dip owns $1M–$500M identity;
+ * Steady/HWR still multi-admit via quality playbook). Pump.fun preferred in CYCLE seats.
  * Pump.fun preferred in CYCLE seats (~55%); non-pump secondary. Never Scalper Mode B.
  * Additive: launch/pump scanner for Scalper-family stays unchanged.
  */
@@ -545,12 +546,25 @@ export function getMajorsUniverseStatus(): {
 }
 
 /**
- * Soft prefer: Medium + Majors → Steady Compounder when enabled;
- * Steady-off → Dip Buyer. Never Scalper.
+ * Soft prefer: inside Dip $1M–$500M → dip_buyer. Above Dip max → Steady when enabled.
+ * Never Scalper.
  */
 export function majorsPreferredProfileId(
-  _band: MajorsMcBand | UniverseWatchBand
+  _band: MajorsMcBand | UniverseWatchBand,
+  marketCapUsd?: number | null
 ): string {
+  try {
+    const { isInDipBuyerMcBand, isAboveDipBuyerMaxMc } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (isInDipBuyerMcBand(marketCapUsd)) {
+      return 'dip_buyer';
+    }
+    if (!isAboveDipBuyerMaxMc(marketCapUsd)) {
+      return 'dip_buyer';
+    }
+  } catch {
+    /* soft */
+  }
   try {
     if (config.tradeProfiles?.profiles?.steady_compounder !== false) {
       return 'steady_compounder';
@@ -816,7 +830,7 @@ export async function runMajorsUniversePass(): Promise<number> {
     const { offerDipWatchFromCandidate } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     for (const c of list) {
-      const prefer = majorsPreferredProfileId(c.watchBand);
+      const prefer = majorsPreferredProfileId(c.watchBand, c.marketCapUsd);
       offerDipWatchFromCandidate({
         mint: c.mint,
         symbol: c.symbol,

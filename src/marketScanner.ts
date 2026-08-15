@@ -1242,10 +1242,19 @@ export async function selectScannerCandidates(
     const scalperConfluentNow =
       scalperMcEligible && ranked.nearMultiTfSupport === true;
 
-    // Dip-wins overlap (1.2.248): MC ≥ Dip floor + Fib/S or dip DNA → offer Dip
-    // early so Mode B park cannot starve the Dip expectancy path. Fib-dip → Dip;
-    // Mode B keeps reclaim-without-Fib / lower band.
-    const dipFloorUsd = 500_000;
+    // Dip-wins overlap: MC in Dip $1M–$500M + Fib/S or dip DNA → offer Dip
+    // early so Mode B park cannot starve the Dip expectancy path.
+    let dipFloorUsd = 1_000_000;
+    let dipMaxUsd = 500_000_000;
+    try {
+      const { getDipBuyerMcBand } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const band = getDipBuyerMcBand();
+      dipFloorUsd = band.min;
+      dipMaxUsd = band.max;
+    } catch {
+      /* catalog defaults */
+    }
     const h1Ch =
       event.priceChangeH1Pct != null && Number.isFinite(event.priceChangeH1Pct)
         ? Number(event.priceChangeH1Pct)
@@ -1254,6 +1263,7 @@ export async function selectScannerCandidates(
     const dipWins =
       event.marketCapUsd != null &&
       event.marketCapUsd >= dipFloorUsd &&
+      event.marketCapUsd <= dipMaxUsd &&
       (ranked.nearKeyFib === true ||
         ((ranked.nearSupport === true || hasSrHint) && dipDropOk));
     let dipOfferedEarly = false;

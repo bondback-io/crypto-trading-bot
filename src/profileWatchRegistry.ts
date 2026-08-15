@@ -233,7 +233,7 @@ function profilesForFamilyRow(
   if (tagged.length) return tagged;
   const pref = String(raw.preferredProfileId || '').trim();
   const familyIds = [...WATCH_FAMILY_PROFILE_IDS[family]];
-  if (pref && (familyIds as string[]).includes(pref)) return [pref];
+  if (pref && (familyIds as string[]).includes(pref) && family !== 'dip') return [pref];
   try {
     return resolveWatchEligibleProfileIds({
       family,
@@ -242,6 +242,8 @@ function profilesForFamilyRow(
         family === 'dip' &&
         (String(raw.source || '') === 'majors' ||
           String(raw.source || '') === 'medium'),
+      marketCapUsd:
+        raw.marketCapUsd != null ? Number(raw.marketCapUsd) : null,
     });
   } catch {
     return pref ? [pref] : familyIds.slice(0, 1);
@@ -450,6 +452,7 @@ export function stampEligibleOnWatchEntry(
   entry: {
     preferredProfileId?: string | null;
     source?: string;
+    marketCapUsd?: number | null;
     eligibleProfileIds?: string[];
   }
 ): string[] {
@@ -460,9 +463,43 @@ export function stampEligibleOnWatchEntry(
       family === 'dip' &&
       (String(entry.source || '') === 'majors' ||
         String(entry.source || '') === 'medium'),
+    marketCapUsd: entry.marketCapUsd,
   });
   entry.eligibleProfileIds = ids;
   return ids;
+}
+
+export function keepWatchTerminalForUi(opts: {
+  status: string;
+  mint: string;
+  updatedAt: number;
+  now?: number;
+  terminalMs: number;
+}): boolean {
+  const st = String(opts.status || '');
+  if (st !== 'triggered' && st !== 'expired' && st !== 'invalidated') {
+    return false;
+  }
+  const now = opts.now ?? Date.now();
+  if (now - opts.updatedAt <= opts.terminalMs) return true;
+  return st === 'triggered' && mintHasOpenPaperOrLiveTrade(opts.mint);
+}
+
+export function mintHasOpenPaperOrLiveTrade(mint: string): boolean {
+  try {
+    const { paperTrader } =
+      require('./paperTrader') as typeof import('./paperTrader');
+    const key = String(mint || '').trim().toLowerCase();
+    if (!key) return false;
+    return (paperTrader.getOpenPositions() || []).some(
+      (p) =>
+        p &&
+        p.status !== 'closed' &&
+        String(p.mint || '').trim().toLowerCase() === key
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Apply trigger confluence onto a watch row. Returns false when the count gate blocks. */

@@ -282,6 +282,15 @@ function pruneTerminal(): void {
       w.status === 'invalidated'
     ) {
       if (now - w.updatedAt > 20 * 60_000) {
+        if (w.status === 'triggered') {
+          try {
+            const { mintHasOpenPaperOrLiveTrade } =
+              require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+            if (mintHasOpenPaperOrLiveTrade(mint)) continue;
+          } catch {
+            /* optional */
+          }
+        }
         watches.delete(mint);
         peakProgress.delete(mint);
         lastMcRefreshAt.delete(mint);
@@ -851,13 +860,26 @@ export function getMigrationGradWatchStatus(limit = 20): {
   const all = [...watches.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   const entries = all.slice(0, limit);
   const recentTerminal = all
-    .filter(
-      (e) =>
-        (e.status === 'triggered' ||
-          e.status === 'expired' ||
-          e.status === 'invalidated') &&
-        now - e.updatedAt <= TERMINAL_UI_MS
-    )
+    .filter((e) => {
+      try {
+        const { keepWatchTerminalForUi } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        return keepWatchTerminalForUi({
+          status: e.status,
+          mint: e.mint,
+          updatedAt: e.updatedAt,
+          now,
+          terminalMs: TERMINAL_UI_MS,
+        });
+      } catch {
+        return (
+          (e.status === 'triggered' ||
+            e.status === 'expired' ||
+            e.status === 'invalidated') &&
+          now - e.updatedAt <= TERMINAL_UI_MS
+        );
+      }
+    })
     .slice(0, 8);
   return {
     active: entries.filter(

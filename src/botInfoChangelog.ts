@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.369',
+    title: 'Unify Dip Buyer watchlist ($1M–$500M)',
+    sections: ['microbots', 'scanners', 'tradecraft'],
+    items: [
+      'Dip Buyer is one Watchlist (no Minors/Medium/Majors tabs). Original Fib/S watch → arm → reclaim trigger across MC $1M–$500M, min TA confluence 1.',
+      'Dip-band names assign to Dip Buyer. Steady and HWR keep their own lists and quality playbooks and may still overlap that band; exclusive winner stays at open.',
+      'Triggered rows show Trade Opened when a live/paper position is open and assigned to that micro-bot.',
+    ],
+  },
+  {
     version: '1.2.368',
     title: 'Per-profile watch, arm, and TA confluence',
     sections: ['microbots', 'scanners', 'tradecraft', 'learning'],
