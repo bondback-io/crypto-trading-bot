@@ -150,3 +150,25 @@ export async function withTimeout<T>(
     if (timer) clearTimeout(timer);
   }
 }
+
+/** Like withTimeout, but returns `fallback` instead of throwing. */
+export async function withTimeoutFallback<T>(
+  work: Promise<T>,
+  ms: number,
+  fallback: T,
+  label: string
+): Promise<{ value: T; timedOut: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.then((value) => ({ value, timedOut: false })),
+      new Promise<{ value: T; timedOut: boolean }>((resolve) => {
+        timer = setTimeout(() => {
+          resolve({ value: fallback, timedOut: true });
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}

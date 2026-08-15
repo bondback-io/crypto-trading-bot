@@ -22,7 +22,7 @@ import {
 import {
   createPollInFlightLock,
   noteSignalBlockedByGate,
-  withTimeout,
+  withTimeoutFallback,
 } from './signalIntakeStats';
 import { getRpcRoleFor } from './rpcRouting';
 import {
@@ -172,7 +172,26 @@ let firstPollTimer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 const SCANNER_POLL_HANG_MS = 45_000;
 const SCANNER_POLL_BUDGET_MS = 40_000;
+const JUPITER_MERGE_BUDGET_MS = 8_000;
+const SELECT_HEALTHY_BUDGET_MS = 15_000;
 const scannerPollLock = createPollInFlightLock('marketScanner', SCANNER_POLL_HANG_MS);
+
+export function scannerEnrichLimits(healthy: boolean): {
+  enrichBudget: number;
+  enrichConcurrency: number;
+} {
+  return healthy
+    ? { enrichBudget: 10, enrichConcurrency: 3 }
+    : { enrichBudget: 6, enrichConcurrency: 2 };
+}
+
+export function shouldStampScannerLastPollAt(input: {
+  universeN: number;
+  pickedN: number;
+  ticksRan: boolean;
+}): boolean {
+  return input.universeN > 0 || input.pickedN > 0 || input.ticksRan;
+}
 let lastPollAt: number | null = null;
 /** Short backoff after defer/adaptive skip — do not burn full poll interval. */
 let lastDeferAt = 0;
@@ -1015,25 +1034,38 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
       const solUsd = await fetchSolUsdPrice();
       const jupLimitRaw = cfg.jupiterLimit ?? 50;
       const jupLimit = jupLimitRaw;
-      const jup = await fetchJupiterPumpTrending({
-        category: cfg.jupiterCategory ?? 'toptraded',
-        limit: jupLimit,
-        pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
-        mergeIntervals: cfg.jupiterMergeIntervals === true,
-        preferOrganicVolume: cfg.preferOrganicVolume !== false,
-        solUsd,
-      });
-      let added = 0;
-      for (const e of jup) {
-        if (!e?.mint) continue;
-        if (!byMint.has(e.mint)) {
-          byMint.set(e.mint, e);
-          added += 1;
-        }
-      }
-      console.log(
-        `[marketScanner] universe dex/gmgn=${dexCount} + jupiter=${jup.length} (new ${added}) → ${byMint.size}`
+      const jupRes = await withTimeoutFallback(
+        fetchJupiterPumpTrending({
+          category: cfg.jupiterCategory ?? 'toptraded',
+          limit: jupLimit,
+          pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
+          mergeIntervals: cfg.jupiterMergeIntervals === true,
+          preferOrganicVolume: cfg.preferOrganicVolume !== false,
+          solUsd,
+        }),
+        JUPITER_MERGE_BUDGET_MS,
+        [],
+        'jupiterTrending'
       );
+      if (jupRes.timedOut) {
+        logger.warn(
+          'MarketScanner',
+          `Jupiter trending merge timed out ${JUPITER_MERGE_BUDGET_MS}ms — keeping Dex/GMGN universe`
+        );
+      } else {
+        const jup = jupRes.value;
+        let added = 0;
+        for (const e of jup) {
+          if (!e?.mint) continue;
+          if (!byMint.has(e.mint)) {
+            byMint.set(e.mint, e);
+            added += 1;
+          }
+        }
+        console.log(
+          `[marketScanner] universe dex/gmgn=${dexCount} + jupiter=${jup.length} (new ${added}) → ${byMint.size}`
+        );
+      }
     } catch (err) {
       logger.warn('MarketScanner', 'Jupiter trending merge failed', errorToMeta(err));
     }
@@ -1073,14 +1105,14 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
  * Enriches only a crude top-N (early-cap) with bounded parallelism.
  */
 export async function selectScannerCandidates(
-  events: LaunchEvent[]
+  events: LaunchEvent[],
+  opts?: { deadlineAt?: number }
 ): Promise<Array<ScannerCandidate & { launch: LaunchEvent }>> {
   const cfg = scannerCfg();
   const now = Date.now();
   const maxOut = Math.max(1, cfg.maxCandidatesPerPoll);
-  // Enrich budget: keep Secondary CU breathing room (was 16 → Alchemy CU storms).
-  const enrichBudget = Math.min(6, Math.max(maxOut, Math.min(maxOut * 2, 6)));
-  const enrichConcurrency = 2;
+  const healthy = isSignalsRpcHealthy();
+  const { enrichBudget, enrichConcurrency } = scannerEnrichLimits(healthy);
 
   // Prefetch regime (cached)
   try {
@@ -1118,7 +1150,11 @@ export async function selectScannerCandidates(
     .slice(0, enrichBudget);
 
   type Enriched = ScannerCandidate & { launch: LaunchEvent };
-  const enriched = await mapPool(prefiltered, enrichConcurrency, async (raw) => {
+  const enriched = await mapPool(
+    prefiltered,
+    enrichConcurrency,
+    async (raw) => {
+    if (opts?.deadlineAt != null && Date.now() >= opts.deadlineAt) return null;
     // Re-check queue mid-enrich so wallet path stays priority under real backlog.
     // Healthy Data: only yield at the hard backlog threshold (not depth 4).
     const midYieldAt = isSignalsRpcHealthy()
@@ -1346,7 +1382,9 @@ export async function selectScannerCandidates(
       launch: event,
     };
     return row;
-  });
+    },
+    { deadlineAt: opts?.deadlineAt }
+  );
 
   enriched.sort((a, b) => b.rankScore - a.rankScore);
   const out = enriched.slice(0, maxOut);
@@ -1591,20 +1629,49 @@ export async function runScannerPollOnce(): Promise<number> {
   }
   try {
     lastError = null;
-    const universe = await withTimeout(
+    let timedOut = false;
+    const collectRes = await withTimeoutFallback(
       collectScannerUniverse(),
       SCANNER_POLL_BUDGET_MS,
+      [] as LaunchEvent[],
       'collectScannerUniverse'
     );
-    const selectBudget = Math.max(
-      8_000,
-      SCANNER_POLL_BUDGET_MS - (Date.now() - t0)
-    );
-    const picked = await withTimeout(
-      selectScannerCandidates(universe),
-      selectBudget,
-      'selectScannerCandidates'
-    );
+    if (collectRes.timedOut) {
+      timedOut = true;
+      lastSkipReason = `collectScannerUniverse timeout ${SCANNER_POLL_BUDGET_MS}ms`;
+      noteSignalBlockedByGate('scanner_poll_timeout');
+      logger.warn(
+        'MarketScanner',
+        'Collect timed out — continuing with empty/partial universe so watch ticks still run'
+      );
+    }
+    const universe = collectRes.value;
+    const healthy = isSignalsRpcHealthy();
+    const selectBudget = healthy
+      ? SELECT_HEALTHY_BUDGET_MS
+      : Math.max(8_000, SCANNER_POLL_BUDGET_MS - (Date.now() - t0));
+    const deadlineAt = Date.now() + selectBudget;
+    let picked: Awaited<ReturnType<typeof selectScannerCandidates>> = [];
+    try {
+      picked = await selectScannerCandidates(universe, { deadlineAt });
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (/timeout/i.test(lastError)) {
+        timedOut = true;
+        lastSkipReason = lastError;
+        noteSignalBlockedByGate('scanner_poll_timeout');
+      }
+      logger.warn(
+        'MarketScanner',
+        'Select failed — continuing with partial candidates',
+        errorToMeta(err)
+      );
+    }
+    if (Date.now() >= deadlineAt && !timedOut && universe.length > 0) {
+      timedOut = true;
+      lastSkipReason = `selectScannerCandidates budget ${selectBudget}ms`;
+      noteSignalBlockedByGate('scanner_poll_timeout');
+    }
     let handed = 0;
     // Non-blocking hand-off: fire handlers without serial await so the
     // scanner poll lock releases quickly; mint locks still serialize buys.
@@ -1629,11 +1696,11 @@ export async function runScannerPollOnce(): Promise<number> {
           });
         });
     }
-    lastPollAt = Date.now();
-    lastPollMs = lastPollAt - t0;
+    lastPollMs = Date.now() - t0;
     console.log(
       `[marketScanner] poll ${universe.length} launches → ${picked.length} candidates ` +
-        `(handed ${handed}) in ${lastPollMs}ms`
+        `(handed ${handed}) in ${lastPollMs}ms` +
+        (timedOut ? ' (partial/timeout)' : '')
     );
 
     let skipSide = false;
@@ -1645,6 +1712,15 @@ export async function runScannerPollOnce(): Promise<number> {
       /* */
     }
     if (skipSide) {
+      if (
+        shouldStampScannerLastPollAt({
+          universeN: universe.length,
+          pickedN: picked.length,
+          ticksRan: false,
+        })
+      ) {
+        lastPollAt = Date.now();
+      }
       return handed;
     }
 
@@ -1848,6 +1924,15 @@ export async function runScannerPollOnce(): Promise<number> {
       }
     } catch (err) {
       logger.warn('MarketScanner', 'Grad watch tick failed', errorToMeta(err));
+    }
+    if (
+      shouldStampScannerLastPollAt({
+        universeN: universe.length,
+        pickedN: picked.length,
+        ticksRan: true,
+      })
+    ) {
+      lastPollAt = Date.now();
     }
     return handed;
   } catch (err) {

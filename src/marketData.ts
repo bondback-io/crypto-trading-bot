@@ -1336,12 +1336,18 @@ async function fetchJson(
 export async function mapPool<T, R>(
   items: T[],
   concurrency: number,
-  fn: (item: T) => Promise<R | null>
+  fn: (item: T) => Promise<R | null>,
+  opts?: { deadlineAt?: number }
 ): Promise<R[]> {
   const out: R[] = [];
   let i = 0;
+  let stop = false;
   async function worker() {
-    while (i < items.length) {
+    while (i < items.length && !stop) {
+      if (opts?.deadlineAt != null && Date.now() >= opts.deadlineAt) {
+        stop = true;
+        break;
+      }
       const idx = i++;
       const result = await fn(items[idx]);
       if (result != null) out.push(result);

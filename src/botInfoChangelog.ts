@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.358',
+    title: 'Restore scanner handoff when polls run long',
+    sections: ['scanners', 'overview'],
+    items: [
+      'A slow Dex/Jupiter collect no longer zeros the poll — Jupiter is capped at 8s and watch ticks still run so Dip/Grad/Scalper can open.',
+      'When Data is healthy the scanner enriches 10 candidates (concurrency 3) with a 15s select budget; CU-safe 6/2 stays when Data is not healthy. 16/hr selectivity is unchanged.',
+    ],
+  },
+  {
     version: '1.2.357',
     title: 'Stop post-Ready Alchemy spike from freezing Favourites',
     sections: ['copy', 'scanners', 'overview'],
