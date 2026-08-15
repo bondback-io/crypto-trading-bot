@@ -54,6 +54,8 @@ import {
   qualityLaneMicrocapNapReason,
   evaluateQualityTop10SoftAllowForGates,
   getTradeProfileDefinition,
+  isSwingLaneMustKnowMc,
+  swingLaneFillMinMarketCapUsd,
   type TradeProfileId,
 } from './tradeProfiles';
 import {
@@ -840,9 +842,17 @@ export async function executeBuy(
       : undefined;
 
   // Hard entry-MC floor after MC is resolved (all paths: paper, live, migration, re-buy).
-  // Known MC below min still hard-rejects. Unknown after fallbacks soft-passes (Dex 429).
-  // Risk OFF: floors disabled — allow unknown / any MC.
+  // Known MC below min still hard-rejects. Unknown after fallbacks: MS/scalper
+  // soft-pass (Dex 429); Dip/Trend hard-skip. Risk OFF: floors disabled.
   const minEntryMc = effectiveMinMarketCapUsd();
+  const swingMustKnowMc = isSwingLaneMustKnowMc(meta?.tradeProfileId);
+  const fillMinMc =
+    minEntryMc > 0
+      ? Math.max(
+          minEntryMc,
+          swingLaneFillMinMarketCapUsd(meta?.tradeProfileId)
+        )
+      : 0;
   if (
     minEntryMc > 0 &&
     (entryMarketCapUsd == null || !(entryMarketCapUsd > 0))
@@ -868,6 +878,21 @@ export async function executeBuy(
   }
   if (minEntryMc > 0) {
     if (entryMarketCapUsd == null || !(entryMarketCapUsd > 0)) {
+      if (swingMustKnowMc) {
+        const reason =
+          `Skipped — ${meta?.tradeProfileId || 'swing'} market cap unknown ` +
+          `(lane min $${Math.round(fillMinMc)})`;
+        logger.info('Trade', 'FILTER_SKIP entry MC unknown', {
+          mint: mint.slice(0, 12),
+          symbol,
+          reason,
+          minEntryMc: fillMinMc,
+        });
+        console.log(
+          `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason}`
+        );
+        return { success: false, mode: config.mode, error: reason };
+      }
       logger.info('Trade', 'FILTER_SKIP entry MC soft-pass unknown', {
         mint: mint.slice(0, 12),
         symbol,
@@ -877,7 +902,7 @@ export async function executeBuy(
         `[trade] Entry MC soft-pass ${symbol}: unknown after curve/Dex/cache ` +
           `(min $${minEntryMc}) — allowing fill`
       );
-      // Soft-pass — do not block; known-below-min still hard below
+      // Soft-pass — MS/scalper only; known-below-min still hard below
     } else if (
       isQualityLaneMicrocap(meta?.tradeProfileId, entryMarketCapUsd, {
         specialtyFeed: meta?.specialtyFeed,
@@ -895,9 +920,9 @@ export async function executeBuy(
       });
       console.log(`[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${nap}`);
       return { success: false, mode: config.mode, error: nap };
-    } else if (entryMarketCapUsd < minEntryMc) {
+    } else if (entryMarketCapUsd < fillMinMc) {
       const reason =
-        `Skipped — market cap too low ($${Math.round(entryMarketCapUsd)} < $${minEntryMc})`;
+        `Skipped — market cap too low ($${Math.round(entryMarketCapUsd)} < $${fillMinMc})`;
       logger.info('Trade', 'FILTER_SKIP entry MC', {
         mint: mint.slice(0, 12),
         symbol,
@@ -906,7 +931,7 @@ export async function executeBuy(
       });
       console.log(
         `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
-          `(gate MC $${Math.round(entryMarketCapUsd)}, min $${minEntryMc})`
+          `(gate MC $${Math.round(entryMarketCapUsd)}, min $${fillMinMc})`
       );
       return { success: false, mode: config.mode, error: reason };
     }
@@ -932,7 +957,7 @@ export async function executeBuy(
   }
   if (minEntryMc > 0 && entryMarketCapUsd != null) {
     console.log(
-      `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${minEntryMc}` +
+      `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${fillMinMc}` +
         (maxEntryMc > 0 ? ` · ≤ max $${maxEntryMc}` : '')
     );
   }

@@ -1590,7 +1590,10 @@ export function considerDipWatchSetup(input: {
   }
 
   const mc = input.marketCapUsd;
-  if (mc != null && mc > 0 && mc < minMc && !isQuality) {
+  if (
+    !isQuality &&
+    (mc == null || !Number.isFinite(Number(mc)) || Number(mc) <= 0 || Number(mc) < minMc)
+  ) {
     noteDipFunnel('mc');
     noteDipFunnel('vol_liq_mc');
     return null;

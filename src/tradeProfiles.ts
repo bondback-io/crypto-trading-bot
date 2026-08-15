@@ -3302,12 +3302,14 @@ export function evaluateLaneEntryFloors(
   const laneMinMc = Math.max(globalMin, profileMin);
 
   // Hard lane MC floor. Unknown MC + profile Min MC Override → hard fail on
-  // discretionary (migration / early enrich often lack MC; soft-pass let Trend
-  // stamp $19k mints despite a $1M override). Armed setup watches soft-pass
-  // unknown MC — global $8k + anti-rug still apply at fill (1.2.269).
+  // discretionary. Dip / Trend never soft-pass unknown MC even when armed
+  // (Marshal-class ghost fills). MS/scalper armed watches may still soft-pass
+  // unknown MC — global $8k + anti-rug still apply at fill.
   if (laneMinMc > 0) {
     if (profileMin > 0 && (mc == null || mc <= 0)) {
-      if (!armedSetupWatchSoft) {
+      const swingMustKnowMc =
+        def.id === 'dip_buyer' || def.id === 'trend_rider';
+      if (!armedSetupWatchSoft || swingMustKnowMc) {
         return {
           ok: false,
           reason: `${def.name} Min MC Override $${Math.round(profileMin)} — MC unknown`,
@@ -3436,6 +3438,29 @@ export function evaluateLaneEntryFloors(
   }
 
   return { ok: true };
+}
+
+/** Dip / Trend must prove MC at fill and lane floors — never unknown-MC soft-pass. */
+export function isSwingLaneMustKnowMc(
+  profileId: string | null | undefined
+): boolean {
+  const id = String(profileId || '');
+  return id === 'dip_buyer' || id === 'trend_rider';
+}
+
+/** Profile Min MC for Dip/Trend fill (0 for other lanes). */
+export function swingLaneFillMinMarketCapUsd(
+  profileId: string | null | undefined
+): number {
+  if (!isSwingLaneMustKnowMc(profileId)) return 0;
+  try {
+    const n = Number(
+      resolveTradeProfileDefinition(profileId).match?.minMarketCapUsd
+    );
+    return n > 0 && Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**

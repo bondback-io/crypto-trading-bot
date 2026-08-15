@@ -2,7 +2,13 @@
  * Smoke: expectancy bottleneck patches (MS late-chase, event exits, Dip disc, MS partial).
  * Run: npx tsx scripts/smokeExpectancyBottleneckPatches.ts
  */
-import { evaluateFreshMigrationEligibility } from '../src/tradeProfiles';
+import {
+  evaluateFreshMigrationEligibility,
+  evaluateLaneEntryFloors,
+  getTradeProfileDefinition,
+  isSwingLaneMustKnowMc,
+  swingLaneFillMinMarketCapUsd,
+} from '../src/tradeProfiles';
 import {
   getLateChaseMaxShare,
   isArmedReclaimRelief,
@@ -259,6 +265,95 @@ const msShareNeutral = shouldThrottleMigrationAdmit({
 check(
   'MS attention cap idle when family neutral',
   msShareNeutral.throttle === false
+);
+
+const dipDef = getTradeProfileDefinition('dip_buyer');
+const dip350 = {
+  ...dipDef,
+  match: { ...dipDef.match, minMarketCapUsd: 350_000 },
+};
+const dipUnknown = evaluateLaneEntryFloors(dip350, {
+  armedWatch: true,
+  setupWatchFamily: 'dip',
+  marketCapUsd: null,
+});
+check(
+  'armed Dip unknown MC hard-fails',
+  dipUnknown.ok === false && /mc unknown/i.test(String(dipUnknown.reason || '')),
+  dipUnknown.reason
+);
+
+const dipLow = evaluateLaneEntryFloors(dip350, {
+  armedWatch: true,
+  setupWatchFamily: 'dip',
+  marketCapUsd: 20_000,
+});
+check(
+  'armed Dip $20k fails vs $350k lane min',
+  dipLow.ok === false && /lane min/i.test(String(dipLow.reason || '')),
+  dipLow.reason
+);
+
+const dipOk = evaluateLaneEntryFloors(dip350, {
+  armedWatch: true,
+  setupWatchFamily: 'dip',
+  marketCapUsd: 400_000,
+});
+check(
+  'armed Dip $400k passes MC floor',
+  dipOk.ok === true ||
+    (dipOk.ok === false &&
+      !/mc unknown|lane min/i.test(String(dipOk.reason || ''))),
+  dipOk.reason
+);
+
+const trendUnknown = evaluateLaneEntryFloors(
+  getTradeProfileDefinition('trend_rider'),
+  {
+    armedWatch: true,
+    setupWatchFamily: 'trend',
+    marketCapUsd: null,
+  }
+);
+check(
+  'armed Trend unknown MC hard-fails',
+  trendUnknown.ok === false &&
+    /mc unknown/i.test(String(trendUnknown.reason || '')),
+  trendUnknown.reason
+);
+
+const msDef = getTradeProfileDefinition('migration_sniper');
+const msWithMin = {
+  ...msDef,
+  match: { ...msDef.match, minMarketCapUsd: 15_000 },
+};
+const msUnknown = evaluateLaneEntryFloors(msWithMin, {
+  armedWatch: true,
+  setupWatchFamily: 'grad',
+  marketCapUsd: null,
+  isMigration: true,
+});
+check(
+  'armed Grad MS unknown MC still soft-pass',
+  msUnknown.ok === true,
+  msUnknown.reason
+);
+
+check(
+  'isSwingLaneMustKnowMc dip + trend only',
+  isSwingLaneMustKnowMc('dip_buyer') &&
+    isSwingLaneMustKnowMc('trend_rider') &&
+    !isSwingLaneMustKnowMc('migration_sniper') &&
+    !isSwingLaneMustKnowMc('scalper')
+);
+check(
+  'swingLaneFillMinMarketCapUsd MS is 0',
+  swingLaneFillMinMarketCapUsd('migration_sniper') === 0
+);
+check(
+  'swingLaneFillMinMarketCapUsd Dip ≥ $350k',
+  swingLaneFillMinMarketCapUsd('dip_buyer') >= 350_000,
+  String(swingLaneFillMinMarketCapUsd('dip_buyer'))
 );
 
 if (failed) {

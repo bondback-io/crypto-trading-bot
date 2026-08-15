@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.366',
+    title: 'Block Dip ghost fills without MC',
+    sections: ['tradecraft', 'microbots', 'scanners'],
+    items: [
+      'Dip watch minors reject unknown market cap the same as below-min — no Marshal-class ghost admits.',
+      'Dip Buyer and Trend Rider hard-fail unknown MC even when armed; governed fail-open treats Min MC Override as safety-hard.',
+      'Fill enforces Dip/Trend lane min (not only global $8k) and hard-skips unknown MC. MS/scalper unknown-MC soft-pass stays for Dex 429.',
+    ],
+  },
+  {
     version: '1.2.365',
     title: 'Stop STATUS refresh timeout warning',
     sections: ['overview'],
