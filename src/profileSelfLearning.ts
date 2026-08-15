@@ -1803,6 +1803,31 @@ export function buildEntryLearningCandidates(
     }
   }
 
+  const armedZeroMfe = losers.filter(
+    (e) =>
+      e.zeroMfeAfterArmedOpen === true ||
+      ((e.armedWatch === true || e.entryPath === 'armed_trigger') &&
+        (Number(e.maxRunupPct) || 0) <= 0.05)
+  ).length;
+  if (
+    armedZeroMfe / Math.max(1, losers.length) >= 0.22 &&
+    (profileId === 'dip_buyer' ||
+      profileId === 'trend_rider' ||
+      profileId === 'steady_compounder' ||
+      profileId === 'high_win_rate' ||
+      profileId === 'scalper')
+  ) {
+    const cur = Number(currentMatch.minTaPlaybookConfluences);
+    const base = Number.isFinite(cur) ? cur : 1;
+    const next = clamp(base + 1, 0, 4);
+    if (next > base) {
+      out.push({
+        summary: `Raise min TA playbook confluences → ${next} (armed zero-MFE)`,
+        patch: { match: { minTaPlaybookConfluences: next } },
+      });
+    }
+  }
+
   // Small loosen entry deltas when evidence supports (healthy WR, floors too tight)
   const winners = episodes.filter((e) => (e.pnlPct || 0) > 0);
   const winRate = winners.length / Math.max(1, episodes.length);
@@ -2065,6 +2090,16 @@ export function clampLearningPatch(
     } else {
       delete match.minTokenAgeHours;
     }
+  }
+
+  if (match.minTaPlaybookConfluences != null) {
+    const cat = Number(catalogMatch.minTaPlaybookConfluences);
+    const base = Number.isFinite(cat) ? cat : 0;
+    match.minTaPlaybookConfluences = clamp(
+      Math.round(Number(match.minTaPlaybookConfluences)),
+      Math.max(0, base - 1),
+      Math.min(4, base + 1)
+    );
   }
 
   let pclFamilyOverride = patch.pclFamilyOverride;

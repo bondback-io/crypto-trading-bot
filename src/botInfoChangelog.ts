@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.368',
+    title: 'Per-profile watch, arm, and TA confluence',
+    sections: ['microbots', 'scanners', 'tradecraft', 'learning'],
+    items: [
+      'Each micro-bot has its own Watchlist tab. Tokens can appear on every list they are eligible for (no exclusive watch assignment).',
+      'Arming Enabled and Min TA Playbook Confluences live on each Micro Bot card. OFF keeps the legacy spot open path; ON waits for watch → arm → trigger.',
+      'Armed opens require the configured TA tool-count at trigger. Learning records arm/trigger quality without wiping existing episodes.',
+    ],
+  },
+  {
     version: '1.2.367',
     title: 'Unstick Trend Rider watch and buys',
     sections: ['tradecraft', 'microbots', 'scanners'],

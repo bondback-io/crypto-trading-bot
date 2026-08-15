@@ -4816,6 +4816,18 @@ export function createServer(): express.Application {
         trendFunnel: getTrendFunnelCounters(),
         migSniperFunnel: getMigrationSniperFunnel(),
         diagnostics,
+        byProfile: (() => {
+          try {
+            const { getProfileWatchInventory, getProfileWatchFunnels } =
+              require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+            return {
+              inventory: getProfileWatchInventory(),
+              funnels: getProfileWatchFunnels(),
+            };
+          } catch {
+            return { inventory: {}, funnels: {} };
+          }
+        })(),
         watchReadiness: (() => {
           try {
             const { getWatchSystemsReadiness } =

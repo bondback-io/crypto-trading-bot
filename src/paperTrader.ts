@@ -442,6 +442,9 @@ export interface Position {
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
   dipWatchTriggered?: boolean;
+  watchToArmMs?: number;
+  armToTriggerMs?: number;
+  confluenceCountAtTrigger?: number;
   /** Armed setup-watch handoff */
   armedWatch?: boolean;
   entryPath?: 'armed_trigger' | 'discretionary' | string;
@@ -899,6 +902,19 @@ function maybeRecordLearningEpisode(
       setupWatchFamily: position.setupWatchFamily,
       dipWatchTriggered: position.dipWatchTriggered === true,
       scalperWatchTriggered: position.scalperWatchTriggered === true,
+      watchToArmMs: position.watchToArmMs,
+      armToTriggerMs: position.armToTriggerMs,
+      confluenceCountAtTrigger:
+        position.confluenceCountAtTrigger != null
+          ? Number(position.confluenceCountAtTrigger)
+          : Array.isArray(position.taToolsPassedAtEntry)
+            ? position.taToolsPassedAtEntry.length
+            : undefined,
+      zeroMfeAfterArmedOpen:
+        (position.armedWatch === true ||
+          position.scalperWatchTriggered === true ||
+          position.dipWatchTriggered === true) &&
+        metrics.maxRunupPct <= 0.05,
       mirrorWalletId: position.mirrorWalletId,
       mirrorWalletName: position.mirrorWalletName,
       learningTags: (() => {
@@ -1191,6 +1207,21 @@ function maybeRecordLearningEpisode(
       return;
     }
     if (episodeRow) {
+      try {
+        const { noteProfileWatchOpenQuality } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchOpenQuality({
+          profileId,
+          armedWatch:
+            position.armedWatch === true ||
+            position.scalperWatchTriggered === true ||
+            position.dipWatchTriggered === true,
+          lateChase: position.lateChaseAtEntry === true,
+          maxRunupPct: metrics.maxRunupPct,
+        });
+      } catch {
+        /* optional */
+      }
       try {
         const { recordInfluencerMirrorOutcome } =
           require('./influencerMirrorLearning') as typeof import('./influencerMirrorLearning');

@@ -87,6 +87,12 @@ export interface ProfileLearningEpisode {
   scalperWatchTriggered?: boolean;
   dipWatchTriggered?: boolean;
   setupWatchFamily?: 'scalper' | 'dip' | 'grad' | string;
+  /** Watch lifecycle learning (additive) */
+  watchToArmMs?: number;
+  armToTriggerMs?: number;
+  confluenceCountAtTrigger?: number;
+  falseArmExpired?: boolean;
+  zeroMfeAfterArmedOpen?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;

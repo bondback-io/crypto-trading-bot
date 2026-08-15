@@ -1203,6 +1203,58 @@ export interface TradeSignal {
 }
 
 /**
+ * Arming ON: park unarmed scanner/copy assignment onto the profile watch list.
+ * Armed handoffs and Arming OFF keep the legacy spot path.
+ */
+function maybeParkArmingOpen(
+  profileId: string | null | undefined,
+  signal: TradeSignal
+): { park: boolean; reason: string } {
+  try {
+    const {
+      shouldParkUnarmedOpen,
+      parkSignalOnProfileWatch,
+      noteProfileWatchFunnel,
+    } = require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    const reasonBits = Array.isArray(signal.scannerReasons)
+      ? signal.scannerReasons.join(' ')
+      : '';
+    const armed =
+      signal.armedWatch === true ||
+      signal.dipWatchTriggered === true ||
+      /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered|armedWatch/i.test(
+        reasonBits
+      );
+    const gate = shouldParkUnarmedOpen({
+      profileId,
+      armedWatch: armed,
+    });
+    if (!gate.park) return gate;
+    parkSignalOnProfileWatch({
+      profileId,
+      mint: signal.mint,
+      symbol: signal.symbol,
+      name: signal.name,
+      marketCapUsd: signal.metrics?.marketCapUsd ?? signal.sourceEntryMcUsd,
+      volumeH1Usd: signal.metrics?.volumeH1Usd,
+      volumeM5Usd: signal.metrics?.volumeM5Usd,
+      holderCount: signal.metrics?.holderCountEstimate,
+      nearKeyFib: signal.nearKeyFib === true,
+      nearSupport: signal.nearSupport === true,
+      nearMultiTfSupport: signal.nearMultiTfSupport === true,
+      srConfluenceScore: signal.srConfluenceScore,
+      supportTfHits: signal.supportTfHits,
+      curveProgressPct: signal.bondingCurve?.progressPct ?? null,
+      dropFromPeakPct: signal.dropFromPeakPct,
+    });
+    noteProfileWatchFunnel(String(profileId || ''), 'blocked', 'unarmed_spot_parked');
+    return gate;
+  } catch {
+    return { park: false, reason: 'park_eval_fail_open' };
+  }
+}
+
+/**
  * Additive Profile TA Playbook gate — Soft nudges size; Hard may skip.
  * Fail-open on throw. Stamps BuyOptions for episode learning.
  */
@@ -4476,6 +4528,28 @@ async function executeSignalBuy(
   }
 
   {
+    const park = maybeParkArmingOpen(
+      String(profileAssignment.profileId || 'default'),
+      signal
+    );
+    if (park.park) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, park.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: park.reason,
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: park.reason,
+      });
+      markScannerCooldown(signal.mint, false);
+      console.log(`[monitor] ${park.reason}`);
+      return;
+    }
+  }
+
+  {
     const taGate = applyProfileTaPlaybookGate(
       String(profileAssignment.profileId || 'default'),
       signal,
@@ -4878,6 +4952,24 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
         skipReason: volSkip.reason,
       });
       console.log(`[monitor] ${volSkip.reason}`);
+      return;
+    }
+  }
+
+  {
+    const park = maybeParkArmingOpen(
+      buyOpts.tradeProfileId ||
+        String(profileAssignment.profileId || 'migration_sniper'),
+      signal
+    );
+    if (park.park) {
+      finishBuy(event.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, park.reason);
+      annotateActivityFeedByMint(event.mint, {
+        tradeStatus: 'skipped',
+        skipReason: park.reason,
+      });
+      console.log(`[monitor] ${park.reason}`);
       return;
     }
   }
@@ -5973,6 +6065,23 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
         skipReason: dbrVolSkip.reason,
       });
       console.log(`[monitor] ${dbrVolSkip.reason}`);
+      return;
+    }
+  }
+
+  {
+    const park = maybeParkArmingOpen(
+      String(profileAssignment.profileId || 'default'),
+      signal
+    );
+    if (park.park) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, park.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: park.reason,
+      });
+      console.log(`[monitor] ${park.reason}`);
       return;
     }
   }

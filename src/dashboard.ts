@@ -8497,10 +8497,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="watchlist-panel is-active space-y-3" id="watchlist-panel-setups" data-watchlist-panel="setups" role="tabpanel" aria-labelledby="watchlist-tab-setups">
         <div class="watch-setup-subtabs closed-filter" role="tablist" aria-label="Setup watch type">
-          <button type="button" role="tab" class="closed-filter-btn is-active" data-watch-setup-tab="dip" aria-selected="true" onclick="setWatchlistSetupTab('dip')">Dip / Steady</button>
-          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="modeb" aria-selected="false" onclick="setWatchlistSetupTab('modeb')">Mode B</button>
+          <button type="button" role="tab" class="closed-filter-btn is-active" data-watch-setup-tab="dip" aria-selected="true" onclick="setWatchlistSetupTab('dip')">Dip</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="steady" aria-selected="false" onclick="setWatchlistSetupTab('steady')">Steady</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="hwr" aria-selected="false" onclick="setWatchlistSetupTab('hwr')">HWR</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="modeb" aria-selected="false" onclick="setWatchlistSetupTab('modeb')">Scalper</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="momentum" aria-selected="false" onclick="setWatchlistSetupTab('momentum')">MB</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="reversal" aria-selected="false" onclick="setWatchlistSetupTab('reversal')">Reversal</button>
           <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="trend" aria-selected="false" onclick="setWatchlistSetupTab('trend')">Trend</button>
-          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="grad" aria-selected="false" onclick="setWatchlistSetupTab('grad')">Grad</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="grad" aria-selected="false" onclick="setWatchlistSetupTab('grad')">Migration</button>
           <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="mirror" aria-selected="false" onclick="setWatchlistSetupTab('mirror')">Mirror</button>
           <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="skips" aria-selected="false" onclick="setWatchlistSetupTab('skips')">Skips</button>
         </div>
@@ -8508,8 +8512,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
-              <span class="setup-watch-kicker">Dip Buyer · Steady Compounder</span>
-              <span class="setup-watch-title">Dip/Steady setup watchlist</span>
+              <span class="setup-watch-kicker">Dip Buyer</span>
+              <span class="setup-watch-title">Dip Buyer setup watchlist</span>
               <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $20–200M + Majors ≥$200M prefer Steady. Pump.fun prioritized on Medium/Majors (~55% seats); non-pump secondary. Caps: minors ≤16 · medium ≤80 · majors ≤50. Vol/movement filters + dead-tape / no-levels rotate. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
               <div class="setup-watch-tabs" role="tablist" aria-label="Dip/Steady watch source">
@@ -8523,18 +8527,74 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="dip-watch-list" class="setup-watch-list text-slate-400">No active dip setups</div>
         </div>
         </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="steady" role="tabpanel">
+<div id="steady-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Steady Compounder</span>
+              <span class="setup-watch-title">Steady Compounder watchlist</span>
+              <p class="setup-watch-sub mb-0">Quality parks (medium/majors) eligible for Steady. Watch → arm → trigger. Unwatch cools 15m.</p>
+              <p id="steady-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+            </div>
+            <span id="steady-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="steady-watch-list" class="setup-watch-list text-slate-400">No active Steady setups</div>
+        </div>
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="hwr" role="tabpanel">
+<div id="hwr-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">High Win-Rate</span>
+              <span class="setup-watch-title">High Win-Rate watchlist</span>
+              <p class="setup-watch-sub mb-0">Quality parks eligible for HWR. Watch → arm → trigger with higher-TF confluence. Unwatch cools 15m.</p>
+              <p id="hwr-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+            </div>
+            <span id="hwr-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="hwr-watch-list" class="setup-watch-list text-slate-400">No active HWR setups</div>
+        </div>
+        </div>
         <div class="watch-setup-panel" data-watch-setup-panel="modeb" role="tabpanel">
 <div id="scalper-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
-              <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
-              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$800k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps under $150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
+              <span class="setup-watch-kicker">Scalper</span>
+              <span class="setup-watch-title">Scalper setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$800k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps under $150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
               <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+) in $150k–$800k. Else watch → arm near S → trigger on reclaim/hold. Microcaps &lt;$150k → Migration / Reversal. Mutual exclusion with Dip watch. Unwatch cools 15m.</p>
               <p id="setup-watch-diag-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Armed — · open rate —</p>
             </div>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="scalper-watch-list" class="setup-watch-list text-slate-400">No active scalper-family setups</div>
+        </div>
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="momentum" role="tabpanel">
+<div id="momentum-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Momentum Burst</span>
+              <span class="setup-watch-title">Momentum Burst watchlist</span>
+              <p class="setup-watch-sub mb-0">Mode B family tokens eligible for MB. Faster triggers, tighter invalidation. Unwatch cools 15m.</p>
+              <p id="momentum-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+            </div>
+            <span id="momentum-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="momentum-watch-list" class="setup-watch-list text-slate-400">No active MB setups</div>
+        </div>
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="reversal" role="tabpanel">
+<div id="reversal-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Reversal Scalper</span>
+              <span class="setup-watch-title">Reversal Scalper watchlist</span>
+              <p class="setup-watch-sub mb-0">Mode B / microcap tokens eligible for Reversal. Unwatch cools 15m.</p>
+              <p id="reversal-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+            </div>
+            <span id="reversal-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="reversal-watch-list" class="setup-watch-list text-slate-400">No active Reversal setups</div>
         </div>
         </div>
         <div class="watch-setup-panel" data-watch-setup-panel="trend" role="tabpanel">
@@ -13715,13 +13775,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               : '');
         }
         const reason =
-          e.lastReason
+          (e.lastReason || e.blockedReason)
             ? '<span class="setup-watch-mc setup-watch-reason" title="' +
-              escAttr(String(e.lastReason)) +
+              escAttr(String(e.lastReason || e.blockedReason || '')) +
+              (e.confluenceCount != null
+                ? ' · TA ' + e.confluenceCount +
+                  (Array.isArray(e.playbookPassed) && e.playbookPassed.length
+                    ? ' (' + e.playbookPassed.join(', ') + ')'
+                    : '')
+                : '') +
               '">' +
-              escHtml(String(e.lastReason).slice(0, 48)) +
+              escHtml(String(e.lastReason || e.blockedReason).slice(0, 48)) +
+              (e.confluenceCount != null
+                ? ' · TA ' + e.confluenceCount
+                : '') +
               '</span>'
-            : '';
+            : e.confluenceCount != null
+              ? '<span class="setup-watch-mc setup-watch-reason">TA ' +
+                escHtml(String(e.confluenceCount)) +
+                '</span>'
+              : '';
         // Medium/majors quality chips: armed / near / has-level / no-level / low-mov / rotating
         let qualityChips = '';
         if (
@@ -14380,6 +14453,145 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           gradList.innerHTML = htmlParts.join('');
         }
       }
+
+      function fillProfileWatchPanel(opts) {
+        const pid = opts.profileId;
+        const listEl = document.getElementById(opts.listId);
+        const countEl = document.getElementById(opts.countId);
+        const funnelEl = document.getElementById(opts.funnelId);
+        const kind = opts.kind || 'dip';
+        const inv =
+          (data.byProfile && data.byProfile.inventory && data.byProfile.inventory[pid]) ||
+          { active: 0, entries: [] };
+        const funnel =
+          (data.byProfile && data.byProfile.funnels && data.byProfile.funnels[pid]) ||
+          null;
+        if (funnelEl && funnel) {
+          const blocked = funnel.blocked || {};
+          const topBlock = Object.keys(blocked)
+            .sort(function (a, b) {
+              return (blocked[b] || 0) - (blocked[a] || 0);
+            })
+            .slice(0, 2)
+            .map(function (k) {
+              return k + '×' + blocked[k];
+            })
+            .join(' ');
+          const late =
+            funnel.armedOpens > 0 && funnel.lateChaseArmedOpens != null
+              ? ' · late-chase ' +
+                Math.round((funnel.lateChaseArmedOpens / funnel.armedOpens) * 100) +
+                '%'
+              : '';
+          const zm =
+            funnel.armedOpens > 0
+              ? ' · 0-MFE armed ' + funnel.zeroMfeArmed + '/' + funnel.armedOpens
+              : '';
+          funnelEl.textContent =
+            'Funnel: watch ' +
+            (funnel.sent_to_watch || 0) +
+            ' → arm ' +
+            (funnel.armed || 0) +
+            ' → ready ' +
+            (funnel.trigger_ready || 0) +
+            ' → open ' +
+            (funnel.opened || 0) +
+            ' · exp ' +
+            (funnel.expired || 0) +
+            (topBlock ? ' · block ' + topBlock : '') +
+            late +
+            zm;
+        }
+        if (!listEl && !countEl) return;
+        const active = (inv.entries || []).filter(function (e) {
+          return e.status === 'watching' || e.status === 'armed';
+        });
+        const terminal = (inv.entries || []).filter(function (e) {
+          return (
+            e.status === 'triggered' ||
+            e.status === 'expired' ||
+            e.status === 'invalidated'
+          );
+        }).slice(0, 3);
+        if (listEl) {
+          const htmlParts = [];
+          if (active.length) {
+            active.forEach(function (e) {
+              htmlParts.push(watchRowHtml(kind, e));
+            });
+          } else {
+            htmlParts.push(
+              '<div class="setup-watch-empty">' +
+                escHtml(opts.empty || 'No active setups') +
+                '</div>'
+            );
+          }
+          terminal.forEach(function (e) {
+            htmlParts.push(watchRowHtml(kind, e));
+          });
+          listEl.innerHTML = htmlParts.join('');
+        }
+        if (countEl) countEl.textContent = (inv.active || active.length) + ' active';
+      }
+
+      fillProfileWatchPanel({
+        profileId: 'steady_compounder',
+        listId: 'steady-watch-list',
+        countId: 'steady-watch-count',
+        funnelId: 'steady-watch-funnel',
+        kind: 'dip',
+        empty: 'No active Steady setups',
+      });
+      fillProfileWatchPanel({
+        profileId: 'high_win_rate',
+        listId: 'hwr-watch-list',
+        countId: 'hwr-watch-count',
+        funnelId: 'hwr-watch-funnel',
+        kind: 'dip',
+        empty: 'No active HWR setups',
+      });
+      fillProfileWatchPanel({
+        profileId: 'momentum_burst',
+        listId: 'momentum-watch-list',
+        countId: 'momentum-watch-count',
+        funnelId: 'momentum-watch-funnel',
+        kind: 'scalper',
+        empty: 'No active MB setups',
+      });
+      fillProfileWatchPanel({
+        profileId: 'reversal_scalper',
+        listId: 'reversal-watch-list',
+        countId: 'reversal-watch-count',
+        funnelId: 'reversal-watch-funnel',
+        kind: 'scalper',
+        empty: 'No active Reversal setups',
+      });
+      const dipFunnelEl = document.getElementById('dip-watch-funnel');
+      if (dipFunnelEl && data.byProfile && data.byProfile.funnels && data.byProfile.funnels.dip_buyer) {
+        const f = data.byProfile.funnels.dip_buyer;
+        dipFunnelEl.textContent =
+          'Funnel: watch ' +
+          (f.sent_to_watch || 0) +
+          ' → arm ' +
+          (f.armed || 0) +
+          ' → ready ' +
+          (f.trigger_ready || 0) +
+          ' → open ' +
+          (f.opened || 0);
+      }
+      const trendFunnelEl = document.getElementById('trend-watch-funnel');
+      if (trendFunnelEl && data.byProfile && data.byProfile.funnels && data.byProfile.funnels.trend_rider) {
+        const f = data.byProfile.funnels.trend_rider;
+        trendFunnelEl.textContent =
+          'Funnel: watch ' +
+          (f.sent_to_watch || 0) +
+          ' → arm ' +
+          (f.armed || 0) +
+          ' → ready ' +
+          (f.trigger_ready || 0) +
+          ' → open ' +
+          (f.opened || 0);
+      }
     }
     window.renderSetupWatchLists = renderSetupWatchLists;
 
@@ -14912,6 +15124,37 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             return er[key] != null ? er[key] : off[key];
           };
           const baseEntryFields = [
+            selectField({
+              key: 'armingEnabled',
+              label: 'Arming Enabled',
+              title:
+                'ON = watch → arm → trigger before open (TA confluence at trigger). OFF = legacy spot / assignment open path.',
+              match: true,
+              kind: 'boolean',
+              value:
+                matchValue('armingEnabled') === true
+                  ? 'true'
+                  : matchValue('armingEnabled') === false
+                    ? 'false'
+                    : '',
+              options: [
+                { value: '', label: 'Default' },
+                { value: 'true', label: 'ON' },
+                { value: 'false', label: 'OFF' },
+              ],
+            }),
+            numField({
+              key: 'minTaPlaybookConfluences',
+              label: 'Min TA Playbook Confluences',
+              title:
+                'Integer count of passed Profile TA tools required at trigger. 0 = off. Distinct from Profile TA min confluence score.',
+              match: true,
+              step: 1,
+              min: 0,
+              max: 6,
+              placeholder: 'default',
+              value: matchValue('minTaPlaybookConfluences'),
+            }),
             numField({
               key: 'minConviction',
               label: 'Min conviction',
@@ -15287,7 +15530,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '<div class="tp-params" data-tp-id="' + escHtml(p.id) + '">' +
                 '<div class="tp-param-section">' +
                   '<p class="tp-param-title">Entry / lane fit</p>' +
-                  '<p class="tp-param-hint">Blank fields fall back to the official profile defaults.</p>' +
+                  '<p class="tp-param-hint">Arming OFF = legacy spot open path. Arming ON waits for watch → arm → trigger (and Min TA Playbook Confluences at trigger). Blank fields fall back to official defaults.</p>' +
                   entryFields.join('') +
                 '</div>' +
                 specialtyFeedHtml +
@@ -19963,7 +20206,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     })();
 
     function setWatchlistSetupTab(tab, opts) {
-      const allowed = ['dip', 'modeb', 'trend', 'grad', 'mirror', 'skips'];
+      const allowed = ['dip', 'steady', 'hwr', 'modeb', 'momentum', 'reversal', 'trend', 'grad', 'mirror', 'skips'];
       const next = allowed.indexOf(tab) >= 0 ? tab : 'dip';
       const shouldLoad = !opts || opts.load !== false;
       try {
@@ -20620,6 +20863,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const n = raw === '' || raw == null ? 0 : Number(raw);
           if (inp.getAttribute('data-match') === '1') return;
           exitRules[k] = Number.isFinite(n) && n > 0 ? n : 0;
+          return;
+        }
+        // Min TA Playbook Confluences: 0 is valid (off). Empty = omit (catalog).
+        if (k === 'minTaPlaybookConfluences') {
+          if (raw === '' || raw == null) return;
+          const n = Number(raw);
+          if (!Number.isFinite(n)) return;
+          match[k] = Math.max(0, Math.min(6, Math.floor(n)));
           return;
         }
         // Entry/lane numeric overrides: empty / 0 clears → catalog / none

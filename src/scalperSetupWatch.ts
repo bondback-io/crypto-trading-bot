@@ -51,6 +51,11 @@ export interface ScalperWatchEntry {
   armedAt: number | null;
   expiresAt: number;
   preferredProfileId: ScalperFamilyProfileId;
+  /** Non-exclusive: scalper-family profiles this row may appear under. */
+  eligibleProfileIds?: string[];
+  confluenceCount?: number | null;
+  playbookPassed?: string[];
+  triggerBlockReason?: string;
   marketCapUsd?: number;
   volumeH1Usd?: number;
   volumeM5Usd?: number;
@@ -108,6 +113,25 @@ function noteModeBFunnel(
   n = 1
 ): void {
   modeBFunnel[key] = (modeBFunnel[key] || 0) + n;
+}
+
+function stampScalperWatchEligibility(
+  w: ScalperWatchEntry,
+  isNew = false
+): void {
+  try {
+    const { stampEligibleOnWatchEntry, noteProfileWatchFunnel } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    const ids = stampEligibleOnWatchEntry('scalper', w);
+    if (isNew) {
+      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      if (w.status === 'armed') {
+        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+      }
+    }
+  } catch {
+    w.eligibleProfileIds = [w.preferredProfileId || 'scalper'];
+  }
 }
 
 /** Public funnel counter for scanner / diagnostics. */
@@ -644,12 +668,24 @@ export function considerScalperWatchSetup(input: {
       existing.lastReason = `prefer ${nextPref} at support`;
     }
     existing.targetEntries = buildTargetEntries(existing);
+    stampScalperWatchEligibility(existing);
     noteModeBFunnel('offered');
     return existing;
   }
 
-  // Already at confluence — enrich path should buy immediately; skip watch
-  if (input.nearMultiTfSupport === true) return null;
+  // Already at confluence — enrich path buys immediately unless Arming is ON.
+  if (input.nearMultiTfSupport === true) {
+    let armOn = true;
+    try {
+      const { isProfileArmingEnabled } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const pref = pickPreferredProfile(input);
+      armOn = isProfileArmingEnabled(pref);
+    } catch {
+      armOn = true;
+    }
+    if (!armOn) return null;
+  }
 
   const now = Date.now();
   const nearArmed =
@@ -685,6 +721,7 @@ export function considerScalperWatchSetup(input: {
   entry.targetEntries = buildTargetEntries(entry);
   if (nearArmed) stampWatchPlan(entry);
   watches.set(input.mint, entry);
+  stampScalperWatchEligibility(entry, true);
   noteModeBFunnel('offered');
   console.log(
     `[scalper-watch] ${entry.status.toUpperCase()} ${entry.symbol} ` +
@@ -933,6 +970,16 @@ export async function tickScalperSetupWatches(opts?: {
         preferredProfileId: w.preferredProfileId,
         honorExplicitPrefer: false,
       });
+      stampScalperWatchEligibility(w);
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        for (const id of w.eligibleProfileIds || [w.preferredProfileId]) {
+          noteProfileWatchFunnel(id, 'armed');
+        }
+      } catch {
+        /* optional */
+      }
       stampWatchPlan(w);
       try {
         const { recordSetupWatchEvent } =
@@ -1071,6 +1118,15 @@ export async function tickScalperSetupWatches(opts?: {
         });
       }
       stampWatchPlan(w);
+      try {
+        const { applyTriggerConfluenceToWatch } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        if (!applyTriggerConfluenceToWatch(w.preferredProfileId, w)) {
+          continue;
+        }
+      } catch {
+        /* fail-open */
+      }
       w.lastReason = reclaim ? 'reclaim trigger' : 'confluence hold';
       const c = buildHandoff(w);
       if (handOffScannerCandidate(c, { bypassCooldown: true })) {

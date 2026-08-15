@@ -96,6 +96,9 @@ const FEATURE_NAMES = [
   'patch_pcl_perm_delta',
   'patch_pcl_early_partial_delta',
   'patch_has_pcl',
+  // Arm/trigger quality (append-only for model fail-open)
+  'armed_zero_mfe_share',
+  'avg_confluence_count',
 ] as const;
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -236,6 +239,15 @@ export function buildWindowFeatures(
     0,
     0,
     0,
+    // Arm/trigger quality
+    episodes.filter((e) => e.zeroMfeAfterArmedOpen === true).length /
+      Math.max(1, episodes.filter((e) => e.armedWatch === true || e.entryPath === 'armed_trigger').length),
+    (() => {
+      const cs = episodes
+        .map((e) => e.confluenceCountAtTrigger)
+        .filter((v): v is number => v != null && Number.isFinite(v));
+      return cs.length ? mean(cs) / 6 : 0;
+    })(),
   ];
 }
 

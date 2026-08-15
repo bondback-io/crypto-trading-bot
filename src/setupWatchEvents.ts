@@ -13,7 +13,11 @@ export type SetupWatchEventKind =
   | 'handoff_failed'
   | 'touch_fail'
   | 'lock_acquired'
-  | 'lock_released';
+  | 'lock_released'
+  | 'watch_admitted'
+  | 'trigger_ready'
+  | 'false_arm_expired'
+  | 'opened_zero_mfe';
 
 export interface SetupWatchEvent {
   at: number;
@@ -47,6 +51,15 @@ export function recordSetupWatchEvent(
   if (!row.mint) return;
   events.unshift(row);
   if (events.length > MAX) events.length = MAX;
+  try {
+    if (row.kind === 'trigger_opened' && row.profileId) {
+      const { noteProfileWatchFunnel } =
+        require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+      noteProfileWatchFunnel(row.profileId, 'opened');
+    }
+  } catch {
+    /* optional */
+  }
   const tag =
     row.family === 'scalper'
       ? 'scalper-watch'

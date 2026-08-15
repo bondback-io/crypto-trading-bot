@@ -389,6 +389,17 @@ export interface TradeProfileMatchRules {
   forbiddenEntryStyles?: string[];
   /** When true, late_chase hard-zeros this profile */
   hardLateChase?: boolean;
+  /**
+   * When true, this profile parks on its watch list and only opens on
+   * armed + strategy trigger (+ min TA playbook confluence count).
+   * When false, legacy spot / assignment open remains available.
+   */
+  armingEnabled?: boolean;
+  /**
+   * Integer count of passed Profile TA playbook tools required at trigger.
+   * 0 = off (no count gate). Distinct from playbook minConfluenceScore (0–100).
+   */
+  minTaPlaybookConfluences?: number;
 }
 
 /** Persisted user edits on top of official catalog defaults */
@@ -523,7 +534,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     ],
     priority: 0,
     defaultEnabled: true,
-    match: { always: true },
+    match: { always: true, armingEnabled: false, minTaPlaybookConfluences: 0 },
     exitRules: {},
     // Empty = inherit all globally ON modules (even when Smart Bot Profiles is ON)
   },
@@ -571,6 +582,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['late_chase'],
       hardLateChase: false,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 1,
     },
     exitRules: {
       forceScalp: true,
@@ -648,6 +661,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['level_momentum_expansion', 'late_chase'],
       hardLateChase: true,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 2,
     },
     exitRules: {
       shortTermStrategyId: 'post_run_dip',
@@ -736,6 +751,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['scalp_reclaim_burst', 'late_chase'],
       hardLateChase: true,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 2,
     },
     exitRules: {
       forceScalp: false,
@@ -803,6 +820,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['support_dip_reclaim'],
       hardLateChase: false,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 0,
     },
     exitRules: {
       takeProfitPctMin: 10,
@@ -907,6 +926,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['late_chase', 'scalp_reclaim_burst'],
       hardLateChase: true,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 2,
     },
     exitRules: {
       takeProfitPctMin: 40,
@@ -987,6 +1008,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['support_dip_reclaim'],
       hardLateChase: false,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 1,
     },
     exitRules: {
       forceScalp: true,
@@ -1069,6 +1092,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['scalp_reclaim_burst'],
       hardLateChase: false,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 2,
     },
     exitRules: {
       forceScalp: false,
@@ -1129,6 +1154,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       allowedEntryStyles: ['scalp_reclaim_burst', 'support_dip_reclaim'],
       forbiddenEntryStyles: ['trend_pullback_continuation', 'late_chase'],
       hardLateChase: false,
+      armingEnabled: true,
+      minTaPlaybookConfluences: 1,
     },
     exitRules: {
       forceScalp: true,
@@ -1194,6 +1221,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       forbiddenEntryStyles: ['late_chase'],
       hardLateChase: true,
+      armingEnabled: false,
+      minTaPlaybookConfluences: 0,
     },
     exitRules: {
       forceScalp: false,
@@ -1243,6 +1272,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     defaultEnabled: true,
     match: {
       // No auto-match flags — Place Trade stamps zion; lane fight skips this id
+      armingEnabled: false,
+      minTaPlaybookConfluences: 0,
     },
     exitRules: {},
     modules: {
@@ -1779,6 +1810,81 @@ export function getTradeProfileEnabledFlags(): Record<string, boolean> {
     out[p.id] = state.profiles[p.id] !== false;
   }
   return out;
+}
+
+/** Family → profiles that share that watch engine (multi-admit, not exclusive). */
+export const WATCH_FAMILY_PROFILE_IDS = {
+  dip: ['dip_buyer', 'steady_compounder', 'high_win_rate'],
+  scalper: ['scalper', 'momentum_burst', 'reversal_scalper'],
+  trend: ['trend_rider'],
+  grad: ['migration_sniper'],
+} as const;
+
+export type WatchFamilyId = keyof typeof WATCH_FAMILY_PROFILE_IDS;
+
+/**
+ * Catalog/override Arming Enabled. Missing → catalog default (resolved match).
+ * Never crash-closed.
+ */
+export function isProfileArmingEnabled(
+  profileId: string | null | undefined
+): boolean {
+  const id = String(profileId || '').trim();
+  if (!id) return false;
+  try {
+    return resolveTradeProfileDefinition(id).match.armingEnabled === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Integer TA playbook tool-count gate at trigger. 0 = off.
+ * Distinct from Profile TA minConfluenceScore (0–100).
+ */
+export function getMinTaPlaybookConfluences(
+  profileId: string | null | undefined
+): number {
+  try {
+    const n = Number(
+      resolveTradeProfileDefinition(profileId).match.minTaPlaybookConfluences
+    );
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.max(0, Math.min(6, Math.floor(n)));
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Non-exclusive watch routing: enabled family profiles, plus preferred.
+ * Dip minors stay dip_buyer-only so quality parks cannot steal minor seats.
+ */
+export function resolveWatchEligibleProfileIds(opts: {
+  family: WatchFamilyId;
+  preferredProfileId?: string | null;
+  dipQualityPark?: boolean;
+}): string[] {
+  const familyIds = [...WATCH_FAMILY_PROFILE_IDS[opts.family]];
+  let flags: Record<string, boolean> = {};
+  try {
+    flags = getTradeProfileEnabledFlags();
+  } catch {
+    flags = {};
+  }
+  const enabled = familyIds.filter((id) => flags[id] !== false);
+  if (opts.family === 'dip' && opts.dipQualityPark !== true) {
+    return enabled.includes('dip_buyer') ? ['dip_buyer'] : ['dip_buyer'];
+  }
+  const out: string[] = [];
+  const pref = String(opts.preferredProfileId || '').trim();
+  if (pref && (familyIds as string[]).includes(pref) && flags[pref] !== false) {
+    out.push(pref);
+  }
+  for (const id of enabled) {
+    if (!out.includes(id)) out.push(id);
+  }
+  return out.length > 0 ? out : familyIds.slice(0, 1);
 }
 
 export function setSmartBotProfilesEnabled(

@@ -51,6 +51,11 @@ export interface GradWatchEntry {
   holderGrowthPct?: number | null;
   buyPressureUsd?: number | null;
   lastReason?: string;
+  preferredProfileId?: string;
+  eligibleProfileIds?: string[];
+  confluenceCount?: number | null;
+  playbookPassed?: string[];
+  triggerBlockReason?: string;
   source?: string;
   /** Wall-clock when known MC first went below LOW_MC_USD (cleared when recovered) */
   belowLowMcSinceMs?: number | null;
@@ -90,6 +95,27 @@ function capGradWatchSidecars(): Record<string, number> {
   return { gradUnwatchCooldown: unwatchCooldownUntil.size };
 }
 registerCacheSweep(capGradWatchSidecars);
+
+function stampGradWatchEligibility(
+  w: GradWatchEntry,
+  isNew = false
+): void {
+  try {
+    const { stampEligibleOnWatchEntry, noteProfileWatchFunnel } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    w.preferredProfileId = w.preferredProfileId || 'migration_sniper';
+    const ids = stampEligibleOnWatchEntry('grad', w);
+    if (isNew) {
+      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      if (w.status === 'armed') {
+        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+      }
+    }
+  } catch {
+    w.eligibleProfileIds = ['migration_sniper'];
+    w.preferredProfileId = w.preferredProfileId || 'migration_sniper';
+  }
+}
 
 /** Live MS funnel tallies (process lifetime) — watch → arm → trigger → blockers */
 export interface MigrationSniperFunnel {
@@ -349,6 +375,7 @@ export function considerMigrationGradWatch(input: {
     existing.buyPressureUsd = input.buyPressureUsd ?? existing.buyPressureUsd;
     const peak = Math.max(peakProgress.get(input.mint) ?? 0, progress);
     peakProgress.set(input.mint, peak);
+    stampGradWatchEligibility(existing);
     return existing;
   }
 
@@ -383,8 +410,10 @@ export function considerMigrationGradWatch(input: {
       : quality
         ? `armed @ ${progress.toFixed(0)}%`
         : `watching @ ${progress.toFixed(0)}%`,
+    preferredProfileId: 'migration_sniper',
   };
   watches.set(input.mint, entry);
+  stampGradWatchEligibility(entry, true);
   peakProgress.set(input.mint, progress);
   funnel.watchAdmit += 1;
   if (entry.status === 'armed') funnel.armed += 1;
@@ -477,6 +506,15 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
     return false;
   }
   const c = buildHandoff(w, { postGrad: true });
+  try {
+    const { applyTriggerConfluenceToWatch } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    if (!applyTriggerConfluenceToWatch('migration_sniper', w)) {
+      return false;
+    }
+  } catch {
+    /* fail-open */
+  }
   if (handOffScannerCandidate(c, { bypassCooldown: true })) {
     w.status = 'triggered';
     w.updatedAt = now;
@@ -710,6 +748,16 @@ export async function tickMigrationGradWatches(): Promise<number> {
     w.status = 'triggered';
     w.updatedAt = now;
     w.lastReason = `fire reclaim ${progress.toFixed(1)}%`;
+    try {
+      const { applyTriggerConfluenceToWatch } =
+        require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+      if (!applyTriggerConfluenceToWatch('migration_sniper', w)) {
+        w.status = 'armed';
+        continue;
+      }
+    } catch {
+      /* fail-open */
+    }
     const c = buildHandoff(w);
     if (handOffScannerCandidate(c, { bypassCooldown: true })) {
       handed += 1;

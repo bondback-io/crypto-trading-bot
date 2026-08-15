@@ -64,6 +64,11 @@ export interface DipWatchEntry {
   majorsBand?: string;
   /** Soft prefer on handoff — dip_buyer default; medium/majors prefer steady_compounder / high_win_rate */
   preferredProfileId?: string;
+  /** Non-exclusive: profiles this row may appear under in the per-profile Watchlist. */
+  eligibleProfileIds?: string[];
+  confluenceCount?: number | null;
+  playbookPassed?: string[];
+  triggerBlockReason?: string;
   /** Fib / Support → approx MC at reclaim entry */
   targetDipEntries?: DipTargetEntry[];
   /** Phase A stamps — pass through trigger without rediscovery */
@@ -150,6 +155,50 @@ function capDipWatchSidecars(): Record<string, number> {
   };
 }
 registerCacheSweep(capDipWatchSidecars);
+
+function stampDipWatchEligibility(w: DipWatchEntry, isNew = false): void {
+  try {
+    const { stampEligibleOnWatchEntry, noteProfileWatchFunnel } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    const ids = stampEligibleOnWatchEntry('dip', w);
+    if (isNew) {
+      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      if (w.status === 'armed') {
+        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+      }
+    }
+  } catch {
+    w.eligibleProfileIds = w.preferredProfileId
+      ? [String(w.preferredProfileId)]
+      : ['dip_buyer'];
+  }
+}
+
+function noteDipProfileArmed(w: DipWatchEntry): void {
+  try {
+    const { noteProfileWatchFunnel } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    for (const id of w.eligibleProfileIds || [w.preferredProfileId || 'dip_buyer']) {
+      noteProfileWatchFunnel(id, 'armed');
+    }
+  } catch {
+    /* optional */
+  }
+}
+
+function noteDipProfileExpired(w: DipWatchEntry): void {
+  try {
+    const { noteProfileWatchFunnel } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    const ids = w.eligibleProfileIds || [w.preferredProfileId || 'dip_buyer'];
+    for (const id of ids) {
+      noteProfileWatchFunnel(id, 'expired');
+      if (w.armedAt) noteProfileWatchFunnel(id, 'blocked', 'false_arm_expired');
+    }
+  } catch {
+    /* optional */
+  }
+}
 
 /** Rolling Dip admit / fire funnel (session counters). */
 const dipFunnel = {
@@ -948,6 +997,8 @@ function maybeArmQualityPark(
     stampWatchPlan(w);
     noteDipFunnel('armed');
     noteQualityBandFunnel(w.source, 'armed');
+    stampDipWatchEligibility(w);
+    noteDipProfileArmed(w);
     noteQualityParkFunnel(verdict.profileId, 'armed');
     if (verdict.profileId === 'steady_compounder') {
       noteDipFunnel('steady_armed');
@@ -1586,6 +1637,7 @@ export function considerDipWatchSetup(input: {
     }
     recomputeProximityFromLevels(existing);
     existing.targetDipEntries = buildTargetDipEntries(existing);
+    stampDipWatchEligibility(existing);
     return existing;
   }
 
@@ -1745,6 +1797,7 @@ export function considerDipWatchSetup(input: {
   entry.targetDipEntries = buildTargetDipEntries(entry);
   if (armed) stampWatchPlan(entry);
   watches.set(input.mint, entry);
+  stampDipWatchEligibility(entry, true);
   noteDipFunnel('offered');
   if (armed) {
     noteDipFunnel('armed');
@@ -1905,7 +1958,13 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
       w.dropFromPeakPct != null
         ? `drop ${w.dropFromPeakPct.toFixed(0)}%`
         : 'setup',
-    ],
+      w.confluenceCount != null
+        ? `taConfluences ${w.confluenceCount}`
+        : '',
+      ...(Array.isArray(w.playbookPassed) && w.playbookPassed.length
+        ? [`taPassed ${w.playbookPassed.slice(0, 6).join('+')}`]
+        : []),
+    ].filter(Boolean),
     source: isMajors || isMedium ? 'jupiter' : feed === 'kolscan' ? 'kolscan' : 'jupiter',
     migrated: true,
     marketCapUsd: w.marketCapUsd,
@@ -1961,6 +2020,7 @@ export async function tickDipSetupWatches(opts?: {
       w.lastReason = 'TTL expired';
       noteQualityBandFunnel(w.source, 'expired');
       if (!isQualityBandSource(w.source)) noteMinorsFunnel('expired');
+      noteDipProfileExpired(w);
       console.log(`[dip-watch] EXPIRED ${w.symbol}`);
       try {
         const {
@@ -2068,6 +2128,8 @@ export async function tickDipSetupWatches(opts?: {
       stampWatchPlan(w);
       noteDipFunnel('armed');
       noteMinorsFunnel('armed');
+      stampDipWatchEligibility(w);
+      noteDipProfileArmed(w);
       console.log(`[dip-watch] ARMED ${w.symbol}`);
       try {
         const { recordSetupWatchEvent } =
@@ -2182,6 +2244,18 @@ export async function tickDipSetupWatches(opts?: {
       if (!trigger) continue;
 
       stampWatchPlan(w);
+      const preferPid = !isQualityBandSource(w.source)
+        ? 'dip_buyer'
+        : w.preferredProfileId || 'dip_buyer';
+      try {
+        const { applyTriggerConfluenceToWatch } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        if (!applyTriggerConfluenceToWatch(preferPid, w)) {
+          continue;
+        }
+      } catch {
+        /* fail-open */
+      }
       w.lastReason = reclaim ? 'reclaim trigger' : 'setup trigger';
       const c = buildHandoff(w);
       // Force Dip floors on minor handoffs (never Steady soft-allow path).
@@ -2406,6 +2480,7 @@ export function offerDipWatchFromCandidate(c: {
   priceChangeH1Pct?: number;
   priceChangeH6Pct?: number;
   priceChange24hPct?: number;
+  dropFromPeakPct?: number | null;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   lastPriceSol?: number | null;
@@ -2434,9 +2509,11 @@ export function offerDipWatchFromCandidate(c: {
     // Still allow organic mature tokens from any specialty feed
   }
   const drop =
-    c.priceChangeH1Pct != null && c.priceChangeH1Pct < -1
-      ? Math.abs(c.priceChangeH1Pct)
-      : null;
+    c.dropFromPeakPct != null && Number.isFinite(Number(c.dropFromPeakPct))
+      ? Number(c.dropFromPeakPct)
+      : c.priceChangeH1Pct != null && c.priceChangeH1Pct < -1
+        ? Math.abs(c.priceChangeH1Pct)
+        : null;
   const src =
     c.specialtyFeed === 'majors'
       ? 'majors'

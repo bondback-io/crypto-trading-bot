@@ -49,6 +49,10 @@ export interface TrendWatchEntry {
   specialtyFeed?: string;
   chartPatternIds?: string[];
   preferredProfileId?: string;
+  eligibleProfileIds?: string[];
+  confluenceCount?: number | null;
+  playbookPassed?: string[];
+  triggerBlockReason?: string;
   entryStyle?: string;
   qualityScore?: number | null;
   sizePlanSol?: number | null;
@@ -83,6 +87,26 @@ const trendFunnel = {
 
 function noteTrendFunnel(key: keyof typeof trendFunnel, n = 1): void {
   trendFunnel[key] = (trendFunnel[key] || 0) + n;
+}
+
+function stampTrendWatchEligibility(
+  w: TrendWatchEntry,
+  isNew = false
+): void {
+  try {
+    const { stampEligibleOnWatchEntry, noteProfileWatchFunnel } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    w.preferredProfileId = w.preferredProfileId || 'trend_rider';
+    const ids = stampEligibleOnWatchEntry('trend', w);
+    if (isNew) {
+      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      if (w.status === 'armed') {
+        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+      }
+    }
+  } catch {
+    w.eligibleProfileIds = ['trend_rider'];
+  }
 }
 
 export function getTrendFunnelCounters(): typeof trendFunnel & {
@@ -381,6 +405,7 @@ export function considerTrendWatchSetup(input: {
     existing.volumeDecayState =
       input.volumeDecayState ?? existing.volumeDecayState;
     existing.updatedAt = Date.now();
+    stampTrendWatchEligibility(existing);
     return existing;
   }
 
@@ -421,6 +446,7 @@ export function considerTrendWatchSetup(input: {
   };
   if (nearArm) stampWatchPlan(entry);
   watches.set(input.mint, entry);
+  stampTrendWatchEligibility(entry, true);
   noteTrendFunnel('offered');
   if (nearArm) noteTrendFunnel('armed');
   else noteTrendFunnel('watching');
@@ -612,6 +638,14 @@ export async function tickTrendSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = 'armed trend continuation';
       stampWatchPlan(w);
+      stampTrendWatchEligibility(w);
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchFunnel('trend_rider', 'armed');
+      } catch {
+        /* optional */
+      }
       noteTrendFunnel('armed');
     }
 
@@ -649,6 +683,15 @@ export async function tickTrendSetupWatches(opts?: {
       }
 
       if (reclaim) {
+        try {
+          const { applyTriggerConfluenceToWatch } =
+            require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+          if (!applyTriggerConfluenceToWatch('trend_rider', w)) {
+            continue;
+          }
+        } catch {
+          /* fail-open */
+        }
         w.status = 'triggered';
         w.updatedAt = now;
         w.lastReason = 'triggered trend handoff';

@@ -204,6 +204,16 @@ export interface ProfileTaEntryResult {
   };
 }
 
+/** Integer count of passed playbook tool ids (not the 0–100 score). */
+export function countPassedTools(
+  result: ProfileTaEntryResult | null | undefined
+): number {
+  if (!result || !Array.isArray(result.passed)) return 0;
+  return result.passed.filter((id) =>
+    (PROFILE_TA_TOOL_IDS as readonly string[]).includes(id)
+  ).length;
+}
+
 export interface ProfileTaExitHint {
   suggestExit: boolean;
   tightenTrail: boolean;
@@ -309,10 +319,20 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
   }),
   migration_sniper: basePlaybook('migration_sniper', {
     taMode: 'soft',
-    entryTools: tools({ volumeExpansion: true }),
-    exitTools: tools({ volumeExpansion: true, macd: true }),
+    entryTools: tools({
+      volumeExpansion: true,
+      supportResistance: true,
+      fib: true,
+      ha: true,
+    }),
+    exitTools: tools({ volumeExpansion: true, macd: true, supportResistance: true }),
     timeframes: ['5m', '15m'],
     minConfluenceScore: 40,
+    supportResistance: {
+      preferNearSupport: true,
+      avoidNearResistance: true,
+      preferFibConfluence: false,
+    },
     whaleMode: 'soft',
     learningEnabled: true,
   }),
@@ -425,7 +445,7 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
     minConfluenceScore: 52,
     heikinAshi: { minConsecutive: 2, preferStrengthening: true },
     supportResistance: {
-      preferNearSupport: false,
+      preferNearSupport: true,
       avoidNearResistance: true,
       preferFibConfluence: false,
     },
