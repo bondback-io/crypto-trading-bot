@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.365',
+    title: 'Stop STATUS refresh timeout warning',
+    sections: ['overview'],
+    items: [
+      'Dashboard /api/status serves last-good immediately after the first build and rebuilds in the background, so a busy event loop cannot 20s-abort the STATUS card while SIGNALS stay LIVE.',
+      'Persistence snapshot cache is 2 minutes (was 30s) so OneDrive existsSync does not stall the poll path. Client timeout for /api/status is 45s on cold start.',
+    ],
+  },
+  {
     version: '1.2.364',
     title: 'MS late-chase abort + event-SL first',
     sections: ['tradecraft', 'microbots', 'learning'],

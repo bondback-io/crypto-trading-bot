@@ -26213,7 +26213,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       try {
       const lastSnap = window._lastRefreshSnap || {};
       const [statusRes, positions, logs, activity, cfgRes, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
-        fetchJSON('/api/status').then(function (d) { return { ok: true, d: d }; }).catch(function (e) { return { ok: false, e: e, d: lastSnap.status || null }; }),
+        fetchJSON('/api/status', { timeoutMs: 45000 }).then(function (d) { return { ok: true, d: d }; }).catch(function (e) { return { ok: false, e: e, d: lastSnap.status || null }; }),
         fetchJSON('/api/positions').catch(function () { return lastSnap.positions || { open: [], closed: [] }; }),
         fetchJSON('/api/logs?limit=50').catch(function () { return lastSnap.logs || []; }),
         fetchJSON('/api/activity').catch(function () { return lastSnap.activity || []; }),

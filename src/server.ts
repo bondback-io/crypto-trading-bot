@@ -279,8 +279,13 @@ export function createServer(): express.Application {
   });
 
   // --- Status ---
+  // Serve last-good immediately after the first build so a blocked event loop
+  // cannot 20s-abort the dashboard STATUS card (signals stay LIVE).
+  let statusSnap: { at: number; body: Record<string, unknown> } | null = null;
+  let statusRebuildInFlight = false;
+  const STATUS_FRESH_MS = 2500;
 
-  app.get('/api/status', async (_req: Request, res: Response) => {
+  async function buildApiStatusPayload(): Promise<Record<string, unknown>> {
     const monitor = getMonitorStatus();
     const active = getActiveTradingWallet();
     const pubkey = getWalletPublicKey();
@@ -395,7 +400,7 @@ export function createServer(): express.Application {
         }
       : paperStats;
 
-    res.json({
+    return {
       mode: config.mode,
       modeLabel:
         config.mode === 'liveSimulation'
@@ -472,7 +477,47 @@ export function createServer(): express.Application {
           };
         }
       })(),
-    });
+    } as Record<string, unknown>;
+  }
+
+  app.get('/api/status', async (_req: Request, res: Response) => {
+    const now = Date.now();
+    const age = statusSnap ? now - statusSnap.at : Number.POSITIVE_INFINITY;
+    if (statusSnap && age < STATUS_FRESH_MS) {
+      res.json(statusSnap.body);
+      return;
+    }
+    if (statusSnap) {
+      if (!statusRebuildInFlight) {
+        statusRebuildInFlight = true;
+        void buildApiStatusPayload()
+          .then((body) => {
+            statusSnap = { at: Date.now(), body };
+          })
+          .catch((err) => {
+            console.warn(
+              '[status] background rebuild failed:',
+              err instanceof Error ? err.message : err
+            );
+          })
+          .finally(() => {
+            statusRebuildInFlight = false;
+          });
+      }
+      res.json(statusSnap.body);
+      return;
+    }
+    try {
+      const body = await buildApiStatusPayload();
+      statusSnap = { at: Date.now(), body };
+      res.json(body);
+    } catch (err) {
+      console.warn(
+        '[status] cold build failed:',
+        err instanceof Error ? err.message : err
+      );
+      res.status(503).json({ error: 'status unavailable' });
+    }
   });
 
   app.get('/api/persistence', (_req: Request, res: Response) => {

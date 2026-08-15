@@ -502,7 +502,7 @@ export interface PersistenceStatus {
 }
 
 /** Avoid sync OneDrive write-probes on every /api/status poll (was freezing the UI). */
-const PERSIST_STATUS_CACHE_MS = 30_000;
+const PERSIST_STATUS_CACHE_MS = 120_000;
 const PERSIST_WRITABLE_PROBE_MS = 120_000;
 let persistStatusCache: { at: number; status: PersistenceStatus } | null = null;
 let lastWritableProbeAt = 0;
