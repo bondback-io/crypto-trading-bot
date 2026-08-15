@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.361',
+    title: 'Fix dashboard JS parse stall',
+    sections: ['overview'],
+    items: [
+      'Unescaped error-sanitizer regex inside the dashboard HTML template broke the page script (Unexpected token / unterminated group). Refresh errors now use string checks.',
+    ],
+  },
+  {
     version: '1.2.360',
     title: 'Restore-era UX/Learning/Trading + signal intake unstick',
     sections: ['overview', 'zion', 'learning', 'microbots', 'scanners', 'tradecraft'],

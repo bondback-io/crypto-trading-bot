@@ -23017,7 +23017,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         ? 'Late chase'
         : style
             .replace(/_/g, ' ')
-            .replace(/\b\w/g, function (c) { return c.toUpperCase(); })
+            .replace(/\\b\\w/g, function (c) { return c.toUpperCase(); })
             .slice(0, 18);
       const bg = late ? '#b45309' : '#475569';
       const title = late
@@ -27864,7 +27864,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           }
           if (/map is not a function/i.test(msg)) {
             msg = 'bad activity data';
-          } else if (!msg || msg.length > 120 || /function\s*\(|=>\s*\{/.test(msg)) {
+          } else if (
+            !msg ||
+            msg.length > 120 ||
+            msg.indexOf('function') >= 0 ||
+            msg.indexOf('=>') >= 0
+          ) {
             msg = 'refresh failed';
           } else {
             msg = msg.slice(0, 120);
