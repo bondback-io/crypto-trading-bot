@@ -2261,6 +2261,7 @@ export async function tickDipSetupWatches(opts?: {
       let undercut = false;
       let nearLevel = false;
       let extensionFromLevelPct: number | null = null;
+      let lateChase = false;
       try {
         const volHintRaw = Number(
           (w as { volumeM5Usd?: number }).volumeM5Usd ?? w.volumeH1Usd
@@ -2280,6 +2281,7 @@ export async function tickDipSetupWatches(opts?: {
         undercut = det.undercut === true;
         nearLevel = det.nearLevel === true;
         extensionFromLevelPct = det.extensionFromLevelPct;
+        lateChase = det.lateChase === true;
         if (det.nearLevel) {
           w.nearSupport = w.nearSupport || det.levelKind === 'support';
           w.nearKeyFib = w.nearKeyFib || det.levelKind === 'fib';
@@ -2351,13 +2353,28 @@ export async function tickDipSetupWatches(opts?: {
 
       stampWatchPlan(w);
       const inDipBandTrig = isInDipBuyerMcBand(w.marketCapUsd);
-      const preferPid = inDipBandTrig
+      let preferPid = inDipBandTrig
         ? 'dip_buyer'
         : w.preferredProfileId || 'dip_buyer';
       try {
-        const { applyTriggerConfluenceToWatch } =
+        const { prepareArmedWatchOpen } =
           require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-        if (!applyTriggerConfluenceToWatch(preferPid, w)) {
+        const gate = prepareArmedWatchOpen({
+          profileId: preferPid,
+          status: w.status,
+          marketCapUsd: w.marketCapUsd,
+          lateChase: lateChase,
+          extensionFromLevelPct,
+          nearLevel,
+          entry: w,
+        });
+        preferPid = gate.profileId;
+        if (!gate.ok) {
+          w.lastReason = gate.reason || 'trigger blocked';
+          if (gate.action === 'expire') {
+            w.status = 'expired';
+            w.updatedAt = now;
+          }
           continue;
         }
       } catch {

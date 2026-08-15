@@ -8514,6 +8514,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="mirror" aria-selected="false" onclick="setWatchlistSetupTab('mirror')">Mirror</button>
           <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="skips" aria-selected="false" onclick="setWatchlistSetupTab('skips')">Skips</button>
         </div>
+        <p id="watch-pipeline-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9;padding:0 0.15rem 0.4rem">Pipeline: inserts 0 · conv — · orphan MC 0</p>
         <div class="watch-setup-panel is-active" data-watch-setup-panel="dip" role="tabpanel">
 <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
@@ -8521,7 +8522,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip Buyer setup watchlist</span>
               <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence 2. Unwatch cools 15m.</p>
-              <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8535,7 +8536,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Steady Compounder</span>
               <span class="setup-watch-title">Steady Compounder watchlist</span>
               <p class="setup-watch-sub mb-0">Own list + quality-structure playbook. May overlap Dip’s $1M–$500M band. Watch → arm → trigger. Unwatch cools 15m.</p>
-              <p id="steady-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <p id="steady-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="steady-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8549,7 +8550,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">High Win-Rate</span>
               <span class="setup-watch-title">High Win-Rate watchlist</span>
               <p class="setup-watch-sub mb-0">Own list + HWR quality playbook. May overlap Dip’s $1M–$500M band. Watch → arm → trigger. Unwatch cools 15m.</p>
-              <p id="hwr-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <p id="hwr-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="hwr-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8561,9 +8562,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Scalper</span>
-              <span class="setup-watch-title">Scalper setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$800k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps under $150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
-              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+) in $150k–$800k. Else watch → arm near S → trigger on reclaim/hold. Microcaps &lt;$150k → Migration / Reversal. Mutual exclusion with Dip watch. Unwatch cools 15m.</p>
-              <p id="scalper-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <span class="setup-watch-title">Scalper setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$1M). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps under $150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
+              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+) in $150k–$1M. Else watch → arm near S → trigger on reclaim/hold. Microcaps &lt;$150k → Migration / Reversal. Mutual exclusion with Dip watch. Unwatch cools 15m.</p>
+              <p id="scalper-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
               <p id="setup-watch-diag-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Armed — · open rate —</p>
             </div>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
@@ -8578,7 +8579,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Momentum Burst</span>
               <span class="setup-watch-title">Momentum Burst watchlist</span>
               <p class="setup-watch-sub mb-0">Mode B family tokens eligible for MB. Faster triggers, tighter invalidation. Unwatch cools 15m.</p>
-              <p id="momentum-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <p id="momentum-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="momentum-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8592,7 +8593,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Reversal Scalper</span>
               <span class="setup-watch-title">Reversal Scalper watchlist</span>
               <p class="setup-watch-sub mb-0">Mode B / microcap tokens eligible for Reversal. Unwatch cools 15m.</p>
-              <p id="reversal-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <p id="reversal-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="reversal-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8606,7 +8607,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Trend Rider</span>
               <span class="setup-watch-title">Trend Rider setup watch <span class="tip" tabindex="0" data-tip="Priority MC ≥$1M trending DNA: multi-TF volume expand, holders up, MC growth, social/KOL/Jupiter heat, trend_continuation/pullback. Cap ≤12. Mutual exclusion vs Mode B microband and Steady Medium/Majors parks. Late-chase forbidden. Preferred profile lock: trend_rider."></span></span>
               <p class="setup-watch-sub mb-0">Watch → arm on pullback/support or continuation · fire on reclaim/hold + live tape not collapsed. Soft prefer ≥$5–10M. Unwatch cools 15m.</p>
-              <p id="trend-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <p id="trend-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="trend-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8620,7 +8621,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Migration Sniper</span>
               <span class="setup-watch-title">Graduation watchlist</span>
               <p class="setup-watch-sub mb-0">Watch ~80% · quality arm · reclaim/hold · min 1 TA confluence at trigger. Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if &lt;$8k for 5m). Unwatch cools 15m.</p>
-              <p id="grad-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
+              <p id="grad-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="grad-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8683,7 +8684,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="ms-enabled" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue (except Scalper mid-band $150k–$800k support reclaim / Mode B, and Trend Rider / Steady Compounder Jupiter|KOL specialty). Learning Mode does not turn this off. Improves entry quality for generic scanner. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
+          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue (except Scalper mid-band $150k–$1M support reclaim / Mode B, and Trend Rider / Steady Compounder Jupiter|KOL specialty). Learning Mode does not turn this off. Improves entry quality for generic scanner. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
           <label class="switch"><input type="checkbox" id="ms-require-ta" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -13647,6 +13648,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         data.watchReadiness = window._lastSetupWatches.watchReadiness;
       }
       renderWatchReadinessStrip(data);
+      (function paintWatchPipeline() {
+        const el = document.getElementById('watch-pipeline-strip');
+        if (!el) return;
+        const wp = data.watchPipeline || {};
+        const rejects = wp.watch_insert_rejected_by_reason || {};
+        const topRej = Object.keys(rejects)
+          .sort(function (a, b) {
+            return (rejects[b] || 0) - (rejects[a] || 0);
+          })
+          .slice(0, 2)
+          .map(function (k) {
+            return k + '×' + rejects[k];
+          })
+          .join(' ');
+        const conv = Number(wp.armed_to_open_conversion);
+        const convTxt = Number.isFinite(conv)
+          ? Math.round(conv * 1000) / 10 + '%'
+          : '—';
+        const orphanN = Number(wp.mc_gap_orphan_count) || 0;
+        const orphanEx =
+          wp.orphan_example_mc != null && Number(wp.orphan_example_mc) > 0
+            ? ' e.g. $' + Math.round(Number(wp.orphan_example_mc)).toLocaleString()
+            : '';
+        el.textContent =
+          'Pipeline: inserts ' +
+          (wp.watch_insert_attempts || 0) +
+          ' · conv ' +
+          convTxt +
+          ' · orphan MC ' +
+          orphanN +
+          orphanEx +
+          (topRej ? ' · reject ' + topRej : '');
+      })();
       const scalperCount = document.getElementById('scalper-watch-count');
       const scalperList = document.getElementById('scalper-watch-list');
       const trendCount = document.getElementById('trend-watch-count');
@@ -14192,7 +14226,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 })() +
                 ' (mxS/mxT=mutual scalper/trend · uw=unwatch_cd · nlRot=no_levels_rotate · vol/liq/mc/noSet/maxD · cap=at_cap)';
             } else {
-              dipFunnelEl.textContent = 'Funnel: —';
+              dipFunnelEl.textContent = 'Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0';
             }
           }
           const block = diag.lastBlockReason
@@ -14298,7 +14332,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ' · blocked ' +
               (tf.blocked || 0);
           } else {
-            funnelEl.textContent = 'Funnel: —';
+            funnelEl.textContent = 'Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0';
           }
         }
         if (trendCount) trendCount.textContent = (tw.active || 0) + ' active';
@@ -14400,6 +14434,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const funnel =
           (data.byProfile && data.byProfile.funnels && data.byProfile.funnels[pid]) ||
           { sent_to_watch: 0, armed: 0, trigger_ready: 0, opened: 0, expired: 0, blocked: {} };
+        const invEntries = inv.entries || [];
+        const watchingN = invEntries.filter(function (e) {
+          return e.status === 'watching';
+        }).length;
+        const armedInv = invEntries.filter(function (e) {
+          return e.status === 'armed';
+        }).length;
         if (funnelEl) {
           const blocked = funnel.blocked || {};
           const topBlock = Object.keys(blocked)
@@ -14422,7 +14463,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ? ' · 0-MFE armed ' + funnel.zeroMfeArmed + '/' + funnel.armedOpens
               : '';
           funnelEl.textContent =
-            'Funnel: watch ' +
+            'Watching ' +
+            watchingN +
+            ' · armed ' +
+            armedInv +
+            ' · Funnel: watch ' +
             (funnel.sent_to_watch || 0) +
             ' → arm ' +
             (funnel.armed || 0) +

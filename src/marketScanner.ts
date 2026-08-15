@@ -1247,7 +1247,7 @@ export async function selectScannerCandidates(
       event.marketCapUsd != null &&
       event.marketCapUsd > 0 &&
       event.marketCapUsd >= 150_000 &&
-      event.marketCapUsd <= 800_000;
+      event.marketCapUsd <= 1_000_000;
     const hasSrHint =
       (ranked.supportPriceSol != null && ranked.supportPriceSol > 0) ||
       (ranked.supportTfHits != null && ranked.supportTfHits.length > 0) ||

@@ -558,7 +558,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'TP 18–30% · SL 7–12%',
       'Max hold 1–3.5 minutes · trail after +12%',
       'Smaller position size (~65%)',
-      'Focus: mid MC ($150k–$800k) · multi-TF support reclaim',
+      'Focus: mid MC ($150k–$1M) · multi-TF support reclaim',
       'Mode B: watch → arm near S → trigger on reclaim/hold',
       'Microcaps <$150k leave to Migration / Reversal',
       'Aggressive dead-market exit · early stall cut',
@@ -571,7 +571,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferSmallMc: true,
       preferVolumeSpike: true,
       minMarketCapUsd: 150_000,
-      maxMarketCapUsd: 800_000,
+      maxMarketCapUsd: 1_000_000,
       minHolders: 40,
       maxTop10HoldPct: 48,
       minVolumeM5Usd: 800,
@@ -1927,6 +1927,65 @@ export function isAboveDipBuyerMaxMc(
   return n > getDipBuyerMcBand().max;
 }
 
+export const MIGRATION_SNIPER_DEFAULT_MAX_MC_USD = 175_000;
+export const SCALPER_DEFAULT_MIN_MC_USD = 150_000;
+export const SCALPER_DEFAULT_MAX_MC_USD = 1_000_000;
+
+/** Resolved Migration Sniper max MC (catalog + user overrides). */
+export function getMigrationSniperMaxMcUsd(): number {
+  try {
+    const n = Number(
+      resolveTradeProfileDefinition('migration_sniper').match.maxMarketCapUsd
+    );
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch {
+    /* catalog default */
+  }
+  return MIGRATION_SNIPER_DEFAULT_MAX_MC_USD;
+}
+
+export function isMcOverMigrationSniperMax(
+  mc: number | null | undefined
+): boolean {
+  const n = Number(mc);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  return n > getMigrationSniperMaxMcUsd();
+}
+
+/** Resolved Scalper Mode B band (catalog + user overrides). */
+export function getScalperMcBand(): { min: number; max: number } {
+  try {
+    const m = resolveTradeProfileDefinition('scalper').match;
+    const min = Number(m.minMarketCapUsd);
+    const max = Number(m.maxMarketCapUsd);
+    return {
+      min:
+        Number.isFinite(min) && min > 0 ? min : SCALPER_DEFAULT_MIN_MC_USD,
+      max:
+        Number.isFinite(max) && max > 0 ? max : SCALPER_DEFAULT_MAX_MC_USD,
+    };
+  } catch {
+    return {
+      min: SCALPER_DEFAULT_MIN_MC_USD,
+      max: SCALPER_DEFAULT_MAX_MC_USD,
+    };
+  }
+}
+
+/**
+ * MS-over-max is not migration DNA — remap the preferred lane to Scalper
+ * (Mode B) so the name is not orphaned between MS max and Dip min.
+ */
+export function remapOverMigrationSniperMax(
+  profileId: string | null | undefined,
+  marketCapUsd?: number | null
+): string {
+  const pid = String(profileId || '').trim();
+  if (pid !== 'migration_sniper') return pid;
+  if (!isMcOverMigrationSniperMax(marketCapUsd)) return pid;
+  return 'scalper';
+}
+
 /**
  * Non-exclusive watch routing: enabled family profiles, plus preferred.
  * Dip Buyer owns $1M–$500M identity; Steady/HWR still multi-admit via playbook
@@ -2796,7 +2855,7 @@ export function evaluateFreshMigrationEligibility(
       return {
         ok: false,
         reason:
-          'post-grad fallback denied — no armed grad-watch continuity',
+          'migration_quality_reject: post-grad fallback denied — no armed grad-watch continuity',
       };
     }
     const ageMs =
@@ -4075,7 +4134,8 @@ function scoreProfile(
       (ctx.armedWatch === true ||
         ctx.dipWatchTriggered === true ||
         String(ctx.setupWatchFamily || '').toLowerCase() === 'dip');
-    // Armed Dip: prefer support_dip_reclaim stamp over rediscovered late_chase
+    // Armed Dip: prefer support_dip_reclaim stamp for DNA, but keep lateChase
+    // so armed late-chase cannot reopen what the watch / buy re-gate blocked.
     if (
       armedDipLane &&
       (ctx.lateChase === true ||
@@ -4084,7 +4144,6 @@ function scoreProfile(
         String(ctx.setupWatchFamily || '').toLowerCase() === 'dip')
     ) {
       ctx.detectedEntryStyle = 'support_dip_reclaim';
-      ctx.lateChase = false;
     }
     const dna = scoreEntryStyleDna({
       profileId: def.id,
@@ -4235,9 +4294,15 @@ function scoreProfile(
     ctx.shortTermStrategyId !== 'post_run_dip';
   // Pre-grad fire band (~90%+) or ultra-fresh post-grad — owns Migration Sniper
   // and makes other lanes defer via isMig / hostileArmed.
+  // Defer-to-MS uses resolved MS max, not this lane's max (Scalper $1M would
+  // otherwise treat $182k as migration and orphan names MS already cannot buy).
+  const migMaxForDefer =
+    def.id === 'migration_sniper'
+      ? (m.maxMarketCapUsd ?? getMigrationSniperMaxMcUsd())
+      : getMigrationSniperMaxMcUsd();
   const freshMig = evaluateFreshMigrationEligibility(ctx, {
     maxTokenAgeHours: m.maxTokenAgeHours ?? FRESH_MIGRATION_MAX_AGE_HOURS,
-    maxMarketCapUsd: m.maxMarketCapUsd ?? FRESH_MIGRATION_MAX_MC_USD,
+    maxMarketCapUsd: migMaxForDefer,
     minCurveProgressPct: m.minCurveProgressPct,
     maxCurveProgressPct: m.maxCurveProgressPct,
     maxMigrationAgeSec: m.maxMigrationAgeSec,
@@ -6426,17 +6491,16 @@ function migrateScalperMidbandCatalogDefaults(
   const ov = state.overrides || (state.overrides = {});
   const scalper = (ov.scalper ||= {});
   const sMatch = (scalper.match ||= {});
-  if (sMatch.maxMarketCapUsd === 180_000) {
-    sMatch.maxMarketCapUsd = 800_000;
+  if (sMatch.maxMarketCapUsd === 180_000 || sMatch.maxMarketCapUsd === 800_000) {
+    sMatch.maxMarketCapUsd = 1_000_000;
   }
-  if (sMatch.minMarketCapUsd == null && sMatch.maxMarketCapUsd === 800_000) {
+  if (sMatch.minMarketCapUsd == null && sMatch.maxMarketCapUsd === 1_000_000) {
     sMatch.minMarketCapUsd = 150_000;
   }
   const mig = (ov.migration_sniper ||= {});
-  const mMatch = (mig.match ||= {});
-  if (mMatch.maxMarketCapUsd === 175_000) {
-    mMatch.maxMarketCapUsd = 150_000;
-  }
+  mig.match ||= {};
+  // Honor user MS max ≥$175k — do not rewrite 175k→150k (later floor already
+  // lifts anything below 175k).
   const rev = (ov.reversal_scalper ||= {});
   const rMatch = (rev.match ||= {});
   if (rMatch.maxMarketCapUsd == null) {

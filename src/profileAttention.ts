@@ -331,7 +331,7 @@ export function shouldThrottleMigrationAdmit(input: {
   return {
     throttle: true,
     reason:
-      `MS attention ${(share * 100).toFixed(0)}% ≥ ${(MS_SHARE_CAP_RESTRICTED * 100).toFixed(0)}% cap` +
+      `migration_share_cap: MS attention ${(share * 100).toFixed(0)}% ≥ ${(MS_SHARE_CAP_RESTRICTED * 100).toFixed(0)}% cap` +
       ` while migration_hold_reclaim ${gov}`,
   };
 }

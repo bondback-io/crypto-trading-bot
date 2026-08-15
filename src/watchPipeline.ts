@@ -20,6 +20,11 @@ export interface WatchPipelineSnapshot {
   trigger_to_open_blocked_by_reason: Record<string, number>;
   scanner_throttle_state: WatchPipelineThrottleState;
   watcher_lane_latency: number | string | null;
+  /** opened / max(armed, 1) from per-profile funnels */
+  armed_to_open_conversion: number;
+  mc_gap_orphan_count: number;
+  orphan_example_mc: number | null;
+  rejected_by_all_mc_bands: number;
 }
 
 const WINDOW_MS = 60_000;
@@ -35,6 +40,9 @@ const throttle: WatchPipelineThrottleState = {
   criticalDefer: false,
 };
 let watcherLaneLatency: number | string | null = '—';
+let mcGapOrphanCount = 0;
+let orphanExampleMc: number | null = null;
+let rejectedByAllMcBands = 0;
 
 function bump(map: Record<string, number>, reason: string): void {
   const key = String(reason || 'unknown').slice(0, 80);
@@ -75,9 +83,18 @@ export function setWatcherLaneLatency(ms: number | string | null): void {
   watcherLaneLatency = ms;
 }
 
+/** ≥3 lanes failed only on MC band and nobody passed. */
+export function noteMcGapOrphan(mcUsd?: number | null): void {
+  mcGapOrphanCount += 1;
+  rejectedByAllMcBands += 1;
+  const n = Number(mcUsd);
+  if (Number.isFinite(n) && n > 0) orphanExampleMc = n;
+}
+
 export function getWatchPipelineSnapshot(opts?: {
   activeByProfile?: Record<string, number>;
   armedByProfile?: Record<string, number>;
+  funnels?: Record<string, { armed?: number; opened?: number }>;
 }): WatchPipelineSnapshot {
   const now = Date.now();
   while (candidateAt.length && now - candidateAt[0] > WINDOW_MS) {
@@ -92,6 +109,12 @@ export function getWatchPipelineSnapshot(opts?: {
   } catch {
     /* optional */
   }
+  let armedSum = 0;
+  let openedSum = 0;
+  for (const row of Object.values(opts?.funnels || {})) {
+    armedSum += Number(row?.armed) || 0;
+    openedSum += Number(row?.opened) || 0;
+  }
   return {
     scanner_candidates_per_min: candidateAt.length,
     watch_insert_attempts: insertAttempts,
@@ -102,5 +125,9 @@ export function getWatchPipelineSnapshot(opts?: {
     trigger_to_open_blocked_by_reason: { ...triggerOpenBlocked },
     scanner_throttle_state: { ...throttle },
     watcher_lane_latency: watcherLaneLatency,
+    armed_to_open_conversion: openedSum / Math.max(armedSum, 1),
+    mc_gap_orphan_count: mcGapOrphanCount,
+    orphan_example_mc: orphanExampleMc,
+    rejected_by_all_mc_bands: rejectedByAllMcBands,
   };
 }

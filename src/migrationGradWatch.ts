@@ -25,6 +25,7 @@ import {
 import {
   isSmartBotProfilesEnabled,
   resolveTradeProfileDefinition,
+  getMigrationSniperMaxMcUsd,
 } from './tradeProfiles';
 import { trimMapToCap, registerCacheSweep } from './mapCap';
 
@@ -362,8 +363,7 @@ export function considerMigrationGradWatch(input: {
       : null;
   if (progress == null || progress < watchPct()) return null;
 
-  const m = migMatch();
-  const maxMc = m.maxMarketCapUsd ?? 200_000;
+  const maxMc = getMigrationSniperMaxMcUsd();
   // Align soft watch admit with hard buy max so the list does not trigger
   // tokens Migration Sniper cannot buy (Dex MC is still noisy near curve).
   if (
@@ -408,10 +408,10 @@ export function considerMigrationGradWatch(input: {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
     name: input.name || input.symbol || 'Grad watch',
-    status: quality || inFire ? 'armed' : 'watching',
+    status: quality ? 'armed' : 'watching',
     createdAt: now,
     updatedAt: now,
-    armedAt: quality || inFire ? now : null,
+    armedAt: quality ? now : null,
     expiresAt: now + ttlMs(),
     curveProgressPct: progress,
     marketCapUsd: input.marketCapUsd,
@@ -421,10 +421,10 @@ export function considerMigrationGradWatch(input: {
     buyPressureUsd: input.buyPressureUsd ?? null,
     source: input.source,
     belowLowMcSinceMs: null,
-    lastReason: inFire
-      ? `in fire band ${progress.toFixed(0)}%`
-      : quality
-        ? `armed @ ${progress.toFixed(0)}%`
+    lastReason: quality
+      ? `armed @ ${progress.toFixed(0)}%`
+      : inFire
+        ? `in fire band ${progress.toFixed(0)}% — waiting quality arm`
         : `watching @ ${progress.toFixed(0)}%`,
     preferredProfileId: 'migration_sniper',
   };
@@ -528,12 +528,39 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
     console.log(`[grad-watch] EXPIRED ${w.symbol} — ${w.lastReason}`);
     return false;
   }
+  if (w.status !== 'armed') {
+    w.lastReason = 'migration_quality_reject — post-grad not armed';
+    w.updatedAt = now;
+    try {
+      const { noteProfileWatchFunnel } =
+        require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+      noteProfileWatchFunnel('migration_sniper', 'blocked', 'migration_quality_reject');
+      const { noteTriggerOpenBlocked } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteTriggerOpenBlocked('migration_quality_reject');
+    } catch {
+      /* optional */
+    }
+    return false;
+  }
   const c = buildHandoff(w, { postGrad: true });
   try {
-    const { applyTriggerConfluenceToWatch } =
+    const { prepareArmedWatchOpen } =
       require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-    if (!applyTriggerConfluenceToWatch('migration_sniper', w)) {
+    const gate = prepareArmedWatchOpen({
+      profileId: 'migration_sniper',
+      status: w.status,
+      marketCapUsd: w.marketCapUsd,
+      entry: w,
+    });
+    if (!gate.ok) {
+      w.lastReason = gate.reason || 'migration_quality_reject';
       return false;
+    }
+    if (gate.profileId !== 'migration_sniper') {
+      w.preferredProfileId = gate.profileId;
+      c.preferredProfileId = gate.profileId;
+      if (c.launch) c.launch.preferredProfileId = gate.profileId;
     }
   } catch {
     /* fail-open */
@@ -777,11 +804,21 @@ export async function tickMigrationGradWatches(): Promise<number> {
     w.updatedAt = now;
     w.lastReason = `fire reclaim ${progress.toFixed(1)}%`;
     try {
-      const { applyTriggerConfluenceToWatch } =
+      const { prepareArmedWatchOpen } =
         require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-      if (!applyTriggerConfluenceToWatch('migration_sniper', w)) {
+      const gate = prepareArmedWatchOpen({
+        profileId: 'migration_sniper',
+        status: 'armed',
+        marketCapUsd: w.marketCapUsd,
+        entry: w,
+      });
+      if (!gate.ok) {
         w.status = 'armed';
+        w.lastReason = gate.reason || 'trigger blocked';
         continue;
+      }
+      if (gate.profileId !== 'migration_sniper') {
+        w.preferredProfileId = gate.profileId;
       }
     } catch {
       /* fail-open */

@@ -262,6 +262,7 @@ function classifierCacheKey(
     finSigned(input.dropFromPeakPct),
     finSigned(input.localPullbackPct),
     input.nearSupport ? '1' : '0',
+    String(Math.round((fin(m.marketCapUsd) || 0) / 5_000) * 5_000),
   ].join('|');
 }
 
@@ -510,6 +511,21 @@ export function classifySetup(
     scores.slow_quality += 0.12;
   }
 
+  const mcUsd = fin(input.metrics?.marketCapUsd);
+  let msMaxUsd = 175_000;
+  try {
+    const { getMigrationSniperMaxMcUsd } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    msMaxUsd = getMigrationSniperMaxMcUsd();
+  } catch {
+    /* catalog default */
+  }
+  const msOverMax = mcUsd != null && mcUsd > msMaxUsd;
+  if (msOverMax && scores.migration > 0) {
+    scores.migration = 0;
+    codes.push('MS_OVER_MAX_HANDOFF');
+  }
+
   let setup: SetupClass = 'unknown';
   let confidence = 0;
   const ranked = (
@@ -555,9 +571,28 @@ export function classifySetup(
   const widenEligibility =
     setup !== 'unknown' &&
     (ambiguousOrClose || confidence < CLASSIFIER_HIGH_CONFIDENCE);
-  const eligible = widenEligibility
+  let eligible = widenEligibility
     ? eligibleForSetup('unknown', cfg.unknownSetupsCanTrade)
     : preferred;
+  let preferredIds = preferred;
+  if (msOverMax) {
+    const neighbors: HmcProfileId[] = [
+      'scalper',
+      'reversal_scalper',
+      'momentum_burst',
+    ];
+    const trendDna =
+      hint === 'trend_rider' || (chH1 != null && chH1 >= 4);
+    if (trendDna) neighbors.push('trend_rider');
+    const stripMs = (ids: HmcProfileId[]) =>
+      ids.filter((id) => id !== 'migration_sniper');
+    preferredIds = stripMs(preferredIds);
+    eligible = stripMs(eligible);
+    if (preferredIds.length === 0) preferredIds = [...neighbors];
+    for (const n of neighbors) {
+      if (!eligible.includes(n)) eligible.push(n);
+    }
+  }
   const blocked =
     eligible.length === 0 ||
     (setup === 'unknown' && !cfg.unknownSetupsCanTrade);
@@ -573,7 +608,7 @@ export function classifySetup(
       blocked,
       eligible
     ),
-    preferredProfileIds: preferred,
+    preferredProfileIds: preferredIds,
     eligibleProfileIds: eligible,
     blocked,
   };

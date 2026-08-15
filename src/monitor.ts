@@ -602,7 +602,17 @@ function lateChaseBuyReGateReason(
       lateChaseAtEntry: true,
     });
     if (msAbort.abort) {
-      return msAbort.reason || 'MS late-chase buy re-gate';
+      return (
+        'migration_late_chase_blocked: ' +
+        (msAbort.reason || 'MS late-chase buy re-gate')
+      );
+    }
+    const reclaimFamily =
+      /^(dip_buyer|scalper|reversal_scalper|trend_rider|momentum_burst)$/.test(
+        profileId
+      ) || /reclaim/.test(entryStyle);
+    if (armedWatch && reclaimFamily) {
+      return 'armed_late_chase_blocked';
     }
     const lim = shouldLimitLateChaseShare({
       lateChase: true,
@@ -3806,7 +3816,7 @@ async function handleScannerCandidate(
         reasonBits.includes('scalper-mtf-support') ||
         (candidate.marketCapUsd != null &&
           candidate.marketCapUsd >= 150_000 &&
-          candidate.marketCapUsd <= 800_000));
+          candidate.marketCapUsd <= 1_000_000));
     // Playbook / confluence only hard-gate when Require TA setup is ON
     // (Risk Off always skips these so scanner-only can still open).
     if (!hybrid && requireTa && !setupWatchHandoff && !scalperMcEligible) {
@@ -7516,7 +7526,22 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     // Armed watch: hard-lock to stamped preferred profile (no silent reassignment).
     // Admission Baseline v235: fail-open to soft lane fight if preferred fails floors.
     if (setupWatchPrefer && signal.candidateTradeProfileId) {
-      const prefId = signal.candidateTradeProfileId;
+      let prefId = signal.candidateTradeProfileId;
+      try {
+        const { remapOverMigrationSniperMax } =
+          require('./tradeProfiles') as typeof import('./tradeProfiles');
+        const liveMc =
+          signal.metrics?.marketCapUsd ??
+          (signal as { sourceEntryMcUsd?: number }).sourceEntryMcUsd ??
+          null;
+        const remapped = remapOverMigrationSniperMax(prefId, liveMc);
+        if (remapped && remapped !== prefId) {
+          prefId = remapped;
+          signal.candidateTradeProfileId = remapped;
+        }
+      } catch {
+        /* keep stamped preferred */
+      }
       const flags = getTradeProfileEnabledFlags();
       if (flags[prefId] === false) {
         const reason = `Armed watch preferred profile OFF (${prefId})`;
@@ -7635,7 +7660,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         classifierPreferredIds != null &&
         classifierPreferredIds.length > 0;
       const preferIds = classifierPreferredIds;
-      const lanes = evaluateTradeProfileLanes(ctx, {
+      let lanes = evaluateTradeProfileLanes(ctx, {
         silent: false,
         eligibleProfileIds: softLaneMode ? null : classifierEligibleIds,
         preferredProfileIds: softLaneMode ? preferIds : null,
@@ -7644,50 +7669,119 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
       lanePassers = lanes.filter((l) => l.passed && l.assignment);
       if (!lanePassers.length) {
-        // Prefer specialty/candidate profile; if that fail is just MC-band miss,
-        // summarize so logs don't always read as "Migration Sniper MC > max".
         const preferId =
           (preferIds && preferIds[0]) ||
           signal.candidateTradeProfileId ||
           null;
-        const intended =
-          (preferId
-            ? lanes.find((l) => l.profileId === preferId)
-            : null) ||
-          lanes.find((l) => !l.passed && l.failReason) ||
-          lanes[0];
         const mc =
           signal.metrics?.marketCapUsd ??
           (signal as { sourceEntryMcUsd?: number }).sourceEntryMcUsd ??
           null;
         const mcN =
           mc != null && Number.isFinite(Number(mc)) ? Number(mc) : null;
-        const bandMisses = lanes.filter((l) =>
-          /MC \$\d+ (<|>) (?:lane )?min|MC \$\d+ > max/i.test(
-            String(l.failReason || '')
-          )
-        );
-        let reason: string;
-        if (
-          intended != null &&
-          /MC \$\d+ > max/i.test(String(intended.failReason || '')) &&
-          bandMisses.length >= Math.min(3, lanes.length)
-        ) {
-          reason =
-            mcN != null
-              ? `no lane covers MC $${Math.round(mcN)} (specialty ${preferId || 'none'} out of band)`
-              : `no lane covers MC band (specialty ${preferId || 'none'} out of band)`;
-        } else if (intended != null) {
-          reason = `${intended.name}: ${intended.failReason || 'no match'}`;
-        } else {
-          reason = 'No trade profile lane passed floors/match';
+        const mcBandRe =
+          /MC \$\d+ (<|>) (?:lane )?min|MC \$\d+ > max|too mature for Migration Sniper/i;
+        const isMcBandOnly = (reason?: string | null) =>
+          mcBandRe.test(String(reason || ''));
+
+        // Mild band-edge: MS failed only on MC max → retry without MS
+        // (overshoot ≤15% or still inside Scalper neighbor band).
+        const msLane = lanes.find((l) => l.profileId === 'migration_sniper');
+        const msMaxFail =
+          msLane != null && isMcBandOnly(msLane.failReason);
+        if (msMaxFail && mcN != null && mcN > 0) {
+          let msMax = 175_000;
+          let scalperMin = 150_000;
+          let scalperMax = 1_000_000;
+          try {
+            const { getMigrationSniperMaxMcUsd, getScalperMcBand } =
+              require('./tradeProfiles') as typeof import('./tradeProfiles');
+            msMax = getMigrationSniperMaxMcUsd();
+            const band = getScalperMcBand();
+            scalperMin = band.min;
+            scalperMax = band.max;
+          } catch {
+            /* defaults */
+          }
+          const overshoot = msMax > 0 ? (mcN - msMax) / msMax : 1;
+          const inNeighbor = mcN >= scalperMin && mcN <= scalperMax;
+          if (overshoot <= 0.15 || inNeighbor) {
+            const eligBase = (
+              classifierEligibleIds || lanes.map((l) => l.profileId)
+            ).filter((id) => id !== 'migration_sniper');
+            const prefBase = (preferIds || []).filter(
+              (id) => id !== 'migration_sniper'
+            );
+            const retryPref =
+              prefBase.length > 0
+                ? prefBase
+                : ['scalper', 'reversal_scalper', 'momentum_burst'];
+            const retry = evaluateTradeProfileLanes(ctx, {
+              silent: false,
+              eligibleProfileIds: softLaneMode ? null : eligBase,
+              preferredProfileIds: softLaneMode ? retryPref : null,
+              softEligibility: softLaneMode,
+            });
+            logLaneFightDecisions(
+              signal,
+              retry,
+              lastHmcGate,
+              lastHmcClassifier
+            );
+            const retryPassers = retry.filter(
+              (l) => l.passed && l.assignment
+            );
+            if (retryPassers.length) {
+              lanes = retry;
+              lanePassers = retryPassers;
+            }
+          }
         }
-        recordRejectedSignal(signal, reason);
-        console.log(
-          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-            `reason=smart-bot lane fight: ${reason}`
-        );
-        return false;
+
+        if (!lanePassers.length) {
+          const intended =
+            (preferId
+              ? lanes.find((l) => l.profileId === preferId)
+              : null) ||
+            lanes.find((l) => !l.passed && l.failReason) ||
+            lanes[0];
+          const bandMisses = lanes.filter((l) =>
+            isMcBandOnly(l.failReason)
+          );
+          const mcOnlyFails = lanes.filter(
+            (l) => !l.passed && isMcBandOnly(l.failReason)
+          );
+          if (mcOnlyFails.length >= 3) {
+            try {
+              const { noteMcGapOrphan } =
+                require('./watchPipeline') as typeof import('./watchPipeline');
+              noteMcGapOrphan(mcN);
+            } catch {
+              /* optional */
+            }
+          }
+          let reason: string;
+          if (
+            intended != null &&
+            /MC \$\d+ > max/i.test(String(intended.failReason || '')) &&
+            bandMisses.length >= Math.min(3, lanes.length)
+          ) {
+            reason =
+              mcN != null
+                ? `rejected_by_all_mc_bands: no lane covers MC $${Math.round(mcN)} (specialty ${preferId || 'none'} out of band)`
+                : `rejected_by_all_mc_bands: no lane covers MC band (specialty ${preferId || 'none'} out of band)`;
+          } else if (intended != null) {
+            reason = `${intended.name}: ${intended.failReason || 'no match'}`;
+          } else {
+            reason = 'No trade profile lane passed floors/match';
+          }
+          recordRejectedSignal(signal, reason);
+          console.log(
+            `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+              `reason=smart-bot lane fight: ${reason}`
+          );
+          return false;
+        }
       }
     }
     console.log(
@@ -7853,7 +7947,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         });
         if (migAtt.throttle) {
           attFails.push(
-            `${passer.name}: ${migAtt.reason || 'MS attention cap'}`
+            `${passer.name}: ${migAtt.reason || 'migration_share_cap'}`
           );
           continue;
         }

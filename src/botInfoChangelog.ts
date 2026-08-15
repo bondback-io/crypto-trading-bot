@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.371',
+    title: 'Fix watch/arm conversion quality',
+    sections: ['microbots', 'scanners', 'tradecraft'],
+    items: [
+      'MC dead-zones: classifier no longer prefers Migration Sniper above resolved max; Scalper/Reversal/MB take the hand-off. Scalper Mode B max meets Dip at $1M. Orphan MC counts show on the pipeline strip.',
+      'Armed Dip/Scalper/Trend (and buy re-gate) hard-block late chase at ≥8% extension. No new “Late chase armed …” opens.',
+      'Migration stays quality-capped: in-fire without quality stays watching; post-grad needs an armed row. Skip codes: migration_share_cap, migration_late_chase_blocked, migration_quality_reject.',
+      'Setup watches show zeroed funnels on load, live watching/armed counts, and a pipeline strip (inserts, conversion, orphan MC).',
+    ],
+  },
+  {
     version: '1.2.370',
     title: 'Complete armed per-profile Watch system',
     sections: ['microbots', 'scanners', 'tradecraft', 'learning'],

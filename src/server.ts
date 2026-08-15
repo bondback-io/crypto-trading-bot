@@ -4836,7 +4836,15 @@ export function createServer(): express.Application {
               (e) => String(e?.status || '') === 'armed'
             ).length;
           }
-          return getWatchPipelineSnapshot({ activeByProfile, armedByProfile });
+          const funnels = (byProfile.funnels || {}) as Record<
+            string,
+            { armed?: number; opened?: number }
+          >;
+          return getWatchPipelineSnapshot({
+            activeByProfile,
+            armedByProfile,
+            funnels,
+          });
         } catch {
           return null;
         }

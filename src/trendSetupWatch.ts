@@ -380,8 +380,8 @@ export function considerTrendWatchSetup(input: {
   if (!(mc >= TREND_WATCH_MIN_MC_USD)) {
     return null;
   }
-  // Hard exclude Mode B microband (dead after $1M; keep silent)
-  if (mc > 0 && mc <= 800_000) {
+  // Hard exclude Mode B band (Scalper owns up to Dip catalog min $1M)
+  if (mc > 0 && mc < TREND_WATCH_MIN_MC_USD) {
     return null;
   }
 
@@ -677,6 +677,9 @@ export async function tickTrendSetupWatches(opts?: {
 
     if (w.status === 'armed') {
       let reclaim = false;
+      let lateChase = false;
+      let nearLevel = false;
+      let extensionFromLevelPct: number | null = null;
       try {
         const det = detectSupportReclaim({
           priceSol: px,
@@ -691,6 +694,9 @@ export async function tickTrendSetupWatches(opts?: {
           det.reclaimed === true ||
           (det.nearLevel === true &&
             (w.nearSupport === true || w.nearKeyFib === true));
+        lateChase = det.lateChase === true;
+        nearLevel = det.nearLevel === true;
+        extensionFromLevelPct = det.extensionFromLevelPct;
       } catch {
         reclaim =
           w.nearSupport === true ||
@@ -710,9 +716,24 @@ export async function tickTrendSetupWatches(opts?: {
 
       if (reclaim) {
         try {
-          const { applyTriggerConfluenceToWatch } =
+          const { prepareArmedWatchOpen } =
             require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-          if (!applyTriggerConfluenceToWatch('trend_rider', w)) {
+          const gate = prepareArmedWatchOpen({
+            profileId: 'trend_rider',
+            status: w.status,
+            marketCapUsd: w.marketCapUsd,
+            lateChase,
+            extensionFromLevelPct,
+            nearLevel,
+            entry: w,
+          });
+          if (!gate.ok) {
+            w.lastReason = gate.reason || 'trigger blocked';
+            if (gate.action === 'expire') {
+              w.status = 'expired';
+              w.updatedAt = now;
+              noteTrendFunnel('expired');
+            }
             continue;
           }
         } catch {

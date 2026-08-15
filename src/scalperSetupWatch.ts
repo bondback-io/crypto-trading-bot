@@ -84,9 +84,9 @@ const TRIGGER_RECLAIM_PCT = 0.9;
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
 const TERMINAL_UI_MS = 60_000;
-/** Dip mutual exclusion is by active dip watch — Scalper owns mid-band up to 800k. */
+/** Dip mutual exclusion is by active dip watch — Scalper owns mid-band up to $1M. */
 const SCALPER_MC_MIN = 150_000;
-const SCALPER_MC_MAX = 800_000;
+const SCALPER_MC_MAX = 1_000_000;
 /** Below this → Migration / Reversal own microcaps (not Scalper). */
 const SCALPER_MICROCAP_BELOW = 150_000;
 
@@ -1038,6 +1038,7 @@ export async function tickScalperSetupWatches(opts?: {
       let undercut = false;
       let nearLevel = false;
       let extensionFromLevelPct: number | null = null;
+      let lateChase = false;
       let volumeHint = false;
       try {
         const volM5 = Number(w.volumeM5Usd);
@@ -1067,6 +1068,7 @@ export async function tickScalperSetupWatches(opts?: {
         undercut = det.undercut === true;
         nearLevel = det.nearLevel === true;
         extensionFromLevelPct = det.extensionFromLevelPct;
+        lateChase = det.lateChase === true;
         if (det.nearLevel) {
           w.nearSupport = true;
         }
@@ -1152,9 +1154,24 @@ export async function tickScalperSetupWatches(opts?: {
       }
       stampWatchPlan(w);
       try {
-        const { applyTriggerConfluenceToWatch } =
+        const { prepareArmedWatchOpen } =
           require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-        if (!applyTriggerConfluenceToWatch(w.preferredProfileId, w)) {
+        const gate = prepareArmedWatchOpen({
+          profileId: w.preferredProfileId,
+          status: w.status,
+          marketCapUsd: w.marketCapUsd,
+          lateChase,
+          extensionFromLevelPct,
+          nearLevel,
+          entry: w,
+        });
+        w.preferredProfileId = gate.profileId as ScalperFamilyProfileId;
+        if (!gate.ok) {
+          w.lastReason = gate.reason || 'trigger blocked';
+          if (gate.action === 'expire') {
+            w.status = 'expired';
+            w.updatedAt = now;
+          }
           continue;
         }
       } catch {

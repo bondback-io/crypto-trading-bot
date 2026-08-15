@@ -8,10 +8,12 @@ import {
   getMinTaPlaybookConfluences,
   isProfileArmingEnabled,
   isProfileWatchEnabled,
+  remapOverMigrationSniperMax,
   resolveWatchEligibleProfileIds,
   WATCH_FAMILY_PROFILE_IDS,
   type WatchFamilyId,
 } from './tradeProfiles';
+import { DEFAULT_LATE_CHASE_EXT_PCT } from './supportReclaim';
 import { countPassedTools, evaluateProfileTaEntry } from './profileTaPlaybook';
 import type { ProfileTaEntryContext } from './profileTaPlaybook';
 
@@ -526,34 +528,39 @@ export function applyTriggerConfluenceToWatch(
   const pid = String(
     profileId || entry.preferredProfileId || ''
   ).trim();
-  const r = evaluateWatchTriggerConfluence({
-    profileId: pid,
-    nearSupport: entry.nearSupport,
-    nearKeyFib: entry.nearKeyFib,
-    nearMultiTfSupport: entry.nearMultiTfSupport,
-    nearMultiTfResistance: entry.nearMultiTfResistance,
-    srConfluenceScore: entry.srConfluenceScore,
-    supportTfHits: Array.isArray(entry.supportTfHits)
-      ? entry.supportTfHits.map(String)
-      : null,
-    chartPatternIds: Array.isArray(entry.chartPatternIds)
-      ? (entry.chartPatternIds as string[])
-      : null,
-  });
-  entry.confluenceCount = r.count;
-  entry.playbookPassed = r.passed;
-  if (!r.ok) {
-    entry.triggerBlockReason = r.reason;
-    entry.lastReason = r.reason;
-    noteProfileWatchFunnel(pid, 'blocked', r.reason);
-    try {
-      const { noteTriggerOpenBlocked } =
-        require('./watchPipeline') as typeof import('./watchPipeline');
-      noteTriggerOpenBlocked(r.reason || 'confluence');
-    } catch {
-      /* optional */
+  try {
+    const r = evaluateWatchTriggerConfluence({
+      profileId: pid,
+      nearSupport: entry.nearSupport,
+      nearKeyFib: entry.nearKeyFib,
+      nearMultiTfSupport: entry.nearMultiTfSupport,
+      nearMultiTfResistance: entry.nearMultiTfResistance,
+      srConfluenceScore: entry.srConfluenceScore,
+      supportTfHits: Array.isArray(entry.supportTfHits)
+        ? entry.supportTfHits.map(String)
+        : null,
+      chartPatternIds: Array.isArray(entry.chartPatternIds)
+        ? (entry.chartPatternIds as string[])
+        : null,
+    });
+    entry.confluenceCount = r.count;
+    entry.playbookPassed = r.passed;
+    if (!r.ok) {
+      entry.triggerBlockReason = r.reason;
+      entry.lastReason = r.reason;
+      noteProfileWatchFunnel(pid, 'blocked', r.reason);
+      try {
+        const { noteTriggerOpenBlocked } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        noteTriggerOpenBlocked(r.reason || 'confluence');
+      } catch {
+        /* optional */
+      }
+      return false;
     }
-    return false;
+  } catch {
+    /* fail-open on confluence eval throw */
+    return true;
   }
   entry.triggerBlockReason = undefined;
   noteProfileWatchFunnel(pid, 'trigger_ready');
@@ -565,6 +572,78 @@ export function applyTriggerConfluenceToWatch(
     /* optional */
   }
   return true;
+}
+
+export const ARMED_LATE_CHASE_BLOCK = 'armed_late_chase_blocked';
+
+export function isExtensionLateChase(
+  lateChase?: boolean,
+  extensionFromLevelPct?: number | null
+): boolean {
+  if (lateChase === true) return true;
+  const ext = Number(extensionFromLevelPct);
+  return Number.isFinite(ext) && ext >= DEFAULT_LATE_CHASE_EXT_PCT;
+}
+
+function noteTriggerBlock(profileId: string, reason: string): void {
+  noteProfileWatchFunnel(profileId, 'blocked', reason);
+  try {
+    const { noteTriggerOpenBlocked } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteTriggerOpenBlocked(reason);
+  } catch {
+    /* optional */
+  }
+}
+
+/**
+ * Last-step gate before armed handoff/open: still armed, not late-chase,
+ * live MC remap (MS-over-max → Scalper), then TA confluence.
+ * Confluence eval throw fail-opens; a real min-TA miss still blocks.
+ */
+export function prepareArmedWatchOpen(opts: {
+  profileId: string;
+  status?: string | null;
+  marketCapUsd?: number | null;
+  lateChase?: boolean;
+  extensionFromLevelPct?: number | null;
+  nearLevel?: boolean;
+  entry: Parameters<typeof applyTriggerConfluenceToWatch>[1];
+}): {
+  ok: boolean;
+  profileId: string;
+  action?: 'keep_watching' | 'expire';
+  reason?: string;
+} {
+  let pid = remapOverMigrationSniperMax(opts.profileId, opts.marketCapUsd);
+  const status = String(opts.status || '').toLowerCase();
+  if (status && status !== 'armed') {
+    noteTriggerBlock(pid, 'trigger_not_armed');
+    return { ok: false, profileId: pid, reason: 'trigger_not_armed' };
+  }
+  if (isExtensionLateChase(opts.lateChase, opts.extensionFromLevelPct)) {
+    noteTriggerBlock(pid, ARMED_LATE_CHASE_BLOCK);
+    return {
+      ok: false,
+      profileId: pid,
+      action: opts.nearLevel ? 'keep_watching' : 'expire',
+      reason: ARMED_LATE_CHASE_BLOCK,
+    };
+  }
+  try {
+    if (!applyTriggerConfluenceToWatch(pid, opts.entry)) {
+      return {
+        ok: false,
+        profileId: pid,
+        reason:
+          (opts.entry as { triggerBlockReason?: string }).triggerBlockReason ||
+          'confluence',
+      };
+    }
+  } catch {
+    /* fail-open on confluence eval throw */
+  }
+  return { ok: true, profileId: pid };
 }
 
 /** Offer a parked mint onto the family watch that serves this profile. */
