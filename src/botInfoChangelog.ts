@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.359',
+    title: 'Optional soft overflow to same-lane Emergency',
+    sections: ['overview'],
+    items: [
+      'Stats → RPC: Soft overflow to Emergency (default OFF). When ON, eligible same-lane reads can spill to that lane’s assigned Emergency if Main probe EWMA stays above the threshold (default 250ms) for 15s or Main is saturated.',
+      'Sends stay on Trading Main. Emergency is never a second always-on Main, never uses another lane’s keys, and is not probed while overflow is OFF or idle.',
+    ],
+  },
+  {
     version: '1.2.358',
     title: 'Restore scanner handoff when polls run long',
     sections: ['scanners', 'overview'],

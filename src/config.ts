@@ -1861,6 +1861,10 @@ export interface BotConfig {
      * unset = default 12. Env RPC_SOFT_WATCH_CAP wins if set.
      */
     softWatchCap: number | null;
+    /** Stats → RPC: spill eligible work to same-lane Emergency under Main pressure. */
+    softOverflowEnabled: boolean;
+    /** Main probe EWMA (ms) that can arm overflow after the sustain window. */
+    softOverflowEwmaMs: number;
     priorityFee: {
       minMicroLamports: number;
       maxMicroLamports: number;
@@ -2704,6 +2708,8 @@ export const config: BotConfig = {
       Number.isFinite(Number(process.env.RPC_SOFT_WATCH_CAP))
         ? Math.max(0, Math.min(200, Math.round(Number(process.env.RPC_SOFT_WATCH_CAP))))
         : null,
+    softOverflowEnabled: false,
+    softOverflowEwmaMs: 250,
     priorityFee: {
       minMicroLamports: 1_000,
       maxMicroLamports: 500_000,
@@ -3121,6 +3127,16 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
         ? config.rpc.softWatchCap
         : null,
+    rpcSoftOverflowEnabled: Boolean(config.rpc.softOverflowEnabled),
+    rpcSoftOverflowEwmaMs: (() => {
+      try {
+        const { clampSoftOverflowEwmaMs } =
+          require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+        return clampSoftOverflowEwmaMs(config.rpc.softOverflowEwmaMs);
+      } catch {
+        return 250;
+      }
+    })(),
     rpcWorkloads: (() => {
       try {
         const { getRpcWorkloadEnabledMap } =
@@ -3901,6 +3917,23 @@ function applySettingsSnapshot(
       saved.rpcSoftWatchCap == null
         ? null
         : Math.max(0, Math.min(200, Math.round(Number(saved.rpcSoftWatchCap))));
+  }
+  if (typeof saved.rpcSoftOverflowEnabled === 'boolean') {
+    config.rpc.softOverflowEnabled = saved.rpcSoftOverflowEnabled;
+  }
+  if (
+    typeof saved.rpcSoftOverflowEwmaMs === 'number' &&
+    Number.isFinite(saved.rpcSoftOverflowEwmaMs)
+  ) {
+    try {
+      const { clampSoftOverflowEwmaMs } =
+        require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+      config.rpc.softOverflowEwmaMs = clampSoftOverflowEwmaMs(
+        saved.rpcSoftOverflowEwmaMs
+      );
+    } catch {
+      config.rpc.softOverflowEwmaMs = 250;
+    }
   }
   if (saved.rpcWorkloads && typeof saved.rpcWorkloads === 'object') {
     try {
@@ -5962,6 +5995,29 @@ export function setRpcShareLoad(enabled: boolean): boolean {
   return config.rpc.shareLoad;
 }
 
+export function setRpcSoftOverflow(input: {
+  enabled?: boolean;
+  ewmaMs?: number;
+}): { enabled: boolean; ewmaMs: number } {
+  if (typeof input.enabled === 'boolean') {
+    config.rpc.softOverflowEnabled = input.enabled;
+  }
+  if (input.ewmaMs != null) {
+    const { clampSoftOverflowEwmaMs } =
+      require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+    config.rpc.softOverflowEwmaMs = clampSoftOverflowEwmaMs(input.ewmaMs);
+  }
+  persistUserSettings();
+  console.log(
+    `[rpc] Soft overflow ${config.rpc.softOverflowEnabled ? 'ON' : 'OFF'} ` +
+      `threshold ${config.rpc.softOverflowEwmaMs}ms`
+  );
+  return {
+    enabled: Boolean(config.rpc.softOverflowEnabled),
+    ewmaMs: config.rpc.softOverflowEwmaMs,
+  };
+}
+
 export type RpcOperatingMode = 'classic' | 'multiLane' | 'simple';
 
 /** @deprecated Mode selector ignored — always simple 2-lane. */
@@ -6759,6 +6815,8 @@ export function getConfigSnapshot() {
       healthIntervalMs: config.rpc.healthIntervalMs,
       failoverDownMs: config.rpc.failoverDownMs,
       shareLoad: Boolean(config.rpc.shareLoad),
+      softOverflowEnabled: Boolean(config.rpc.softOverflowEnabled),
+      softOverflowEwmaMs: config.rpc.softOverflowEwmaMs,
       softWatchCap:
         config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
           ? config.rpc.softWatchCap

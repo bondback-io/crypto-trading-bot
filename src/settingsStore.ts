@@ -136,6 +136,9 @@ export interface PersistedBotSettings {
   rpcMode?: 'classic' | 'multiLane' | 'simple';
   /** Favourites soft-watch wallet cap (0 = pause) */
   rpcSoftWatchCap?: number | null;
+  /** Soft overflow Main → same-lane Emergency (default OFF) */
+  rpcSoftOverflowEnabled?: boolean;
+  rpcSoftOverflowEwmaMs?: number;
   /** Stats → RPC workload kill-switches (test thrashing / latency) */
   rpcWorkloads?: Partial<Record<string, boolean>>;
   /** Stats → RPC exclusive Main/Emergency inventory ids per lane */

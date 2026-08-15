@@ -11054,6 +11054,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
+          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-md" title="When ON, eligible same-lane reads can spill to that lane's Emergency if Main is under sustained pressure. OFF = Main only; Emergency only on hard-fail. Default OFF.">
+              <span>Soft overflow to Emergency</span>
+              <input type="checkbox" id="rpc-soft-overflow-enabled" />
+            </label>
+            <label class="ctl ctl-sm" title="Main probe EWMA (ms) that can arm overflow after 15s. Clamp 150–800. Default 250.">
+              <span>Overflow threshold ms</span>
+              <input type="number" id="rpc-soft-overflow-ewma" value="250" min="150" max="800" step="10" />
+            </label>
+            <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftOverflow()" title="Save soft overflow toggle">Save overflow</button>
+            <span class="mint text-xs" id="rpc-soft-overflow-status">OFF (default)</span>
+          </div>
           <div id="rpc-lane-assign" class="text-xs mb-3" style="line-height:1.45;border:1px solid rgba(51,65,85,0.45);border-radius:0.5rem;padding:0.65rem 0.75rem;background:rgba(15,23,42,0.35)">
             <div class="mb-2"><strong style="color:#e2e8f0">Lane assignment</strong> <span class="mint" style="color:#64748b">— each inventory id used at most once</span></div>
             <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
@@ -11111,6 +11123,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-control-plane" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
+          <div id="rpc-overflow-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
@@ -27458,6 +27471,45 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (e.active ? ' ACTIVE' : ' idle') +
           (rpc.lanesShareEndpoint ? ' · SHARED Trading/Data provider' : '');
       }
+      const ovEl = document.getElementById('rpc-overflow-status');
+      if (ovEl) {
+        const ov = rpc.softOverflow || {};
+        const lanes = ov.lanes || {};
+        function ovPart(name, row) {
+          const r = row || {};
+          const split = r.main_vs_emergency || {};
+          return (
+            name +
+            ' ' +
+            (r.overflow_active ? 'ON' : 'off') +
+            (r.overflow_reason ? ' ' + r.overflow_reason : '') +
+            ' main/em ' +
+            (split.main != null ? split.main : 0) +
+            '/' +
+            (split.emergency != null ? split.emergency : 0)
+          );
+        }
+        if (ov.enabled) {
+          ovEl.textContent =
+            'Soft overflow ON @' +
+            (ov.ewmaMs != null ? ov.ewmaMs : 250) +
+            'ms · ' +
+            ovPart('Trading', lanes.trading) +
+            ' · ' +
+            ovPart('Data', lanes.data) +
+            ' · ' +
+            ovPart('Background', lanes.background);
+          ovEl.style.color = (lanes.trading && lanes.trading.overflow_active) ||
+            (lanes.data && lanes.data.overflow_active) ||
+            (lanes.background && lanes.background.overflow_active)
+            ? '#fbbf24'
+            : '#94a3b8';
+        } else {
+          ovEl.textContent = 'Soft overflow OFF — Emergency only on hard-fail';
+          ovEl.style.color = '#64748b';
+        }
+        syncRpcSoftOverflowFromStatus(ov);
+      }
       const gateEl = document.getElementById('rpc-gate-status');
       if (gateEl) {
         const g = rpc.gate || {};
@@ -36677,6 +36729,45 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const empty =
           !_rpcAssignDraft.trading.main || !_rpcAssignDraft.data.main;
         warn.style.display = empty ? 'block' : 'none';
+      }
+    }
+
+    function syncRpcSoftOverflowFromStatus(ov) {
+      const en = document.getElementById('rpc-soft-overflow-enabled');
+      const ms = document.getElementById('rpc-soft-overflow-ewma');
+      const st = document.getElementById('rpc-soft-overflow-status');
+      if (document.activeElement === en || document.activeElement === ms) return;
+      if (en) en.checked = Boolean(ov && ov.enabled);
+      if (ms && ov && ov.ewmaMs != null) ms.value = String(ov.ewmaMs);
+      if (st) {
+        st.textContent = ov && ov.enabled
+          ? ('ON · ' + (ov.ewmaMs != null ? ov.ewmaMs : 250) + 'ms')
+          : 'OFF (default)';
+        st.style.color = ov && ov.enabled ? '#34d399' : '#94a3b8';
+      }
+    }
+
+    async function saveRpcSoftOverflow() {
+      const en = document.getElementById('rpc-soft-overflow-enabled');
+      const ms = document.getElementById('rpc-soft-overflow-ewma');
+      const st = document.getElementById('rpc-soft-overflow-status');
+      if (st) st.textContent = 'Saving…';
+      try {
+        const data = await fetchJSON('/api/rpc/soft-overflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: Boolean(en && en.checked),
+            ewmaMs: ms ? Number(ms.value) : 250,
+          }),
+        });
+        syncRpcSoftOverflowFromStatus(data);
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        if (st) {
+          st.textContent = err.message || String(err);
+          st.style.color = '#f87171';
+        }
       }
     }
 

@@ -1123,6 +1123,50 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/rpc/soft-overflow', (_req: Request, res: Response) => {
+    try {
+      const { getSoftOverflowSnapshot } =
+        require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+      res.json({ ok: true, ...getSoftOverflowSnapshot() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/rpc/soft-overflow', (req: Request, res: Response) => {
+    try {
+      const { setRpcSoftOverflow } =
+        require('./config') as typeof import('./config');
+      const { getSoftOverflowSnapshot } =
+        require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const saved = setRpcSoftOverflow({
+        enabled:
+          body.enabled === true ||
+          body.enabled === 'true' ||
+          body.enabled === 1,
+        ewmaMs:
+          body.ewmaMs != null && Number.isFinite(Number(body.ewmaMs))
+            ? Number(body.ewmaMs)
+            : undefined,
+      });
+      res.json({
+        ok: true,
+        ...saved,
+        ...getSoftOverflowSnapshot(),
+        rpc: getRpcStats(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/rpc/share-load', (req: Request, res: Response) => {
     try {
       const { setRpcShareLoad } = require('./config') as typeof import('./config');

@@ -909,6 +909,66 @@ function laneState(role: NormalizedRpcRole): EndpointState | null {
   return backgroundActive();
 }
 
+function sameLaneEmergency(role: NormalizedRpcRole): EndpointState | null {
+  if (role === 'primary') return emergencyPublic;
+  if (role === 'secondary') return dataFailover;
+  return backgroundEmergency;
+}
+
+function isHardFailHopActive(role: NormalizedRpcRole): boolean {
+  if (role === 'primary') return tradingHop >= 1;
+  if (role === 'secondary') return dataOnFailover;
+  return backgroundIdx >= 1;
+}
+
+function tickSoftOverflowFromLanes(): void {
+  try {
+    const {
+      tickSoftOverflowLane,
+      roleToOverflowLane,
+    } = require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+    const gate = getRpcGateSnapshot();
+    const samples: Array<{
+      role: NormalizedRpcRole;
+      pref: EndpointState | null;
+      em: EndpointState | null;
+      gateKey: 'primary' | 'secondary' | 'background';
+    }> = [
+      {
+        role: 'primary',
+        pref: tradingPref,
+        em: emergencyPublic,
+        gateKey: 'primary',
+      },
+      {
+        role: 'secondary',
+        pref: dataPref,
+        em: dataFailover,
+        gateKey: 'secondary',
+      },
+      {
+        role: 'background',
+        pref: backgroundPref,
+        em: backgroundEmergency,
+        gateKey: 'background',
+      },
+    ];
+    for (const s of samples) {
+      const g = gate.lanes[s.gateKey];
+      tickSoftOverflowLane(roleToOverflowLane(s.role), {
+        ewmaMs: s.pref?.probeLatencyMs ?? s.pref?.latencyMs ?? null,
+        inFlight: g.inFlight,
+        queued: g.queued,
+        max: g.max,
+        emergencyAssigned: Boolean(s.em),
+        emergencyUsable: Boolean(s.em && usable(s.em)),
+      });
+    }
+  } catch {
+    /* */
+  }
+}
+
 function isRateLimited(st: EndpointState): boolean {
   return st.rateLimitedUntil > Date.now();
 }
@@ -1213,6 +1273,7 @@ export function getConnection(role?: RpcRole): Connection {
   }
   ensureEndpoints();
   const norm = normalizeRole(role ?? currentRole());
+  tickSoftOverflowFromLanes();
   const st = laneState(norm);
   if (!st) {
     if (norm === 'secondary' && isLaneRateLimited('secondary')) {
@@ -1225,6 +1286,31 @@ export function getConnection(role?: RpcRole): Connection {
       throw new Error('rpc_background_rate_limited');
     }
     throw new Error('No RPC endpoint configured');
+  }
+  if (!isHardFailHopActive(norm)) {
+    try {
+      const {
+        shouldOverflowCall,
+        noteSoftOverflowDest,
+        roleToOverflowLane,
+      } = require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+      const lane = roleToOverflowLane(norm);
+      const em = sameLaneEmergency(norm);
+      const gate = getRpcGateSnapshot().lanes[norm];
+      if (
+        em &&
+        usable(em) &&
+        em !== st &&
+        shouldOverflowCall(lane, feature, gate, true)
+      ) {
+        noteSoftOverflowDest(lane, 'emergency');
+        noteCallTraffic(em.endpoint.label, feature, norm);
+        return em.connection;
+      }
+      noteSoftOverflowDest(lane, 'main');
+    } catch {
+      /* overflow optional */
+    }
   }
   noteCallTraffic(
     st.endpoint.label,
@@ -1564,6 +1650,7 @@ function refreshRpcLoadSignalsFromLanes(): void {
       backgroundHealthy: bgFeatureOn ? Boolean(bActive?.healthy) : true,
       primaryQueued: gate.lanes.primary.queued,
     });
+    tickSoftOverflowFromLanes();
   } catch {
     /* */
   }
@@ -2021,6 +2108,37 @@ function buildRpcStats() {
       }
     })(),
     laneAssignments: asg,
+    softOverflow: (() => {
+      try {
+        const { getSoftOverflowSnapshot } =
+          require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+        return getSoftOverflowSnapshot();
+      } catch {
+        return {
+          enabled: false,
+          ewmaMs: 250,
+          sustainMs: 15_000,
+          recoverMs: 20_000,
+          lanes: {
+            trading: {
+              overflow_active: false,
+              overflow_reason: 'off',
+              main_vs_emergency: { main: 0, emergency: 0 },
+            },
+            data: {
+              overflow_active: false,
+              overflow_reason: 'off',
+              main_vs_emergency: { main: 0, emergency: 0 },
+            },
+            background: {
+              overflow_active: false,
+              overflow_reason: 'off',
+              main_vs_emergency: { main: 0, emergency: 0 },
+            },
+          },
+        };
+      }
+    })(),
     lanes: {
       trading: {
         label: tActive?.endpoint.label || (tradingPref ? tradingPref.endpoint.label : 'none'),
@@ -2525,14 +2643,46 @@ export function startRpcHealthMonitor(): void {
       ) {
         await probeState(backgroundPref, 8_000);
       }
-      // Emergency only when Trading already failed over onto it.
+      // Emergency only when Trading already failed over, or soft overflow is armed.
+      let overflowArmed: {
+        trading?: boolean;
+        data?: boolean;
+        background?: boolean;
+      } = {};
+      try {
+        const { isSoftOverflowArmed } =
+          require('./rpcSoftOverflow') as typeof import('./rpcSoftOverflow');
+        overflowArmed = {
+          trading: isSoftOverflowArmed('trading'),
+          data: isSoftOverflowArmed('data'),
+          background: isSoftOverflowArmed('background'),
+        };
+      } catch {
+        /* */
+      }
       if (
-        tradingHop >= 1 &&
+        (tradingHop >= 1 || overflowArmed.trading) &&
         emergencyPublic &&
         !isHardFailed(emergencyPublic) &&
         !isRateLimited(emergencyPublic)
       ) {
         await probeState(emergencyPublic, 6_000);
+      }
+      if (
+        overflowArmed.data &&
+        dataFailover &&
+        !isHardFailed(dataFailover) &&
+        !isRateLimited(dataFailover)
+      ) {
+        await probeState(dataFailover, 6_000);
+      }
+      if (
+        overflowArmed.background &&
+        backgroundEmergency &&
+        !isHardFailed(backgroundEmergency) &&
+        !isRateLimited(backgroundEmergency)
+      ) {
+        await probeState(backgroundEmergency, 6_000);
       }
       if (tradingHop > 0 && usable(tradingPref)) {
         if (!tradingRecoverAt) tradingRecoverAt = Date.now() + TRADING_RECOVER_MS;
