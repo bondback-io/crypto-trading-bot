@@ -1434,6 +1434,20 @@ function hardStopMinFillPriceSol(
   return slPrice * (1 - HARD_SL_MAX_GAP_SLIPPAGE);
 }
 
+function isMigrationEventLane(position: Position): boolean {
+  return position.shortTermStrategyId === 'migration_event';
+}
+
+function migrationEventCurveProgressPct(mint: string): number | null {
+  try {
+    const { getGradWatchCurveProgressPct } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    return getGradWatchCurveProgressPct(mint);
+  } catch {
+    return null;
+  }
+}
+
 export class PaperTrader {
   private balanceSol: number;
   private startingBalanceSol: number;
@@ -3651,8 +3665,9 @@ export class PaperTrader {
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
     // PCL exit priority: hard SL / disaster first (never softened by PCL;
-    // still fail-soft on poisoned marks that circulating MC does not confirm)
-    {
+    // still fail-soft on poisoned marks that circulating MC does not confirm).
+    // Migration Event lane: event SL (−15%) runs before the portfolio −30% floor.
+    if (!isMigrationEventLane(position)) {
       const rulesEarly = getStrategyRiskRules(position.strategyKind);
       const hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
       const hardSl = hardSlRaw > 0 ? -Math.abs(hardSlRaw) : hardSlRaw;
@@ -3874,6 +3889,7 @@ export class PaperTrader {
           volumeMult: params.volumeMult,
           maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
           highWaterMarkSol: position.highWaterMarkSol,
+          curveProgressPct: migrationEventCurveProgressPct(position.mint),
         });
       } else {
         scalpAction = evaluateShortTermExit({
@@ -4040,7 +4056,10 @@ export class PaperTrader {
                 position.scalpSlPct ?? position.stopLossPct
               )
             : undefined;
-        if (scalpAction.exitKind === 'scalp_sl') {
+        if (
+          scalpAction.exitKind === 'scalp_sl' &&
+          !isMigrationEventLane(position)
+        ) {
           const scalpSlRaw = position.scalpSlPct ?? position.stopLossPct;
           const scalpSl = scalpSlRaw > 0 ? -Math.abs(scalpSlRaw) : scalpSlRaw;
           if (!this.hardStopLossAllowed(position, markPrice, scalpSl)) {
@@ -4585,8 +4604,9 @@ export class PaperTrader {
       const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
       // PCL exit priority 1: hard SL / disaster first (never softened by PCL;
-      // still fail-soft on poisoned marks that circulating MC does not confirm)
-      {
+      // still fail-soft on poisoned marks that circulating MC does not confirm).
+      // Migration Event lane: event SL (−15%) runs before the portfolio −30% floor.
+      if (!isMigrationEventLane(position)) {
         const rulesEarly = getStrategyRiskRules(position.strategyKind);
         let hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
         // Mirrored positions: soft SL overlay (tighter). Hard floor still absolute.
@@ -4969,6 +4989,7 @@ export class PaperTrader {
             volumeMult: params.volumeMult,
             maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
             highWaterMarkSol: position.highWaterMarkSol,
+            curveProgressPct: migrationEventCurveProgressPct(position.mint),
           });
         } else {
           scalpAction = evaluateShortTermExit({
@@ -5111,7 +5132,10 @@ export class PaperTrader {
             'sell',
             `${label}: [${tag}|${strat}] ${scalpAction.reason}`
           );
-          if (scalpAction.exitKind === 'scalp_sl') {
+          if (
+            scalpAction.exitKind === 'scalp_sl' &&
+            !isMigrationEventLane(position)
+          ) {
             const scalpSlRaw = position.scalpSlPct ?? position.stopLossPct;
             const scalpSl = scalpSlRaw > 0 ? -Math.abs(scalpSlRaw) : scalpSlRaw;
             if (!this.hardStopLossAllowed(position, currentPrice, scalpSl)) {

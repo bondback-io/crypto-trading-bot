@@ -279,6 +279,63 @@ export function shouldLimitMigrationConcurrent(input: {
   return { limit: false };
 }
 
+/** Last-N share ceiling while migration_hold_reclaim is weak — includes Grad-armed. */
+const MS_SHARE_CAP_RESTRICTED = 0.32;
+
+export function getMigrationAttentionShareCap(): number {
+  return MS_SHARE_CAP_RESTRICTED;
+}
+
+/**
+ * When migration_hold_reclaim is down_ranked/restricted, cap MS mix (incl. Grad-armed)
+ * so the book cannot stay ~70% sniper. Concurrent Grad bypass is unchanged.
+ * Pass familyState / migrationShare / attentionTotal to unit-test without live state.
+ */
+export function shouldThrottleMigrationAdmit(input: {
+  profileId?: string | null;
+  familyState?: 'promoted' | 'neutral' | 'down_ranked' | 'restricted';
+  migrationShare?: number;
+  attentionTotal?: number;
+}): { throttle: boolean; reason?: string } {
+  if (isV235Baseline()) return { throttle: false };
+  if (String(input.profileId || '') !== 'migration_sniper') {
+    return { throttle: false };
+  }
+  let gov: string | null =
+    input.familyState != null ? String(input.familyState) : null;
+  if (gov == null) {
+    try {
+      const { getFamilyGovernorState } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      gov = getFamilyGovernorState('migration_hold_reclaim');
+    } catch {
+      return { throttle: false };
+    }
+  }
+  if (gov !== 'down_ranked' && gov !== 'restricted') {
+    return { throttle: false };
+  }
+  const att =
+    input.migrationShare != null && input.attentionTotal != null
+      ? null
+      : getProfileAttentionShare();
+  const share =
+    input.migrationShare != null
+      ? input.migrationShare
+      : att?.shares.migration ?? 0;
+  const total =
+    input.attentionTotal != null ? input.attentionTotal : att?.total ?? 0;
+  if (total < 8 || share < MS_SHARE_CAP_RESTRICTED) {
+    return { throttle: false };
+  }
+  return {
+    throttle: true,
+    reason:
+      `MS attention ${(share * 100).toFixed(0)}% ≥ ${(MS_SHARE_CAP_RESTRICTED * 100).toFixed(0)}% cap` +
+      ` while migration_hold_reclaim ${gov}`,
+  };
+}
+
 /**
  * True when a discretionary (non-armed) Scalper-family admit should be skipped
  * to leave room for Dip/Trend/Migration.

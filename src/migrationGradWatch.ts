@@ -820,6 +820,13 @@ export function getMigrationGradWatchStatus(limit = 20): {
   };
 }
 
+/** Live curve % for an open MS position (never-mig stall). */
+export function getGradWatchCurveProgressPct(mint: string): number | null {
+  const w = watches.get(String(mint || '').trim());
+  const p = w?.curveProgressPct;
+  return p != null && Number.isFinite(Number(p)) ? Number(p) : null;
+}
+
 /** Offer from near-mig wallet / scanner candidates. */
 export function offerMigrationGradWatchFromCandidate(c: {
   mint: string;

@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.364',
+    title: 'MS late-chase abort + event-SL first',
+    sections: ['tradecraft', 'microbots', 'learning'],
+    items: [
+      'Migration Sniper late-chase buy re-gate is wired — remapped Grad reclaim with lateChaseAtEntry no longer opens.',
+      'Migration Event SL (−15%) runs before the portfolio hard floor (−30%) and does not wait on circulating-MC confirm.',
+      'Never-migrated bags cut after 3m if still red and curve is not ≥99% (greg-class 12m safety-timer bleed).',
+      'While migration_hold_reclaim is restricted/down-ranked, MS attention is capped at 32% including Grad-armed. Steady late-chase ceiling stays 35%.',
+    ],
+  },
+  {
     version: '1.2.363',
     title: 'Unstick dashboard refresh and signal intake',
     sections: ['overview', 'scanners', 'tradecraft'],

@@ -575,6 +575,7 @@ function lateChaseBuyReGateReason(
     const {
       shouldLimitLateChaseShare,
       shouldSkipFamilyGovernor,
+      shouldAbortMsLateChaseBuy,
       isAdmissionBaselineV235,
     } = require('./expectancyLift') as typeof import('./expectancyLift');
     if (isAdmissionBaselineV235()) return null;
@@ -595,6 +596,13 @@ function lateChaseBuyReGateReason(
         signal.candidateTradeProfileId ||
         ''
     );
+    const msAbort = shouldAbortMsLateChaseBuy({
+      profileId,
+      lateChaseAtEntry: true,
+    });
+    if (msAbort.abort) {
+      return msAbort.reason || 'MS late-chase buy re-gate';
+    }
     const lim = shouldLimitLateChaseShare({
       lateChase: true,
       family: 'late_chase',
@@ -7607,6 +7615,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         shouldThrottleScalperAdmit,
         shouldLimitScalperConcurrent,
         shouldLimitMigrationConcurrent,
+        shouldThrottleMigrationAdmit,
         shouldLimitSteadyConcurrent,
         shouldSoftSkipUnarmedScalperHabit,
         getProfileAttentionShare,
@@ -7647,6 +7656,15 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         if (migConc.limit) {
           attFails.push(
             `${passer.name}: ${migConc.reason || 'MS concurrent cap'}`
+          );
+          continue;
+        }
+        const migAtt = shouldThrottleMigrationAdmit({
+          profileId: passer.profileId,
+        });
+        if (migAtt.throttle) {
+          attFails.push(
+            `${passer.name}: ${migAtt.reason || 'MS attention cap'}`
           );
           continue;
         }

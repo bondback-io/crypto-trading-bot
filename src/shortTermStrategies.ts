@@ -695,6 +695,8 @@ export interface MigrationEventExitView {
   maxHoldAfterMigrateMs?: number;
   /** Peak mark since open — used for post-mig no-pop cut */
   highWaterMarkSol?: number;
+  /** Live bonding-curve % when known — never-mig stall if not advancing */
+  curveProgressPct?: number | null;
 }
 
 /**
@@ -716,6 +718,9 @@ export function evaluateMigrationEventExit(
   const NO_POP_AFTER_MIG_MS = 75_000;
   const NO_POP_PEAK_PCT = 2;
   const FLAT_VOL_RUNNER_PCT = 12;
+  /** Still on-curve and red after 3m — do not wait the ~12m safety timer. */
+  const NEVER_MIG_STALL_MS = 180_000;
+  const NEVER_MIG_NEAR_PCT = 99;
   const slPct = view.slPct > 0 ? -Math.abs(view.slPct) : view.slPct;
   const spikePct =
     view.spikePct != null && view.spikePct > 0 ? view.spikePct : 8;
@@ -750,6 +755,23 @@ export function evaluateMigrationEventExit(
         exitKind: 'scalp_timer',
         reason: `${label} safety timer ${heldSec}s — never migrated (mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
       };
+    }
+    // Curve not advancing / unknown and already red — cut before 12m bag.
+    if (ageMs >= NEVER_MIG_STALL_MS && pnlPct < 0) {
+      const curve =
+        view.curveProgressPct != null &&
+        Number.isFinite(Number(view.curveProgressPct))
+          ? Number(view.curveProgressPct)
+          : null;
+      const nearMigrate = curve != null && curve >= NEVER_MIG_NEAR_PCT;
+      if (!nearMigrate) {
+        const heldSec = Math.max(0, Math.round(ageMs / 1000));
+        return {
+          type: 'full',
+          exitKind: 'scalp_timer',
+          reason: `${label} never-mig stall ${heldSec}s (mark ${pnlPct.toFixed(1)}%)`,
+        };
+      }
     }
     return { type: 'none' };
   }

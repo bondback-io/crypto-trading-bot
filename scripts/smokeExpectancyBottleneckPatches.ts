@@ -11,6 +11,7 @@ import {
 } from '../src/expectancyLift';
 import { evaluateMigrationEventExit } from '../src/shortTermStrategies';
 import { resolveExitPolicy } from '../src/profileTradeIntelligence';
+import { shouldThrottleMigrationAdmit } from '../src/profileAttention';
 
 let failed = 0;
 function check(label: string, ok: boolean, detail?: string): void {
@@ -184,6 +185,80 @@ check(
   'disc MS partial threshold capped at 10%',
   discPartial.earlyPartialTpPct === 10,
   String(discPartial.earlyPartialTpPct)
+);
+
+const neverMigStall = evaluateMigrationEventExit({
+  ...slView,
+  migrated: false,
+  migratedAtMs: null,
+  currentPriceSol: 0.94,
+  nowMs: openedAt + 180_000,
+  curveProgressPct: 93,
+});
+check(
+  'pre-mig 180s red + curve not near 99 → never-mig stall',
+  neverMigStall.type === 'full' && /never-mig stall/i.test(neverMigStall.reason),
+  neverMigStall.type === 'full' ? neverMigStall.reason : neverMigStall.type
+);
+
+const neverMigNear = evaluateMigrationEventExit({
+  ...slView,
+  migrated: false,
+  migratedAtMs: null,
+  currentPriceSol: 0.94,
+  nowMs: openedAt + 180_000,
+  curveProgressPct: 99.2,
+});
+check(
+  'pre-mig 180s red but curve ≥99 → hold for migrate',
+  neverMigNear.type === 'none'
+);
+
+const neverMigEarly = evaluateMigrationEventExit({
+  ...slView,
+  migrated: false,
+  migratedAtMs: null,
+  currentPriceSol: 0.94,
+  nowMs: openedAt + 60_000,
+  curveProgressPct: 93,
+});
+check(
+  'pre-mig 60s red → still hold',
+  neverMigEarly.type === 'none'
+);
+
+const msShareCap = shouldThrottleMigrationAdmit({
+  profileId: 'migration_sniper',
+  familyState: 'restricted',
+  migrationShare: 0.68,
+  attentionTotal: 30,
+});
+check(
+  'MS attention cap binds when family restricted and share 68%',
+  msShareCap.throttle === true,
+  msShareCap.reason
+);
+
+const msShareOk = shouldThrottleMigrationAdmit({
+  profileId: 'migration_sniper',
+  familyState: 'restricted',
+  migrationShare: 0.2,
+  attentionTotal: 30,
+});
+check(
+  'MS attention cap idle under 32% even if restricted',
+  msShareOk.throttle === false
+);
+
+const msShareNeutral = shouldThrottleMigrationAdmit({
+  profileId: 'migration_sniper',
+  familyState: 'neutral',
+  migrationShare: 0.68,
+  attentionTotal: 30,
+});
+check(
+  'MS attention cap idle when family neutral',
+  msShareNeutral.throttle === false
 );
 
 if (failed) {
