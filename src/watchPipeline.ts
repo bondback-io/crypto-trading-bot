@@ -34,6 +34,13 @@ export interface WatchPipelineSnapshot {
   expired_from_volume_collapse_count: number;
   saved_from_decay_by_volume_expansion_count: number;
   avg_time_to_decay_by_profile: Record<string, number>;
+  candidates_by_source: Record<string, number>;
+  candidates_by_category: Record<string, number>;
+  merge_deduped_count: number;
+  dropped_pre_gate_by_reason: Record<string, number>;
+  exclusive_route_counts?: Record<string, number>;
+  duplicate_token_across_steady_hwr?: number;
+  hwr_watch_rejects_by_reason?: Record<string, number>;
 }
 
 const WINDOW_MS = 60_000;
@@ -66,6 +73,27 @@ const decayTimeByProfile: Record<string, { sum: number; n: number }> = {};
 function bump(map: Record<string, number>, reason: string): void {
   const key = String(reason || 'unknown').slice(0, 80);
   map[key] = (map[key] || 0) + 1;
+}
+
+let lastFanInBySource: Record<string, number> = {};
+let lastFanInByCategory: Record<string, number> = {};
+let lastMergeDeduped = 0;
+const droppedPreGateByReason: Record<string, number> = {};
+
+export function noteDroppedPreGate(reason: string, n = 1): void {
+  const count = Math.max(1, Math.floor(n));
+  droppedPreGateByReason[reason] =
+    (droppedPreGateByReason[reason] || 0) + count;
+}
+
+export function noteScannerFanIn(input: {
+  bySource?: Record<string, number>;
+  byCategory?: Record<string, number>;
+  mergeDeduped?: number;
+}): void {
+  lastFanInBySource = { ...(input.bySource || {}) };
+  lastFanInByCategory = { ...(input.byCategory || {}) };
+  lastMergeDeduped = Number(input.mergeDeduped) || 0;
 }
 
 export function noteScannerCandidate(n = 1): void {
@@ -213,5 +241,55 @@ export function getWatchPipelineSnapshot(opts?: {
     saved_from_decay_by_volume_expansion_count:
       savedFromDecayByVolumeExpansionCount,
     avg_time_to_decay_by_profile: avgDecay,
+    candidates_by_source: { ...lastFanInBySource },
+    candidates_by_category: { ...lastFanInByCategory },
+    merge_deduped_count: lastMergeDeduped,
+    dropped_pre_gate_by_reason: { ...droppedPreGateByReason },
+    exclusive_route_counts: (() => {
+      try {
+        const { getExclusiveRouteCounts } =
+          require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+        return getExclusiveRouteCounts();
+      } catch {
+        return {};
+      }
+    })(),
+    hwr_watch_rejects_by_reason: (() => {
+      try {
+        const { getQualityParkDenyCounters } =
+          require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+        return getQualityParkDenyCounters().high_win_rate as unknown as Record<
+          string,
+          number
+        >;
+      } catch {
+        return {};
+      }
+    })(),
+    duplicate_token_across_steady_hwr: (() => {
+      const inv = opts?.activeByProfile || {};
+      void inv;
+      try {
+        const { getProfileWatchInventory } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        const inventory = getProfileWatchInventory();
+        const steady = new Set(
+          (inventory.steady_compounder?.entries || [])
+            .filter(
+              (e: { status?: string }) =>
+                e.status === 'watching' || e.status === 'armed'
+            )
+            .map((e: { mint?: string }) => String(e.mint || ''))
+        );
+        let dup = 0;
+        for (const e of inventory.high_win_rate?.entries || []) {
+          if (e.status !== 'watching' && e.status !== 'armed') continue;
+          if (steady.has(String(e.mint || ''))) dup += 1;
+        }
+        return dup;
+      } catch {
+        return 0;
+      }
+    })(),
   };
 }

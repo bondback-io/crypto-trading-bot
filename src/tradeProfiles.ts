@@ -407,6 +407,11 @@ export interface TradeProfileMatchRules {
   minTaPlaybookConfluences?: number;
   /** Max concurrent armed watches for this profile (WatchScore top-K). Default 5. */
   maxArmedWatches?: number;
+  /**
+   * When true, Steady and HWR may share the same quality-park mint on both lists.
+   * Default false = exclusive winner only.
+   */
+  allowSteadyHwrOverlap?: boolean;
 }
 
 /** Persisted user edits on top of official catalog defaults */
@@ -923,7 +928,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternMinMarketCapUsd: DEFAULT_HWR_QUALITY_FILTER.minMarketCapUsd,
       qualityFilter: { ...DEFAULT_HWR_QUALITY_FILTER },
       minMarketCapUsd: 500_000,
-      preferMarketCapUsd: 50_000_000,
+      preferMarketCapUsd: 80_000_000,
+      maxMarketCapUsd: 500_000_000,
       minHolders: 150,
       maxTop10HoldPct: 32,
       minVolumeH1Usd: 15_000,
@@ -945,8 +951,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       hardLateChase: true,
       armingEnabled: true,
       watchEnabled: true,
-      minTaPlaybookConfluences: 2,
+      minTaPlaybookConfluences: 3,
       maxArmedWatches: 5,
+      allowSteadyHwrOverlap: false,
     },
     exitRules: {
       takeProfitPctMin: 40,
@@ -1096,6 +1103,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minTokenAgeHours: 3,
       minMarketCapUsd: 50_000,
       preferMarketCapUsd: 50_000_000,
+      maxMarketCapUsd: 150_000_000,
       minHolders: 80,
       maxTop10HoldPct: 35,
       minVolumeH1Usd: 4_000,
@@ -1117,6 +1125,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       watchEnabled: true,
       minTaPlaybookConfluences: 2,
       maxArmedWatches: 5,
+      allowSteadyHwrOverlap: false,
     },
     exitRules: {
       forceScalp: false,
@@ -1997,15 +2006,33 @@ export function remapOverMigrationSniperMax(
 }
 
 /**
- * Non-exclusive watch routing: enabled family profiles, plus preferred.
- * Dip Buyer owns $1M–$500M identity; Steady/HWR still multi-admit via playbook
- * (not min-MC-only, not leftovers above $500M). Above Dip max, Dip is omitted.
+ * Exclusive Steady vs HWR watch routing (1.2.373).
+ * Dump-reclaim in the Dip band stays Dip-only. Quality parks stamp one winner.
+ * `allowSteadyHwrOverlap` restores the old multi-admit.
  */
 export function resolveWatchEligibleProfileIds(opts: {
   family: WatchFamilyId;
   preferredProfileId?: string | null;
   dipQualityPark?: boolean;
   marketCapUsd?: number | null;
+  source?: string;
+  liquidityUsd?: number | null;
+  volumeH1Usd?: number | null;
+  holderCount?: number | null;
+  top10HoldPct?: number | null;
+  nearKeyFib?: boolean;
+  nearSupport?: boolean;
+  dropFromPeakPct?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+  multiTfSupportHits?: number;
+  priceChangeH1Pct?: number | null;
+  priceChangeH6Pct?: number | null;
+  priceChange24hPct?: number | null;
+  tokenAgeHours?: number | null;
+  symbol?: string | null;
+  name?: string | null;
 }): string[] {
   const familyIds = [...WATCH_FAMILY_PROFILE_IDS[opts.family]];
   let flags: Record<string, boolean> = {};
@@ -2030,33 +2057,81 @@ export function resolveWatchEligibleProfileIds(opts: {
 
   const mc = Number(opts.marketCapUsd);
   const aboveMax = isAboveDipBuyerMaxMc(mc);
+  const inDipBand = isInDipBuyerMcBand(mc);
   const qualityEligible =
     opts.dipQualityPark === true ||
-    (Number.isFinite(mc) && mc >= QUALITY_PARK_MULTI_ADMIT_MIN_MC_USD);
+    String(opts.source || '') === 'medium' ||
+    String(opts.source || '') === 'majors';
+
+  if (!qualityEligible) {
+    const out: string[] = [];
+    if (!aboveMax && enabled.includes('dip_buyer')) out.push('dip_buyer');
+    if (
+      pref &&
+      (familyIds as string[]).includes(pref) &&
+      flags[pref] !== false &&
+      !(pref === 'dip_buyer' && aboveMax)
+    ) {
+      if (!out.includes(pref)) out.unshift(pref);
+    }
+    return out.length > 0 ? out : ['dip_buyer'];
+  }
+
+  try {
+    const {
+      routeExclusiveQualityPark,
+      isQualityDumpReclaim,
+    } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+    const dumpReclaim = isQualityDumpReclaim({
+      dropFromPeakPct: opts.dropFromPeakPct,
+      nearKeyFib: opts.nearKeyFib,
+      nearSupport: opts.nearSupport,
+    });
+    const routed = routeExclusiveQualityPark({
+      source: opts.source || (qualityEligible ? 'medium' : undefined),
+      marketCapUsd: opts.marketCapUsd,
+      liquidityUsd: opts.liquidityUsd,
+      volumeH1Usd: opts.volumeH1Usd,
+      holderCount: opts.holderCount,
+      top10HoldPct: opts.top10HoldPct,
+      nearKeyFib: opts.nearKeyFib,
+      nearSupport: opts.nearSupport,
+      supportPriceSol: opts.supportPriceSol,
+      fib05PriceSol: opts.fib05PriceSol,
+      fib618PriceSol: opts.fib618PriceSol,
+      multiTfSupportHits: opts.multiTfSupportHits,
+      tokenAgeHours: opts.tokenAgeHours,
+      dropFromPeakPct: opts.dropFromPeakPct,
+      symbol: opts.symbol,
+      name: opts.name,
+      movement: {
+        priceChangeH1Pct: opts.priceChangeH1Pct,
+        priceChangeH6Pct: opts.priceChangeH6Pct,
+        priceChange24hPct: opts.priceChange24hPct,
+        range24hPct:
+          opts.priceChange24hPct != null
+            ? Math.abs(Number(opts.priceChange24hPct))
+            : null,
+        volumeH1Usd: opts.volumeH1Usd,
+      },
+      inDipBand,
+      dumpReclaim: dumpReclaim && inDipBand && !aboveMax,
+    });
+    const ids = routed.eligibleProfileIds.filter(
+      (id) => flags[id] !== false
+    );
+    if (ids.length > 0) return ids;
+    if (routed.reason === 'rejected_both') {
+      return inDipBand && !aboveMax && dumpReclaim ? ['dip_buyer'] : [];
+    }
+  } catch {
+    /* fall through */
+  }
 
   const out: string[] = [];
-  if (!aboveMax && enabled.includes('dip_buyer')) {
-    out.push('dip_buyer');
-  }
-  if (qualityEligible) {
-    for (const id of ['steady_compounder', 'high_win_rate'] as const) {
-      if (flags[id] !== false && !out.includes(id)) out.push(id);
-    }
-  }
-  if (
-    pref &&
-    (familyIds as string[]).includes(pref) &&
-    flags[pref] !== false &&
-    !(pref === 'dip_buyer' && aboveMax)
-  ) {
-    if (!out.includes(pref)) out.unshift(pref);
-    else {
-      out.splice(out.indexOf(pref), 1);
-      out.unshift(pref);
-    }
-  }
+  if (!aboveMax && enabled.includes('dip_buyer')) out.push('dip_buyer');
   if (out.length > 0) return out;
-  return aboveMax ? ['steady_compounder'] : ['dip_buyer'];
+  return aboveMax ? [] : ['dip_buyer'];
 }
 
 export function setSmartBotProfilesEnabled(

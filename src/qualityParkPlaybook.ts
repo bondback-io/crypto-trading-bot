@@ -12,6 +12,13 @@ const MEDIUM_MIN_VOL_H1_USD = 12_000;
 const MAJORS_MIN_VOL_H1_USD = 20_000;
 const MAJORS_MIN_LIQ_USD = 40_000;
 
+/** Exclusive watch bands (catalog match knobs may override). */
+export const STEADY_WATCH_MIN_MC_USD = 20_000_000;
+export const STEADY_WATCH_MAX_MC_USD = 150_000_000;
+export const HWR_WATCH_MIN_MC_USD = 80_000_000;
+export const HWR_WATCH_MAX_MC_USD = 500_000_000;
+export const QUALITY_DUMP_RECLAIM_DROP_PCT = 8;
+
 /** Arm / trigger tags */
 export const STEADY_STRUCTURE_ARM = 'steady_structure_arm';
 export const STEADY_RECLAIM_TRIGGER = 'steady_reclaim_trigger';
@@ -43,7 +50,13 @@ export type QualityParkDenyKey =
   | 'soft_allow_preview'
   | 'confluence'
   | 'safety'
-  | 'late_chase';
+  | 'late_chase'
+  | 'hwr_mc_band'
+  | 'hwr_low_movement'
+  | 'hwr_low_liquidity'
+  | 'hwr_no_structure'
+  | 'hwr_holder_risk'
+  | 'hwr_asset_proxy_excluded';
 
 export type QualityParkProfileId = 'steady_compounder' | 'high_win_rate';
 
@@ -80,6 +93,11 @@ export interface QualityParkEvalInput {
   movement: QualityMovementSnapshot;
   softAllowDenied?: boolean | null;
   lateChase?: boolean;
+  top10HoldPct?: number | null;
+  tokenAgeHours?: number | null;
+  dropFromPeakPct?: number | null;
+  symbol?: string | null;
+  name?: string | null;
 }
 
 export interface QualityParkEvalResult {
@@ -108,6 +126,12 @@ const emptyDeny = (): DenyBucket => ({
   confluence: 0,
   safety: 0,
   late_chase: 0,
+  hwr_mc_band: 0,
+  hwr_low_movement: 0,
+  hwr_low_liquidity: 0,
+  hwr_no_structure: 0,
+  hwr_holder_risk: 0,
+  hwr_asset_proxy_excluded: 0,
 });
 
 const denyByProfile: Record<QualityParkProfileId, DenyBucket> = {
@@ -125,6 +149,8 @@ const funnelByProfile = {
     rotated_stale: 0,
     low_movement: 0,
     soft_movement: 0,
+    insert_denied: 0,
+    trigger_denied: 0,
   },
   high_win_rate: {
     candidates_seen: 0,
@@ -135,8 +161,42 @@ const funnelByProfile = {
     rotated_stale: 0,
     low_movement: 0,
     soft_movement: 0,
+    insert_denied: 0,
+    trigger_denied: 0,
   },
 };
+
+export type ExclusiveRouteReason =
+  | 'routed_steady'
+  | 'routed_hwr'
+  | 'both_eligible_but_split'
+  | 'rejected_both'
+  | 'routed_dip_dump'
+  | 'overlap';
+
+export interface ExclusiveRouteResult {
+  eligibleProfileIds: string[];
+  preferredProfileId: string | null;
+  reason: ExclusiveRouteReason;
+}
+
+const exclusiveRouteCounts: Record<ExclusiveRouteReason, number> = {
+  routed_steady: 0,
+  routed_hwr: 0,
+  both_eligible_but_split: 0,
+  rejected_both: 0,
+  routed_dip_dump: 0,
+  overlap: 0,
+};
+
+export function noteExclusiveRoute(reason: ExclusiveRouteReason, n = 1): void {
+  exclusiveRouteCounts[reason] =
+    (exclusiveRouteCounts[reason] || 0) + Math.max(1, Math.floor(n));
+}
+
+export function getExclusiveRouteCounts(): Record<ExclusiveRouteReason, number> {
+  return { ...exclusiveRouteCounts };
+}
 
 const deadTapeSince = new Map<string, number>();
 /** Concurrent soft-movement arms (Steady+HWR combined). */
@@ -443,14 +503,14 @@ function evaluateSteadyArm(
     };
   }
   const mc = Number(input.marketCapUsd);
-  if (!Number.isFinite(mc) || mc < MEDIUM_MIN_MC_USD) {
+  if (!Number.isFinite(mc) || mc < STEADY_WATCH_MIN_MC_USD || mc > STEADY_WATCH_MAX_MC_USD) {
     noteQualityParkDeny('steady_compounder', 'mc_band');
     return {
       ok: false,
       profileId: 'steady_compounder',
       armTag: null,
       denyKey: 'mc_band',
-      reason: 'MC below medium band',
+      reason: 'MC outside Steady $20M–$150M watch band',
       movementActive,
       chip,
       softArmOk: false,
@@ -579,14 +639,14 @@ function evaluateHwrArm(
     };
   }
   const mc = Number(input.marketCapUsd);
-  if (!Number.isFinite(mc) || mc < MEDIUM_MIN_MC_USD) {
-    noteQualityParkDeny('high_win_rate', 'mc_band');
+  if (!Number.isFinite(mc) || mc < HWR_WATCH_MIN_MC_USD || mc > HWR_WATCH_MAX_MC_USD) {
+    noteQualityParkDeny('high_win_rate', 'hwr_mc_band');
     return {
       ok: false,
       profileId: 'high_win_rate',
       armTag: null,
-      denyKey: 'mc_band',
-      reason: 'MC below medium band',
+      denyKey: 'hwr_mc_band',
+      reason: 'MC outside HWR $80M–$500M watch band',
       movementActive,
       chip,
       softArmOk: false,
@@ -606,27 +666,27 @@ function evaluateHwrArm(
     };
   }
   if (!movementActive) {
-    noteQualityParkDeny('high_win_rate', 'low_movement');
+    noteQualityParkDeny('high_win_rate', 'hwr_low_movement');
     noteQualityParkFunnel('high_win_rate', 'low_movement');
     return {
       ok: false,
       profileId: 'high_win_rate',
       armTag: null,
-      denyKey: 'low_movement',
-      reason: 'low movement / dead tape',
+      denyKey: 'hwr_low_movement',
+      reason: 'HWR low movement / dead tape',
       movementActive: false,
       chip: 'low_movement',
       softArmOk: false,
     };
   }
   if (!hasQualityStructure(input)) {
-    noteQualityParkDeny('high_win_rate', 'no_level');
+    noteQualityParkDeny('high_win_rate', 'hwr_no_structure');
     return {
       ok: false,
       profileId: 'high_win_rate',
       armTag: null,
-      denyKey: 'no_level',
-      reason: 'no structure level',
+      denyKey: 'hwr_no_structure',
+      reason: 'HWR no structure level',
       movementActive,
       chip: 'no_level',
       softArmOk: false,
@@ -638,12 +698,12 @@ function evaluateHwrArm(
     liq > 0 &&
     liq < Math.max(qf.minLiquidityUsd, MAJORS_MIN_LIQ_USD)
   ) {
-    noteQualityParkDeny('high_win_rate', 'liq');
+    noteQualityParkDeny('high_win_rate', 'hwr_low_liquidity');
     return {
       ok: false,
       profileId: 'high_win_rate',
       armTag: null,
-      denyKey: 'liq',
+      denyKey: 'hwr_low_liquidity',
       reason: `HWR liq $${Math.round(liq)} low`,
       movementActive,
       chip,
@@ -669,13 +729,27 @@ function evaluateHwrArm(
   }
   const holders = Number(input.holderCount);
   if (Number.isFinite(holders) && holders > 0 && holders < qf.minHolders) {
-    noteQualityParkDeny('high_win_rate', 'safety');
+    noteQualityParkDeny('high_win_rate', 'hwr_holder_risk');
     return {
       ok: false,
       profileId: 'high_win_rate',
       armTag: null,
-      denyKey: 'safety',
+      denyKey: 'hwr_holder_risk',
       reason: `holders ${holders} < ${qf.minHolders}`,
+      movementActive,
+      chip,
+      softArmOk: false,
+    };
+  }
+  const top10 = Number(input.top10HoldPct);
+  if (Number.isFinite(top10) && top10 > 32) {
+    noteQualityParkDeny('high_win_rate', 'hwr_holder_risk');
+    return {
+      ok: false,
+      profileId: 'high_win_rate',
+      armTag: null,
+      denyKey: 'hwr_holder_risk',
+      reason: `top10 ${top10.toFixed(0)}% > 32%`,
       movementActive,
       chip,
       softArmOk: false,
@@ -728,7 +802,10 @@ function evaluateHwrArm(
 }
 
 export function evaluateQualityParkArm(
-  input: QualityParkEvalInput & { mint?: string | null }
+  input: QualityParkEvalInput & {
+    mint?: string | null;
+    exclusiveProfileId?: string | null;
+  }
 ): QualityParkEvalResult {
   const band =
     String(input.source || '').toLowerCase() === 'majors' ? 'majors' : 'medium';
@@ -744,28 +821,31 @@ export function evaluateQualityParkArm(
     canGrantSoftMovementArm(input.mint);
   const movementForArm = mov2.active || softCandidate;
   const softOpts = softCandidate ? { softMovement: true } : undefined;
+  const exclusive = String(input.exclusiveProfileId || '').trim();
 
   const hwr = evaluateHwrArm(input, movementForArm, softOpts);
-  if (hwr.ok) {
-    if (softCandidate) {
-      return applySoftMovementGrant(hwr, input.mint);
-    }
-    return hwr;
-  }
-
   const steady = evaluateSteadyArm(input, movementForArm, softOpts);
-  if (steady.ok) {
-    if (softCandidate) {
-      return applySoftMovementGrant(steady, input.mint);
-    }
-    return steady;
+
+  const pick = (res: QualityParkEvalResult): QualityParkEvalResult => {
+    if (res.ok && softCandidate) return applySoftMovementGrant(res, input.mint);
+    return res;
+  };
+
+  if (exclusive === 'high_win_rate') return pick(hwr);
+  if (exclusive === 'steady_compounder') return pick(steady);
+
+  if (hwr.ok && steady.ok) {
+    const winner = pickOverlapWinner(input);
+    return pick(winner === 'high_win_rate' ? hwr : steady);
   }
+  if (hwr.ok) return pick(hwr);
+  if (steady.ok) return pick(steady);
 
   // Prefer the real deny (vol/liq/confluence) over generic low_movement
   if (!mov2.active) {
     const prefer = steady.denyKey && steady.denyKey !== 'low_movement'
       ? steady
-      : hwr.denyKey && hwr.denyKey !== 'low_movement'
+      : hwr.denyKey && hwr.denyKey !== 'hwr_low_movement' && hwr.denyKey !== 'low_movement'
         ? hwr
         : null;
     if (prefer) return prefer;
@@ -811,6 +891,260 @@ function applySoftMovementGrant(
     softMovement: true,
     sizeMult: QUALITY_SOFT_ARM_SIZE_MULT,
     reason: `${base.reason} · soft_movement`,
+  };
+}
+
+export function isQualityDumpReclaim(input: {
+  dropFromPeakPct?: number | null;
+  nearKeyFib?: boolean;
+  nearSupport?: boolean;
+}): boolean {
+  const drop = Number(input.dropFromPeakPct);
+  return (
+    Number.isFinite(drop) &&
+    drop >= QUALITY_DUMP_RECLAIM_DROP_PCT &&
+    (input.nearKeyFib === true || input.nearSupport === true)
+  );
+}
+
+function readWatchBand(
+  profileId: 'steady_compounder' | 'high_win_rate'
+): { min: number; max: number } {
+  const fallback =
+    profileId === 'high_win_rate'
+      ? { min: HWR_WATCH_MIN_MC_USD, max: HWR_WATCH_MAX_MC_USD }
+      : { min: STEADY_WATCH_MIN_MC_USD, max: STEADY_WATCH_MAX_MC_USD };
+  try {
+    const { resolveTradeProfileDefinition } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const m = resolveTradeProfileDefinition(profileId).match;
+    const min = Number(m?.preferMarketCapUsd ?? m?.minMarketCapUsd);
+    const max = Number(m?.maxMarketCapUsd);
+    return {
+      min:
+        profileId === 'high_win_rate'
+          ? Number.isFinite(min) && min >= HWR_WATCH_MIN_MC_USD
+            ? min
+            : fallback.min
+          : Number.isFinite(Number(m?.minMarketCapUsd)) &&
+              Number(m?.minMarketCapUsd) >= STEADY_WATCH_MIN_MC_USD
+            ? Number(m.minMarketCapUsd)
+            : fallback.min,
+      max: Number.isFinite(max) && max > 0 ? max : fallback.max,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function overlapAllowed(): boolean {
+  try {
+    const { resolveTradeProfileDefinition } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const s = resolveTradeProfileDefinition('steady_compounder').match
+      ?.allowSteadyHwrOverlap;
+    const h = resolveTradeProfileDefinition('high_win_rate').match
+      ?.allowSteadyHwrOverlap;
+    return s === true || h === true;
+  } catch {
+    return false;
+  }
+}
+
+function nameExcluded(input: QualityParkEvalInput): boolean {
+  try {
+    const { classifyQualityParkNameExclusion } =
+      require('./qualityParkNameExclusions') as typeof import('./qualityParkNameExclusions');
+    return Boolean(
+      classifyQualityParkNameExclusion(input.symbol, input.name)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function evaluateSteadyWatchElig(input: QualityParkEvalInput): {
+  ok: boolean;
+  denyKey: QualityParkDenyKey | null;
+} {
+  if (!isQualitySource(input.source)) {
+    return { ok: false, denyKey: 'mc_band' };
+  }
+  const mc = Number(input.marketCapUsd);
+  const band = readWatchBand('steady_compounder');
+  if (!Number.isFinite(mc) || mc < band.min || mc > band.max) {
+    noteQualityParkDeny('steady_compounder', 'mc_band');
+    noteQualityParkFunnel('steady_compounder', 'insert_denied');
+    return { ok: false, denyKey: 'mc_band' };
+  }
+  if (nameExcluded(input)) {
+    noteQualityParkDeny('steady_compounder', 'safety');
+    noteQualityParkFunnel('steady_compounder', 'insert_denied');
+    return { ok: false, denyKey: 'safety' };
+  }
+  const mov = evaluateQualityMovement(input.movement, {
+    watchBand:
+      String(input.source || '').toLowerCase() === 'majors' ? 'majors' : 'medium',
+    volumeFloorUsd: steadyVolFloor(input.source),
+  });
+  if (!mov.active && !mov.softEligible) {
+    noteQualityParkDeny('steady_compounder', 'low_movement');
+    noteQualityParkFunnel('steady_compounder', 'insert_denied');
+    return { ok: false, denyKey: 'low_movement' };
+  }
+  return { ok: true, denyKey: null };
+}
+
+export function evaluateHwrWatchElig(input: QualityParkEvalInput): {
+  ok: boolean;
+  denyKey: QualityParkDenyKey | null;
+} {
+  if (!isQualitySource(input.source)) {
+    return { ok: false, denyKey: 'hwr_mc_band' };
+  }
+  const mc = Number(input.marketCapUsd);
+  const band = readWatchBand('high_win_rate');
+  if (!Number.isFinite(mc) || mc < band.min || mc > band.max) {
+    noteQualityParkDeny('high_win_rate', 'hwr_mc_band');
+    noteQualityParkFunnel('high_win_rate', 'insert_denied');
+    return { ok: false, denyKey: 'hwr_mc_band' };
+  }
+  if (nameExcluded(input)) {
+    noteQualityParkDeny('high_win_rate', 'hwr_asset_proxy_excluded');
+    noteQualityParkFunnel('high_win_rate', 'insert_denied');
+    return { ok: false, denyKey: 'hwr_asset_proxy_excluded' };
+  }
+  const mov = evaluateQualityMovement(input.movement, {
+    watchBand:
+      String(input.source || '').toLowerCase() === 'majors' ? 'majors' : 'medium',
+    volumeFloorUsd: DEFAULT_HWR_QUALITY_FILTER.minVolumeH1Usd,
+  });
+  if (!mov.active && !mov.softEligible) {
+    noteQualityParkDeny('high_win_rate', 'hwr_low_movement');
+    noteQualityParkFunnel('high_win_rate', 'insert_denied');
+    return { ok: false, denyKey: 'hwr_low_movement' };
+  }
+  const liq = Number(input.liquidityUsd);
+  if (
+    Number.isFinite(liq) &&
+    liq > 0 &&
+    liq < Math.max(DEFAULT_HWR_QUALITY_FILTER.minLiquidityUsd, MAJORS_MIN_LIQ_USD)
+  ) {
+    noteQualityParkDeny('high_win_rate', 'hwr_low_liquidity');
+    noteQualityParkFunnel('high_win_rate', 'insert_denied');
+    return { ok: false, denyKey: 'hwr_low_liquidity' };
+  }
+  if (!hasQualityStructure(input)) {
+    noteQualityParkDeny('high_win_rate', 'hwr_no_structure');
+    noteQualityParkFunnel('high_win_rate', 'insert_denied');
+    return { ok: false, denyKey: 'hwr_no_structure' };
+  }
+  const holders = Number(input.holderCount);
+  const top10 = Number(input.top10HoldPct);
+  if (
+    (Number.isFinite(holders) &&
+      holders > 0 &&
+      holders < DEFAULT_HWR_QUALITY_FILTER.minHolders) ||
+    (Number.isFinite(top10) && top10 > 32)
+  ) {
+    noteQualityParkDeny('high_win_rate', 'hwr_holder_risk');
+    noteQualityParkFunnel('high_win_rate', 'insert_denied');
+    return { ok: false, denyKey: 'hwr_holder_risk' };
+  }
+  return { ok: true, denyKey: null };
+}
+
+function pickOverlapWinner(
+  input: QualityParkEvalInput
+): QualityParkProfileId {
+  try {
+    const { computeWatchScore } =
+      require('./watchPriorityScore') as typeof import('./watchPriorityScore');
+    const base = {
+      nearSupport: input.nearSupport,
+      nearKeyFib: input.nearKeyFib,
+      nearMultiTfSupport: (input.multiTfSupportHits ?? 0) >= 2,
+      supportPriceSol: input.supportPriceSol,
+      fib05PriceSol: input.fib05PriceSol,
+      volumeH1Usd: input.volumeH1Usd,
+      liquidityUsd: input.liquidityUsd,
+      top10HoldPct: input.top10HoldPct,
+      tokenAgeHours: input.tokenAgeHours,
+      dropFromPeakPct: input.dropFromPeakPct,
+      lateChase: input.lateChase,
+      movementActive: true,
+    };
+    const s = computeWatchScore({ ...base, profileId: 'steady_compounder' }).score;
+    const h = computeWatchScore({ ...base, profileId: 'high_win_rate' }).score;
+    if (h > s) return 'high_win_rate';
+    if (s > h) return 'steady_compounder';
+  } catch {
+    /* score optional */
+  }
+  const mc = Number(input.marketCapUsd);
+  if (Number.isFinite(mc) && mc >= 100_000_000) return 'high_win_rate';
+  return 'steady_compounder';
+}
+
+export function routeExclusiveQualityPark(input: QualityParkEvalInput & {
+  inDipBand?: boolean;
+  dumpReclaim?: boolean;
+}): ExclusiveRouteResult {
+  if (input.dumpReclaim === true && input.inDipBand === true) {
+    noteExclusiveRoute('routed_dip_dump');
+    return {
+      eligibleProfileIds: ['dip_buyer'],
+      preferredProfileId: 'dip_buyer',
+      reason: 'routed_dip_dump',
+    };
+  }
+
+  const steady = evaluateSteadyWatchElig(input);
+  const hwr = evaluateHwrWatchElig(input);
+
+  if (overlapAllowed() && (steady.ok || hwr.ok)) {
+    noteExclusiveRoute('overlap');
+    const ids: string[] = [];
+    if (steady.ok) ids.push('steady_compounder');
+    if (hwr.ok) ids.push('high_win_rate');
+    return {
+      eligibleProfileIds: ids,
+      preferredProfileId: ids[0] || null,
+      reason: 'overlap',
+    };
+  }
+
+  if (steady.ok && !hwr.ok) {
+    noteExclusiveRoute('routed_steady');
+    return {
+      eligibleProfileIds: ['steady_compounder'],
+      preferredProfileId: 'steady_compounder',
+      reason: 'routed_steady',
+    };
+  }
+  if (hwr.ok && !steady.ok) {
+    noteExclusiveRoute('routed_hwr');
+    return {
+      eligibleProfileIds: ['high_win_rate'],
+      preferredProfileId: 'high_win_rate',
+      reason: 'routed_hwr',
+    };
+  }
+  if (steady.ok && hwr.ok) {
+    const winner = pickOverlapWinner(input);
+    noteExclusiveRoute('both_eligible_but_split');
+    noteExclusiveRoute(winner === 'high_win_rate' ? 'routed_hwr' : 'routed_steady');
+    return {
+      eligibleProfileIds: [winner],
+      preferredProfileId: winner,
+      reason: 'both_eligible_but_split',
+    };
+  }
+  noteExclusiveRoute('rejected_both');
+  return {
+    eligibleProfileIds: [],
+    preferredProfileId: null,
+    reason: 'rejected_both',
   };
 }
 

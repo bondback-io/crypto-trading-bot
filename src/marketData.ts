@@ -60,7 +60,7 @@ export interface LaunchEvent {
   isPumpFun?: boolean;
   /** Price path for replay (oldest → newest) */
   candles: MarketCandle[];
-  source: 'dexscreener' | 'gmgn' | 'birdeye' | 'jupiter' | 'kolscan' | 'synthetic';
+  source: 'dexscreener' | 'gmgn' | 'birdeye' | 'jupiter' | 'kolscan' | 'synthetic' | 'pump_stream' | 'graduating_feed' | 'onchain_helius' | 'alphascan';
   url?: string;
   /** SOL/USD used when this event was built (for PnL $ display) */
   solUsd?: number;
@@ -83,6 +83,10 @@ export interface LaunchEvent {
   /** Per-profile specialty feed tags (additive; global scanner leaves unset) */
   preferredProfileId?: string;
   specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium';
+  /** Fan-in tags — extra sources/categories attached when mint already existed */
+  scannerSources?: string[];
+  scannerCategories?: string[];
+  curvePct?: number;
 }
 
 function isValidMint(m: string): boolean {

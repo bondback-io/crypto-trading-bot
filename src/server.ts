@@ -1018,6 +1018,32 @@ export function createServer(): express.Application {
     }
   });
 
+  app.post('/api/rpc/helius-extra-fallback', (req: Request, res: Response) => {
+    try {
+      const { setHeliusExtraFallback } =
+        require('./config') as typeof import('./config');
+      const enabled =
+        req.body?.enabled === true ||
+        req.body?.enabled === 'true' ||
+        req.body?.enabled === 1;
+      const rawTarget = String(req.body?.target || '').trim();
+      const target =
+        rawTarget === 'public' ? 'public' : 'backup2';
+      const extra = setHeliusExtraFallback(enabled, target);
+      res.json({
+        ...getRpcStats(),
+        ok: true,
+        heliusExtraFallbackEnabled: extra.enabled,
+        heliusExtraFallbackTarget: extra.target,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/rpc/soft-watch-cap', (req: Request, res: Response) => {
     try {
       const { setRpcSoftWatchCap } =
@@ -2712,13 +2738,16 @@ export function createServer(): express.Application {
         preferOrganicVolume: true,
         jupiterTrendingEnabled: true,
         jupiterCategory: 'toptraded',
-        jupiterPumpFunOnly: true,
+        jupiterPumpFunOnly: false,
         jupiterLimit: 100,
         jupiterMergeIntervals: true,
         minVolumeM5Usd: 1000,
         minVolumeH1Usd: 2500,
         minVolumeH6Usd: 10000,
         minVolumeH24Usd: 15000,
+        pumpStreamEnabled: true,
+        graduatingFeedEnabled: true,
+        heliusOnchainDiscoveryEnabled: false,
       };
     }
     const ms = config.marketScanner;
@@ -2824,6 +2853,17 @@ export function createServer(): express.Application {
     }
     if (body.jupiterPumpFunOnly !== undefined) {
       ms.jupiterPumpFunOnly = Boolean(body.jupiterPumpFunOnly);
+    }
+    if (body.pumpStreamEnabled !== undefined) {
+      ms.pumpStreamEnabled = Boolean(body.pumpStreamEnabled);
+    }
+    if (body.graduatingFeedEnabled !== undefined) {
+      ms.graduatingFeedEnabled = Boolean(body.graduatingFeedEnabled);
+    }
+    if (body.heliusOnchainDiscoveryEnabled !== undefined) {
+      ms.heliusOnchainDiscoveryEnabled = Boolean(
+        body.heliusOnchainDiscoveryEnabled
+      );
     }
     if (body.jupiterLimit !== undefined) {
       const n = Number(body.jupiterLimit);

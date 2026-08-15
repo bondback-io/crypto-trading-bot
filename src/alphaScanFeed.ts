@@ -634,6 +634,53 @@ export async function runAlphaScanFeedPass(): Promise<number> {
   }
 }
 
+/** Merge New + Soon/Bonded into scanner universe when AlphaScan is enabled. */
+export function getAlphaScanUniverseLaunchEvents(cap = 24): LaunchEvent[] {
+  const cfg = asCfg();
+  if (!cfg.enabled) return [];
+  const preferOrganic =
+    config.marketScanner?.preferOrganicVolume !== false;
+  const sol = solUsd();
+  const rows = [...cachedNew, ...cachedSoon, ...cachedBonded];
+  const out: LaunchEvent[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const mint = String(row.mint || '').trim();
+    if (!mint || seen.has(mint)) continue;
+    seen.add(mint);
+    const event = jupiterTokenToLaunchEvent(
+      {
+        id: row.mint,
+        symbol: row.symbol,
+        name: row.name,
+        mcap: row.marketCapUsd ?? null,
+        liquidity: row.liquidityUsd ?? null,
+        holderCount: row.holderCount ?? null,
+        organicScore: row.organicScore,
+        launchpad: row.launchpad,
+      },
+      sol,
+      { preferOrganicVolume: preferOrganic }
+    );
+    event.source = event.source || 'jupiter';
+    event.scannerSources = [
+      ...(event.scannerSources || []),
+      'alphascan',
+    ];
+    event.scannerCategories = [
+      ...(event.scannerCategories || []),
+      row.column,
+    ];
+    event.curvePct = row.curveProgressPct ?? event.curvePct;
+    if (row.column === 'soon' || row.column === 'bonded') {
+      event.specialtyFeed = event.specialtyFeed || 'alphascan';
+    }
+    out.push(event);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
 /** Optional soft-merge of New column into scanner universe (when toggle on). */
 export function getAlphaScanNewLaunchEvents(): LaunchEvent[] {
   const cfg = asCfg();

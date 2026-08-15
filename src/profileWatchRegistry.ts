@@ -249,6 +249,19 @@ function profilesForFamilyRow(
           String(raw.source || '') === 'medium'),
       marketCapUsd:
         raw.marketCapUsd != null ? Number(raw.marketCapUsd) : null,
+      source: raw.source != null ? String(raw.source) : undefined,
+      liquidityUsd:
+        raw.liquidityUsd != null ? Number(raw.liquidityUsd) : null,
+      volumeH1Usd:
+        raw.volumeH1Usd != null ? Number(raw.volumeH1Usd) : null,
+      holderCount:
+        raw.holderCount != null ? Number(raw.holderCount) : null,
+      nearKeyFib: raw.nearKeyFib === true,
+      nearSupport: raw.nearSupport === true,
+      dropFromPeakPct:
+        raw.dropFromPeakPct != null ? Number(raw.dropFromPeakPct) : null,
+      symbol: raw.symbol != null ? String(raw.symbol) : null,
+      name: raw.name != null ? String(raw.name) : null,
     });
   } catch {
     return pref ? [pref] : familyIds.slice(0, 1);
@@ -451,7 +464,7 @@ export function shouldParkUnarmedOpen(opts: {
   };
 }
 
-/** Stamp eligibleProfileIds on a family watch row (lazy, no exclusive assign). */
+/** Stamp eligibleProfileIds on a family watch row (exclusive Steady/HWR). */
 export function stampEligibleOnWatchEntry(
   family: WatchFamilyId,
   entry: {
@@ -459,6 +472,24 @@ export function stampEligibleOnWatchEntry(
     source?: string;
     marketCapUsd?: number | null;
     eligibleProfileIds?: string[];
+    liquidityUsd?: number | null;
+    volumeH1Usd?: number | null;
+    holderCount?: number | null;
+    top10HoldPct?: number | null;
+    nearKeyFib?: boolean;
+    nearSupport?: boolean;
+    dropFromPeakPct?: number | null;
+    supportPriceSol?: number | null;
+    fib05PriceSol?: number | null;
+    fib618PriceSol?: number | null;
+    multiTfSupportHits?: number;
+    priceChangeH1Pct?: number | null;
+    priceChangeH6Pct?: number | null;
+    priceChange24hPct?: number | null;
+    tokenAgeHours?: number | null;
+    symbol?: string | null;
+    name?: string | null;
+    exclusiveRouteReason?: string;
   }
 ): string[] {
   const ids = resolveWatchEligibleProfileIds({
@@ -469,8 +500,36 @@ export function stampEligibleOnWatchEntry(
       (String(entry.source || '') === 'majors' ||
         String(entry.source || '') === 'medium'),
     marketCapUsd: entry.marketCapUsd,
+    source: entry.source,
+    liquidityUsd: entry.liquidityUsd,
+    volumeH1Usd: entry.volumeH1Usd,
+    holderCount: entry.holderCount,
+    top10HoldPct: entry.top10HoldPct,
+    nearKeyFib: entry.nearKeyFib,
+    nearSupport: entry.nearSupport,
+    dropFromPeakPct: entry.dropFromPeakPct,
+    supportPriceSol: entry.supportPriceSol,
+    fib05PriceSol: entry.fib05PriceSol,
+    fib618PriceSol: entry.fib618PriceSol,
+    multiTfSupportHits: entry.multiTfSupportHits,
+    priceChangeH1Pct: entry.priceChangeH1Pct,
+    priceChangeH6Pct: entry.priceChangeH6Pct,
+    priceChange24hPct: entry.priceChange24hPct,
+    tokenAgeHours: entry.tokenAgeHours,
+    symbol: entry.symbol,
+    name: entry.name,
   });
   entry.eligibleProfileIds = ids;
+  if (family === 'dip' && ids.length === 1) {
+    const only = ids[0];
+    if (
+      only === 'steady_compounder' ||
+      only === 'high_win_rate' ||
+      only === 'dip_buyer'
+    ) {
+      entry.preferredProfileId = only;
+    }
+  }
   return ids;
 }
 

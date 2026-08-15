@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.373',
+    title: 'Unique Steady/HWR, Trend path, scanner coverage',
+    sections: ['microbots', 'scanners', 'tradecraft', 'execution'],
+    items: [
+      'Steady and HWR no longer clone the same mint: exclusive watch routing by MC band ($20–150M vs $80–500M) and diverged WatchScores. Dump-reclaim in the Dip band stays Dip; quality-park winners open as the routed profile.',
+      'HWR insert/arm/trigger uses its own deny keys (MC band, movement, liquidity, structure, holder risk) and min 3 TA confluences. Steady stays min 2. Overlap flag default off.',
+      'Trend continuation is no longer stolen by Dip watching near Fib/S or a 5% dip. Yield only to armed Dip or real dump-reclaim; DNA minHits loosened; Fib/S is not Trend DNA. Continuation can trigger at DNA 4 if volume is not collapsed.',
+      'Scanner universe pulls all three Jupiter categories, merges tags onto existing Dex/GMGN mints, defaults Pump.fun-only off, and includes AlphaScan New/Soon/Bonded when enabled. Additive PumpPortal stream, graduating HTTP, and optional Helius on-chain tags (reuse migration WS — no extra Trading logsSubscribe).',
+      'Stats → RPC: opt-in Helius extra fallback (BACKUP2 or public) stays OFF by default and is lazy — no probe until Critical actually fails. Existing Share-load lane map is unchanged while OFF.',
+    ],
+  },
+  {
     version: '1.2.372',
     title: 'WatchScore rank, backup gzip, Stats RPC',
     sections: ['microbots', 'scanners', 'tradecraft', 'backup'],

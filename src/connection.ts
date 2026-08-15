@@ -26,6 +26,7 @@ import {
   isPublicRpcUrl,
   isQuicknodeRpcUrl,
   isOfficialMainnetBetaRpcUrl,
+  buildAlchemyRpcUrl,
   type RpcLaneRole,
 } from './rpcUrl';
 import {
@@ -110,6 +111,8 @@ let preferredUtility = 0;
 let preferredWatchers = 0;
 /** Mid-tier paid failover (QuickNode); -1 when unset */
 let preferredQuicknode = -1;
+/** Lazy extra Critical failover (BACKUP2/public). -1 until toggle ON + Helius failing. */
+let extraCriticalIdx = -1;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
@@ -610,6 +613,65 @@ function ensureEndpoints(): void {
   }
 }
 
+/**
+ * Lazy extra Critical piggyback. Does not register/probe until toggle is ON
+ * and this is called from the existing Helius-fail failover path.
+ */
+function ensureHeliusExtraFallbackEndpoint(): number {
+  if (config.rpc?.heliusExtraFallbackEnabled !== true) return -1;
+  if (extraCriticalIdx >= 0 && extraCriticalIdx < endpoints.length) {
+    return extraCriticalIdx;
+  }
+  ensureEndpoints();
+  const target =
+    config.rpc.heliusExtraFallbackTarget === 'public' ? 'public' : 'backup2';
+  let url: string | null = null;
+  let label = 'helius-extra';
+  if (target === 'backup2') {
+    url = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP2);
+    label = 'alchemy-backup2';
+  } else {
+    url = PUBLIC_SOLANA_RPC;
+    label = 'publicnode-extra';
+  }
+  if (!url) return -1;
+  const existing = endpoints.findIndex((e) => e.endpoint.url === url);
+  if (existing >= 0) {
+    extraCriticalIdx = existing;
+    return existing;
+  }
+  extraCriticalIdx = endpoints.length;
+  endpoints.push({
+    endpoint: { url, label, role: 'fallback' },
+    connection: new Connection(url, {
+      commitment: 'confirmed',
+      wsEndpoint: toWsUrl(url),
+      disableRetryOnRateLimit: true,
+      fetch: meteredFetch(label),
+    }),
+    healthy: true,
+    latencyMs: null,
+    lastCallLatencyMs: null,
+    successCount: 0,
+    failureCount: 0,
+    lastCheckedAt: null,
+    consecutiveFailures: 0,
+    unhealthySince: null,
+    role: 'fallback',
+    rateLimitedUntil: 0,
+    hardFailUntil: 0,
+    quarantineStreak: 0,
+    lastQuarantineLogAt: 0,
+    lastUnhealthyLogAt: 0,
+    latencyStressedSince: null,
+    lastLatencyFailoverLogAt: 0,
+  });
+  console.log(
+    `[rpc] Helius extra fallback registered → ${label} (lazy, after paid failover)`
+  );
+  return extraCriticalIdx;
+}
+
 function maskUrlForLog(url: string | undefined): string {
   if (!url) return '—';
   try {
@@ -970,6 +1032,25 @@ function resolveIndexForRole(role: RpcRole): number {
       )
     ) {
       return preferredQuicknode;
+    }
+    if (role === 'primary' && config.rpc?.heliusExtraFallbackEnabled === true) {
+      const extraIdx = ensureHeliusExtraFallbackEndpoint();
+      if (
+        extraIdx >= 0 &&
+        acceptFailoverTarget(
+          role,
+          preferred,
+          pref,
+          extraIdx,
+          latencySoft,
+          rateLimited,
+          downMs,
+          avoidPublicForCritical &&
+            config.rpc.heliusExtraFallbackTarget !== 'public'
+        )
+      ) {
+        return extraIdx;
+      }
     }
     // 3) Utility / public before remaining fallbacks
     if (
@@ -1437,6 +1518,8 @@ export function getRpcStats(): {
     configured: boolean;
   };
   shareLoad: boolean;
+  heliusExtraFallbackEnabled: boolean;
+  heliusExtraFallbackTarget: 'backup2' | 'public';
   shareSupports: typeof RPC_SHARE_LOAD_SUPPORTS;
   failoverDownMs: number;
   /** True when primary and secondary prefer the same endpoint (Zion shares CU with copy). */
@@ -1608,6 +1691,12 @@ export function getRpcStats(): {
         Boolean(endpoints[preferredWatchers]?.endpoint.label === 'alchemy-backup'),
     },
     shareLoad,
+    heliusExtraFallbackEnabled:
+      config.rpc?.heliusExtraFallbackEnabled === true,
+    heliusExtraFallbackTarget: (config.rpc?.heliusExtraFallbackTarget ===
+    'public'
+      ? 'public'
+      : 'backup2') as 'backup2' | 'public',
     shareSupports: RPC_SHARE_LOAD_SUPPORTS,
     failoverDownMs: failoverDownMs(),
     lanesShareEndpoint: share,

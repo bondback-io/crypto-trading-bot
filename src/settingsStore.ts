@@ -132,6 +132,8 @@ export interface PersistedBotSettings {
   pollIntervalMs?: number;
   /** Share RPC load across Helius / Alchemy / public */
   rpcShareLoad?: boolean;
+  rpcHeliusExtraFallbackEnabled?: boolean;
+  rpcHeliusExtraFallbackTarget?: 'backup2' | 'public';
   /** Favourites soft-watch wallet cap (0 = pause) */
   rpcSoftWatchCap?: number | null;
   /** Micro-bot Learning Mode (global gate overlays + fairness) */

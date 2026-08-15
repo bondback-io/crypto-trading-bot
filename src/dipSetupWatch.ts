@@ -139,6 +139,7 @@ export interface DipWatchEntry {
   watchScoreAtArm?: number;
   prevLevelDistancePct?: number | null;
   prevConfluenceCount?: number | null;
+  exclusiveRouteReason?: string;
 }
 
 /** Unified Dip-family inventory (1M–500M + above-max Steady/HWR parks). */
@@ -203,6 +204,13 @@ function stampDipWatchEligibility(w: DipWatchEntry, isNew = false): void {
     const { stampEligibleOnWatchEntry, noteProfileWatchFunnel } =
       require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
     const ids = stampEligibleOnWatchEntry('dip', w);
+    if (ids.length === 1 && ids[0] === 'steady_compounder') {
+      w.exclusiveRouteReason = 'routed_steady';
+    } else if (ids.length === 1 && ids[0] === 'high_win_rate') {
+      w.exclusiveRouteReason = 'routed_hwr';
+    } else if (ids.length === 1 && ids[0] === 'dip_buyer') {
+      w.exclusiveRouteReason = 'routed_dip_dump';
+    }
     if (isNew) {
       for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
       if (w.status === 'armed') {
@@ -1047,7 +1055,14 @@ function maybeArmQualityPark(
       registerSoftMovementArm,
       noteSoftMovementGrant,
     } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
-    const verdict = evaluateQualityParkArm(buildQualityParkEvalInput(w));
+    const verdict = evaluateQualityParkArm({
+      ...buildQualityParkEvalInput(w),
+      exclusiveProfileId:
+        w.preferredProfileId === 'high_win_rate' ||
+        w.preferredProfileId === 'steady_compounder'
+          ? w.preferredProfileId
+          : undefined,
+    });
     w.movementActive = verdict.movementActive;
     w.qualityChip = verdict.chip;
     if (!verdict.ok || !verdict.profileId) {
@@ -1070,7 +1085,9 @@ function maybeArmQualityPark(
       shouldSkipArmForCap(
         verdict.profileId,
         countArmedWatchesForProfile(watches.values(), verdict.profileId)
-      )
+      ) ||
+      (verdict.profileId === 'high_win_rate' &&
+        (w.watchScore ?? 0) < WATCH_ARM_SCORE_FLOOR)
     ) {
       w.lastReason = 'skipped_low_score · arm cap';
       return false;
@@ -1087,9 +1104,10 @@ function maybeArmQualityPark(
     } else {
       w.softMovement = false;
     }
-    w.preferredProfileId = opts?.keepDipIdentity
-      ? w.preferredProfileId || 'dip_buyer'
-      : verdict.profileId;
+    w.preferredProfileId =
+      opts?.keepDipIdentity === true
+        ? 'dip_buyer'
+        : verdict.profileId;
     w.armTag = verdict.armTag || undefined;
     w.status = 'armed';
     w.armedAt = now;
@@ -1574,6 +1592,7 @@ export function considerDipWatchSetup(input: {
   volumeH1Usd?: number;
   holderCount?: number;
   dropFromPeakPct?: number | null;
+  priceChangeH1Pct?: number | null;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   lastPriceSol?: number | null;
@@ -1654,24 +1673,43 @@ export function considerDipWatchSetup(input: {
   } catch {
     /* optional */
   }
-  // Trend: quality parks prefer Dip/Steady; minors yield on drop OR near Fib/S.
+  // Trend: do not steal a live continuation (DNA≥4, drop<8%, H1 green).
   try {
     const {
       isMintOnActiveTrendWatch,
       expireTrendWatchForDipAdmit,
+      getActiveTrendWatch,
+      noteTrendFunnel,
     } = require('./trendSetupWatch') as typeof import('./trendSetupWatch');
     if (isMintOnActiveTrendWatch(input.mint)) {
+      const tw = getActiveTrendWatch(input.mint);
+      const trendHits = Number(tw?.dnaHits ?? 0);
+      const drop = Number(input.dropFromPeakPct ?? 0);
+      const h1 = Number(input.priceChangeH1Pct);
+      const h1Green = Number.isFinite(h1) && h1 > 0;
+      const dipDumpBeats =
+        Number.isFinite(drop) && drop >= 8 && (nearTaEarly || dropStartedEarly);
+      if (trendHits >= 4 && drop < 8 && h1Green && !dipDumpBeats) {
+        noteTrendFunnel('trend_admitted_despite_dip_watching');
+        noteDipFunnel('mutual_exclude');
+        noteDipFunnel('mx_trend');
+        return null;
+      }
       if (isQuality) {
+        if (trendHits >= 4 && drop < 8 && !dipDumpBeats) {
+          noteTrendFunnel('trend_admitted_despite_dip_watching');
+          noteDipFunnel('mutual_exclude');
+          noteDipFunnel('mx_trend');
+          return null;
+        }
         expireTrendWatchForDipAdmit(
           input.mint,
           'Yielded to Dip/Steady quality park'
         );
-      } else if (nearTaEarly || dropStartedEarly) {
+      } else if (nearTaEarly && drop >= 8) {
         expireTrendWatchForDipAdmit(
           input.mint,
-          nearTaEarly
-            ? 'Yielded to Dip minor near Fib/S'
-            : 'Yielded to Dip minor dip DNA'
+          'Yielded to Dip minor dump-reclaim'
         );
       } else {
         noteDipFunnel('mutual_exclude');
@@ -1731,7 +1769,11 @@ export function considerDipWatchSetup(input: {
     if (isQuality) {
       existing.source = isMedium ? 'medium' : 'majors';
       existing.majorsBand = input.majorsBand ?? existing.majorsBand;
-      if (isInDipBuyerMcBand(existing.marketCapUsd)) {
+      const dumpReclaim =
+        Number(existing.dropFromPeakPct ?? 0) >= 8 &&
+        (existing.nearKeyFib === true || existing.nearSupport === true) &&
+        isInDipBuyerMcBand(existing.marketCapUsd);
+      if (dumpReclaim) {
         existing.preferredProfileId = 'dip_buyer';
       } else if (input.preferredProfileId) {
         existing.preferredProfileId = input.preferredProfileId;
@@ -1741,6 +1783,7 @@ export function considerDipWatchSetup(input: {
       if (remain < MAJORS_TTL_MS / 2) {
         existing.expiresAt = Date.now() + MAJORS_TTL_MS;
       }
+      stampDipWatchEligibility(existing);
     } else {
       // Minors always stay Dip — never inherit Steady/HWR prefer from specialty.
       if (
@@ -2320,20 +2363,28 @@ export async function tickDipSetupWatches(opts?: {
       w.dropFromPeakPct >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
       w.dropFromPeakPct <= maxDrop;
 
-    // Arm: quality parks (incl. $20M–$500M overlap) via Steady/HWR playbook
-    // without stealing Dip identity; Dip band Fib/S still arms as dip_buyer.
+    // Arm: quality parks via Steady/HWR playbook. Dump-reclaim in Dip band
+    // stays Dip identity; medium compounder / A+ parks open as the routed profile.
     const aboveDipMax = isAboveDipBuyerMaxMc(w.marketCapUsd);
     const inDipBand = isInDipBuyerMcBand(w.marketCapUsd);
-    if (w.status === 'watching' && isQualityBandSource(w.source) && (aboveDipMax || inDipBand)) {
-      maybeArmQualityPark(w, now, dropOk, {
-        keepDipIdentity: inDipBand && !aboveDipMax,
-      });
+    const dumpReclaim =
+      inDipBand &&
+      (w.dropFromPeakPct ?? 0) >= 8 &&
+      nearTa;
+    stampDipWatchEligibility(w);
+    if (
+      w.status === 'watching' &&
+      isQualityBandSource(w.source) &&
+      (aboveDipMax || inDipBand) &&
+      !dumpReclaim
+    ) {
+      maybeArmQualityPark(w, now, dropOk, { keepDipIdentity: false });
     }
-    if (inDipBand && nearTa) {
+    if (inDipBand && nearTa && (!isQualityBandSource(w.source) || dumpReclaim)) {
       w.preferredProfileId = 'dip_buyer';
     }
     if (w.status === 'watching' && nearTa) {
-      if (inDipBand || !isQualityBandSource(w.source)) {
+      if (!isQualityBandSource(w.source) || dumpReclaim) {
         w.preferredProfileId = 'dip_buyer';
       }
       const pid = w.preferredProfileId || 'dip_buyer';
@@ -2488,7 +2539,12 @@ export async function tickDipSetupWatches(opts?: {
       if (!trigger) continue;
 
       stampWatchPlan(w);
-      const inDipBandTrig = isInDipBuyerMcBand(w.marketCapUsd);
+      const dumpReclaimTrig =
+        isInDipBuyerMcBand(w.marketCapUsd) &&
+        (w.dropFromPeakPct ?? 0) >= 8 &&
+        (w.nearKeyFib === true || w.nearSupport === true);
+      const inDipBandTrig =
+        dumpReclaimTrig || !isQualityBandSource(w.source);
       let preferPid = inDipBandTrig
         ? 'dip_buyer'
         : w.preferredProfileId || 'dip_buyer';
@@ -2518,8 +2574,8 @@ export async function tickDipSetupWatches(opts?: {
       }
       w.lastReason = reclaim ? 'reclaim trigger' : 'setup trigger';
       const c = buildHandoff(w);
-      // Dip-band handoffs stay dip_buyer; MARL still picks the opener.
-      if (inDipBandTrig || !isQualityBandSource(w.source)) {
+      // Dump-reclaim / Dip minors stay dip_buyer; quality-park winners keep route.
+      if (inDipBandTrig) {
         c.preferredProfileId = 'dip_buyer';
         if (c.launch) c.launch.preferredProfileId = 'dip_buyer';
         w.preferredProfileId = 'dip_buyer';

@@ -1856,6 +1856,10 @@ export interface BotConfig {
      * unset = default 12 (Share ON) / 20 (Share OFF). Env RPC_SOFT_WATCH_CAP wins if set.
      */
     softWatchCap: number | null;
+    /** Opt-in extra Critical failover after paid lanes. OFF = no register/probe. */
+    heliusExtraFallbackEnabled: boolean;
+    /** BACKUP2 preferred for live; public is paper/emergency only. */
+    heliusExtraFallbackTarget: 'backup2' | 'public';
     priorityFee: {
       minMicroLamports: number;
       maxMicroLamports: number;
@@ -1980,7 +1984,7 @@ export interface BotConfig {
     minLiquidityUsd: number;
     /** Jupiter organicScore floor when available (0 = disabled) */
     minOrganicScore: number;
-    /** Prefer buyOrganicVolume+sellOrganicVolume for vol gates when present */
+    /** Prefer organic volume as a rank boost only (do not drop non-organic names) */
     preferOrganicVolume: boolean;
     /** Merge Jupiter Tokens API trending into scanner universe */
     jupiterTrendingEnabled: boolean;
@@ -1996,6 +2000,12 @@ export interface BotConfig {
     minVolumeH1Usd: number;
     minVolumeH6Usd: number;
     minVolumeH24Usd: number;
+    /** PumpPortal WS create/trade/grad (off Solana RPC). Default ON. */
+    pumpStreamEnabled?: boolean;
+    /** Merge graduating / soon-bonded HTTP into scanner universe */
+    graduatingFeedEnabled?: boolean;
+    /** Optional on-chain Helius discovery via existing migration WS tags. Default OFF. */
+    heliusOnchainDiscoveryEnabled?: boolean;
   };
 
   /** Paper trading simulation */
@@ -2707,6 +2717,8 @@ export const config: BotConfig = {
       Number.isFinite(Number(process.env.RPC_SOFT_WATCH_CAP))
         ? Math.max(0, Math.min(200, Math.round(Number(process.env.RPC_SOFT_WATCH_CAP))))
         : null,
+    heliusExtraFallbackEnabled: false,
+    heliusExtraFallbackTarget: 'backup2' as const,
     priorityFee: {
       minMicroLamports: 1_000,
       maxMicroLamports: 500_000,
@@ -2795,13 +2807,16 @@ export const config: BotConfig = {
     preferOrganicVolume: true,
     jupiterTrendingEnabled: true,
     jupiterCategory: 'toptraded',
-    jupiterPumpFunOnly: true,
+    jupiterPumpFunOnly: false,
     jupiterLimit: 100,
     jupiterMergeIntervals: true,
     minVolumeM5Usd: 1000,
     minVolumeH1Usd: 2500,
     minVolumeH6Usd: 10000,
     minVolumeH24Usd: 15_000,
+    pumpStreamEnabled: true,
+    graduatingFeedEnabled: true,
+    heliusOnchainDiscoveryEnabled: false,
   },
 
   notifications: {
@@ -3121,6 +3136,11 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
         ? config.rpc.softWatchCap
         : null,
+    rpcHeliusExtraFallbackEnabled: Boolean(
+      config.rpc.heliusExtraFallbackEnabled
+    ),
+    rpcHeliusExtraFallbackTarget:
+      config.rpc.heliusExtraFallbackTarget === 'public' ? 'public' : 'backup2',
     learningMode: config.learningMode
       ? (cloneJson(config.learningMode) as PersistedBotSettings['learningMode'])
       : {
@@ -3872,6 +3892,15 @@ function applySettingsSnapshot(
   }
   if (typeof saved.rpcShareLoad === 'boolean') {
     config.rpc.shareLoad = saved.rpcShareLoad;
+  }
+  if (typeof saved.rpcHeliusExtraFallbackEnabled === 'boolean') {
+    config.rpc.heliusExtraFallbackEnabled = saved.rpcHeliusExtraFallbackEnabled;
+  }
+  if (
+    saved.rpcHeliusExtraFallbackTarget === 'public' ||
+    saved.rpcHeliusExtraFallbackTarget === 'backup2'
+  ) {
+    config.rpc.heliusExtraFallbackTarget = saved.rpcHeliusExtraFallbackTarget;
   }
   if (
     saved.rpcSoftWatchCap === null ||
@@ -4858,13 +4887,16 @@ export function applyPersistedSettings(opts?: {
           preferOrganicVolume: true,
           jupiterTrendingEnabled: true,
           jupiterCategory: 'toptraded',
-          jupiterPumpFunOnly: true,
+          jupiterPumpFunOnly: false,
           jupiterLimit: 100,
           jupiterMergeIntervals: true,
           minVolumeM5Usd: 1000,
           minVolumeH1Usd: 2500,
           minVolumeH6Usd: 10000,
           minVolumeH24Usd: 15_000,
+          pumpStreamEnabled: true,
+          graduatingFeedEnabled: true,
+          heliusOnchainDiscoveryEnabled: false,
         };
       } else {
         config.marketScanner.enabled = true;
@@ -5880,6 +5912,26 @@ export function setRpcShareLoad(enabled: boolean): boolean {
   return config.rpc.shareLoad;
 }
 
+export function setHeliusExtraFallback(
+  enabled: boolean,
+  target?: 'backup2' | 'public'
+): { enabled: boolean; target: 'backup2' | 'public' } {
+  config.rpc.heliusExtraFallbackEnabled = Boolean(enabled);
+  if (target === 'public' || target === 'backup2') {
+    config.rpc.heliusExtraFallbackTarget = target;
+  }
+  persistUserSettings();
+  console.log(
+    `[rpc] Helius extra fallback ${
+      config.rpc.heliusExtraFallbackEnabled ? 'ON' : 'OFF'
+    } → ${config.rpc.heliusExtraFallbackTarget} (lazy until Critical actually fails)`
+  );
+  return {
+    enabled: config.rpc.heliusExtraFallbackEnabled,
+    target: config.rpc.heliusExtraFallbackTarget,
+  };
+}
+
 /**
  * Favourites soft-watch wallet cap (Utility when Share ON).
  * 0 = pause Favourites RPC watch. null clears to code default (12/20).
@@ -6656,6 +6708,11 @@ export function getConfigSnapshot() {
       healthIntervalMs: config.rpc.healthIntervalMs,
       failoverDownMs: config.rpc.failoverDownMs,
       shareLoad: Boolean(config.rpc.shareLoad),
+      heliusExtraFallbackEnabled: Boolean(
+        config.rpc.heliusExtraFallbackEnabled
+      ),
+      heliusExtraFallbackTarget:
+        config.rpc.heliusExtraFallbackTarget === 'public' ? 'public' : 'backup2',
       softWatchCap:
         config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
           ? config.rpc.softWatchCap

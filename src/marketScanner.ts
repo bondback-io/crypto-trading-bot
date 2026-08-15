@@ -49,6 +49,7 @@ import { getScannerOutcomeSummary } from './scannerOutcomes';
 import {
   fetchJupiterPumpTrending,
   getJupiterTokensStatus,
+  type JupiterCategory,
 } from './jupiterTokens';
 
 export const MARKET_SCANNER_WALLET = 'market-scanner';
@@ -161,6 +162,17 @@ export interface ScannerStatus {
   skippedForBuyQueue?: number;
   lastSkipReason?: string | null;
   buyQueueYieldThreshold?: number;
+  candidatesBySource?: Record<string, number>;
+  candidatesByCategory?: Record<string, number>;
+  mergeDedupedCount?: number;
+  droppedPreGateByReason?: Record<string, number>;
+  pumpStream?: ReturnType<
+    typeof import('./pumpPortalStream').getPumpStreamStatus
+  >;
+  graduating?: ReturnType<
+    typeof import('./graduatingFeed').getGraduatingFeedStatus
+  >;
+  onchainEventsPerMin?: number;
 }
 
 type ScannerHandler = (candidate: ScannerCandidate & { launch: LaunchEvent }) => Promise<void>;
@@ -177,6 +189,11 @@ let pollInFlightSince = 0;
 const SCANNER_POLL_HANG_MS = 12_000;
 const COLLECT_BUDGET_MS = 8_000;
 let lastGoodUniverse: LaunchEvent[] = [];
+let lastUniverseBySource: Record<string, number> = {};
+let lastUniverseByCategory: Record<string, number> = {};
+let lastMergeDeduped = 0;
+let lastOnchainEventsPerMin = 0;
+const droppedPreGate: Record<string, number> = {};
 let lastPollAt: number | null = null;
 let lastPollMs: number | null = null;
 let lastError: string | null = null;
@@ -204,13 +221,16 @@ function baseScannerCfg() {
       preferOrganicVolume: true,
       jupiterTrendingEnabled: true,
       jupiterCategory: 'toptraded' as const,
-      jupiterPumpFunOnly: true,
+      jupiterPumpFunOnly: false,
       jupiterLimit: 100,
       jupiterMergeIntervals: true,
       minVolumeM5Usd: 1000,
       minVolumeH1Usd: 2500,
       minVolumeH6Usd: 10000,
       minVolumeH24Usd: 15_000,
+      pumpStreamEnabled: true,
+      graduatingFeedEnabled: true,
+      heliusOnchainDiscoveryEnabled: false,
     }
   );
 }
@@ -317,7 +337,7 @@ export function getScannerStatus(): ScannerStatus {
   } catch {
     majors = undefined;
   }
-  return {
+  const status: ScannerStatus = {
     running,
     lastPollAt,
     lastPollMs,
@@ -341,7 +361,27 @@ export function getScannerStatus(): ScannerStatus {
     skippedForBuyQueue,
     lastSkipReason,
     buyQueueYieldThreshold: SCANNER_YIELD_QUEUE_DEPTH,
+    candidatesBySource: { ...lastUniverseBySource },
+    candidatesByCategory: { ...lastUniverseByCategory },
+    mergeDedupedCount: lastMergeDeduped,
+    droppedPreGateByReason: { ...droppedPreGate },
+    onchainEventsPerMin: lastOnchainEventsPerMin,
   };
+  try {
+    const { getPumpStreamStatus } =
+      require('./pumpPortalStream') as typeof import('./pumpPortalStream');
+    status.pumpStream = getPumpStreamStatus();
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getGraduatingFeedStatus } =
+      require('./graduatingFeed') as typeof import('./graduatingFeed');
+    status.graduating = getGraduatingFeedStatus();
+  } catch {
+    /* optional */
+  }
+  return status;
 }
 
 export function annotateScannerCandidate(
@@ -378,23 +418,10 @@ function hardFloorsOk(event: LaunchEvent): boolean {
   if (minLiq > 0 && liq > 0 && liq < minLiq) return false;
   if (minMc > 0 && mc > 0 && mc < minMc) return false;
 
-  const preferOrg = cfg.preferOrganicVolume !== false;
-  const volM5 =
-    preferOrg && event.volumeOrganicM5Usd != null && event.volumeOrganicM5Usd > 0
-      ? event.volumeOrganicM5Usd
-      : (event.volumeM5Usd ?? 0);
-  const volH1 =
-    preferOrg && event.volumeOrganicH1Usd != null && event.volumeOrganicH1Usd > 0
-      ? event.volumeOrganicH1Usd
-      : (event.volumeH1Usd ?? 0);
-  const volH6 =
-    preferOrg && event.volumeOrganicH6Usd != null && event.volumeOrganicH6Usd > 0
-      ? event.volumeOrganicH6Usd
-      : (event.volumeH6Usd ?? 0);
-  const volH24 =
-    preferOrg && event.volumeOrganicUsd != null && event.volumeOrganicUsd > 0
-      ? event.volumeOrganicUsd
-      : (event.volumeUsd ?? 0);
+  const volM5 = event.volumeM5Usd ?? 0;
+  const volH1 = event.volumeH1Usd ?? 0;
+  const volH6 = event.volumeH6Usd ?? 0;
+  const volH24 = event.volumeUsd ?? 0;
 
   const floorM5 = cfg.minVolumeM5Usd ?? 0;
   const floorH1 = cfg.minVolumeH1Usd ?? 0;
@@ -578,6 +605,21 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
   if (event.isPumpFun) {
     score += 3;
     reasons.push('pump');
+  }
+  if (cfg.preferOrganicVolume !== false) {
+    const org = Number(event.organicScore);
+    if (Number.isFinite(org) && org >= 60) {
+      score += 6;
+      reasons.push('organic boost');
+    } else if (
+      event.volumeOrganicH1Usd != null &&
+      event.volumeOrganicH1Usd > 0 &&
+      (event.volumeH1Usd ?? 0) > 0 &&
+      event.volumeOrganicH1Usd >= (event.volumeH1Usd ?? 0) * 0.45
+    ) {
+      score += 4;
+      reasons.push('organic vol');
+    }
   }
 
   if (event.candles?.length) {
@@ -1012,66 +1054,215 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
   );
 
   const byMint = new Map<string, LaunchEvent>();
+  const bump = (map: Record<string, number>, key: string) => {
+    map[key] = (map[key] || 0) + 1;
+  };
+  const bySource: Record<string, number> = {};
+  const byCategory: Record<string, number> = {};
+  let mergeDeduped = 0;
+
+  const attach = (
+    e: LaunchEvent,
+    source: string,
+    category?: string
+  ): void => {
+    if (!e?.mint) return;
+    const existing = byMint.get(e.mint);
+    if (existing) {
+      mergeDeduped += 1;
+      existing.scannerSources = [
+        ...new Set([
+          ...(existing.scannerSources || [existing.source]),
+          source,
+          e.source,
+        ]),
+      ];
+      const cats = [
+        ...(existing.scannerCategories || []),
+        ...(e.scannerCategories || []),
+        ...(category ? [category] : []),
+      ];
+      existing.scannerCategories = [...new Set(cats.filter(Boolean))];
+      if (existing.organicScore == null && e.organicScore != null) {
+        existing.organicScore = e.organicScore;
+      }
+      if (existing.curvePct == null && e.curvePct != null) {
+        existing.curvePct = e.curvePct;
+      }
+      if (
+        (existing.volumeOrganicH1Usd == null || existing.volumeOrganicH1Usd <= 0) &&
+        e.volumeOrganicH1Usd != null
+      ) {
+        existing.volumeOrganicH1Usd = e.volumeOrganicH1Usd;
+      }
+      bump(bySource, source);
+      if (category) bump(byCategory, category);
+      return;
+    }
+    e.scannerSources = [
+      ...new Set([...(e.scannerSources || []), source, e.source]),
+    ];
+    if (category) {
+      e.scannerCategories = [
+        ...new Set([...(e.scannerCategories || []), category]),
+      ];
+    }
+    byMint.set(e.mint, e);
+    bump(bySource, source);
+    if (category) bump(byCategory, category);
+    for (const c of e.scannerCategories || []) bump(byCategory, c);
+  };
+
   for (const e of events) {
-    if (e?.mint) byMint.set(e.mint, e);
+    if (e?.mint) attach(e, e.source || 'dexscreener');
   }
   const dexCount = byMint.size;
 
   if (cfg.jupiterTrendingEnabled !== false) {
     try {
       const solUsd = await fetchSolUsdPrice();
-      const jup = await withBudget(
-        fetchJupiterPumpTrending({
-          category: cfg.jupiterCategory ?? 'toptraded',
-          limit: cfg.jupiterLimit ?? 50,
-          pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
-          mergeIntervals: cfg.jupiterMergeIntervals !== false,
-          preferOrganicVolume: cfg.preferOrganicVolume !== false,
-          solUsd,
-        }),
-        COLLECT_BUDGET_MS,
-        []
+      const cats: JupiterCategory[] = [
+        'toptrending',
+        'toptraded',
+        'toporganicscore',
+      ];
+      const pumpFunOnly = cfg.jupiterPumpFunOnly === true;
+      const fetched = await Promise.all(
+        cats.map((category) =>
+          withBudget(
+            fetchJupiterPumpTrending({
+              category,
+              limit: cfg.jupiterLimit ?? 50,
+              pumpFunOnly,
+              mergeIntervals: cfg.jupiterMergeIntervals !== false,
+              preferOrganicVolume: cfg.preferOrganicVolume !== false,
+              solUsd,
+            }),
+            COLLECT_BUDGET_MS,
+            []
+          )
+        )
       );
-      let added = 0;
-      for (const e of jup) {
-        if (!e?.mint) continue;
-        if (!byMint.has(e.mint)) {
-          byMint.set(e.mint, e);
-          added += 1;
+      let jupN = 0;
+      for (let i = 0; i < cats.length; i++) {
+        const cat = cats[i];
+        for (const e of fetched[i] || []) {
+          if (!e?.mint) continue;
+          e.scannerCategories = [
+            ...new Set([...(e.scannerCategories || []), cat]),
+          ];
+          attach(e, 'jupiter', cat);
+          jupN += 1;
         }
       }
       console.log(
-        `[marketScanner] universe dex/gmgn=${dexCount} + jupiter=${jup.length} (new ${added}) → ${byMint.size}`
+        `[marketScanner] universe dex/gmgn=${dexCount} + jupiter=${jupN} ` +
+          `(3-cat, pumpOnly=${pumpFunOnly}) → ${byMint.size}`
       );
     } catch (err) {
       logger.warn('MarketScanner', 'Jupiter trending merge failed', errorToMeta(err));
     }
   }
 
-  // Optional AlphaScan New soft-merge (default OFF — does not change universe unless enabled)
-  if (config.alphaScan?.enabled && config.alphaScan?.includeNewInScannerUniverse) {
+  if (config.alphaScan?.enabled) {
     try {
-      const { getAlphaScanNewLaunchEvents } =
+      const { getAlphaScanUniverseLaunchEvents } =
         require('./alphaScanFeed') as typeof import('./alphaScanFeed');
-      const neu = getAlphaScanNewLaunchEvents();
+      const alpha = getAlphaScanUniverseLaunchEvents(24);
       let added = 0;
-      for (const e of neu) {
-        if (!e?.mint || byMint.has(e.mint)) continue;
-        byMint.set(e.mint, e);
-        added += 1;
+      for (const e of alpha) {
+        const before = byMint.size;
+        attach(e, 'alphascan', (e.scannerCategories || [])[0] || 'new');
+        if (byMint.size > before) added += 1;
       }
-      if (added > 0) {
+      if (added > 0 || alpha.length > 0) {
         console.log(
-          `[marketScanner] universe + alphascan new=${added} → ${byMint.size}`
+          `[marketScanner] universe + alphascan new/soon/bonded=${alpha.length} (new ${added}) → ${byMint.size}`
         );
       }
     } catch (err) {
       logger.warn(
         'MarketScanner',
-        'AlphaScan new merge failed',
+        'AlphaScan universe merge failed',
         errorToMeta(err)
       );
     }
+  }
+
+  if (cfg.pumpStreamEnabled !== false) {
+    try {
+      const { getPumpStreamLaunchEvents } =
+        require('./pumpPortalStream') as typeof import('./pumpPortalStream');
+      for (const e of getPumpStreamLaunchEvents(40)) {
+        attach(e, 'pump_stream', (e.scannerCategories || [])[0] || 'new');
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  if (cfg.graduatingFeedEnabled !== false) {
+    try {
+      const { getGraduatingLaunchEvents, refreshGraduatingFeed } =
+        require('./graduatingFeed') as typeof import('./graduatingFeed');
+      void refreshGraduatingFeed();
+      for (const e of getGraduatingLaunchEvents()) {
+        attach(e, 'graduating_feed', (e.scannerCategories || [])[0] || 'soon');
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  if (cfg.heliusOnchainDiscoveryEnabled === true) {
+    try {
+      const { getRecentMigrations } =
+        require('./migrationListener') as typeof import('./migrationListener');
+      const recent = getRecentMigrations(24);
+      lastOnchainEventsPerMin = recent.filter(
+        (m) => Date.now() - m.detectedAt < 60_000
+      ).length;
+      for (const m of recent) {
+        if (!m.mint) continue;
+        attach(
+          {
+            mint: m.mint,
+            symbol: m.mint.slice(0, 6),
+            name: 'On-chain pool',
+            launchedAt: m.timestamp || m.detectedAt,
+            migrated: true,
+            entryPriceSol: 0,
+            lastPriceSol: 0,
+            priceChangePct: 0,
+            candles: [],
+            source: 'onchain_helius',
+            scannerSources: ['onchain_helius'],
+            scannerCategories: ['new_pool'],
+          },
+          'onchain_helius',
+          'new_pool'
+        );
+      }
+    } catch {
+      lastOnchainEventsPerMin = 0;
+    }
+  } else {
+    lastOnchainEventsPerMin = 0;
+  }
+
+  lastUniverseBySource = bySource;
+  lastUniverseByCategory = byCategory;
+  lastMergeDeduped = mergeDeduped;
+  try {
+    const { noteScannerFanIn } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteScannerFanIn({
+      bySource,
+      byCategory,
+      mergeDeduped,
+    });
+  } catch {
+    /* optional */
   }
 
   const out = [...byMint.values()];
@@ -1111,6 +1302,12 @@ export async function selectScannerCandidates(
       `[marketScanner] Deferring enrich — ${qDepth} wallet buy(s) queued ` +
         `(threshold ${SCANNER_YIELD_QUEUE_DEPTH})`
     );
+    droppedPreGate.queue_yield = (droppedPreGate.queue_yield || 0) + events.length;
+    try {
+      require('./watchPipeline').noteDroppedPreGate('queue_yield', events.length);
+    } catch {
+      /* optional */
+    }
     return [];
   }
 
@@ -1194,6 +1391,16 @@ export async function selectScannerCandidates(
       const { noteScannerThrottle } =
         require('./watchPipeline') as typeof import('./watchPipeline');
       noteScannerThrottle({ crudeOnly: true });
+    } catch {
+      /* optional */
+    }
+    droppedPreGate.crude_only =
+      (droppedPreGate.crude_only || 0) + Math.max(0, events.length - out.length);
+    try {
+      require('./watchPipeline').noteDroppedPreGate(
+        'crude_only',
+        Math.max(0, events.length - out.length)
+      );
     } catch {
       /* optional */
     }
@@ -1344,6 +1551,28 @@ export async function selectScannerCandidates(
       } catch {
         /* watch module may not be ready during boot */
       }
+    }
+
+    try {
+      const { offerTrendWatchFromCandidate } =
+        require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+      offerTrendWatchFromCandidate({
+        mint: event.mint,
+        symbol: event.symbol,
+        name: event.name,
+        marketCapUsd: event.marketCapUsd,
+        volumeH1Usd: event.volumeH1Usd,
+        volumeM5Usd: event.volumeM5Usd,
+        holderCount: event.holderCount,
+        priceChangeH1Pct: event.priceChangeH1Pct,
+        nearKeyFib: ranked.nearKeyFib,
+        nearSupport: ranked.nearSupport || hasSrHint,
+        lastPriceSol: ranked.lastPriceSol ?? null,
+        supportPriceSol: ranked.supportPriceSol ?? null,
+        chartPatternIds: ranked.chartPatternIds,
+      });
+    } catch {
+      /* optional */
     }
 
     if (ranked.veto?.startsWith('bearish:')) return null;
@@ -1758,6 +1987,12 @@ export async function runScannerPollOnce(): Promise<number> {
     } catch {
       /* optional */
     }
+    droppedPreGate.queue_yield = (droppedPreGate.queue_yield || 0) + 1;
+    try {
+      require('./watchPipeline').noteDroppedPreGate('queue_yield', 1);
+    } catch {
+      /* optional */
+    }
     return 0;
   }
   pollInFlight = true;
@@ -1768,6 +2003,16 @@ export async function runScannerPollOnce(): Promise<number> {
     const universe = await collectScannerUniverse();
     const crudeOnly = shouldDegradeScannerEnrich();
     const picked = await selectScannerCandidates(universe, { crudeOnly });
+    const notPicked = Math.max(0, universe.length - picked.length);
+    if (notPicked > 0) {
+      droppedPreGate.not_in_picked =
+        (droppedPreGate.not_in_picked || 0) + notPicked;
+      try {
+        require('./watchPipeline').noteDroppedPreGate('not_in_picked', notPicked);
+      } catch {
+        /* optional */
+      }
+    }
     try {
       const { noteScannerCandidate, noteScannerThrottle } =
         require('./watchPipeline') as typeof import('./watchPipeline');
@@ -2027,6 +2272,15 @@ export function startMarketScanner(): void {
   if (running) return;
   running = true;
   const cfg = scannerCfg();
+  if (cfg.pumpStreamEnabled !== false) {
+    try {
+      const { startPumpPortalStream } =
+        require('./pumpPortalStream') as typeof import('./pumpPortalStream');
+      startPumpPortalStream();
+    } catch {
+      /* optional */
+    }
+  }
   console.log(
     `[marketScanner] Starting — poll every ${cfg.pollIntervalMs}ms, ` +
       `lookback ${cfg.lookbackHours}h, minScore ${cfg.minRankScore}`
@@ -2050,6 +2304,13 @@ export function stopMarketScanner(): void {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
+  }
+  try {
+    const { stopPumpPortalStream } =
+      require('./pumpPortalStream') as typeof import('./pumpPortalStream');
+    stopPumpPortalStream();
+  } catch {
+    /* optional */
   }
 }
 

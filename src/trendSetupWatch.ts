@@ -103,9 +103,12 @@ const trendFunnel = {
   expired: 0,
   invalidated: 0,
   blocked: 0,
+  trend_yield_to_dip_armed: 0,
+  trend_expired_by_dip_admit: 0,
+  trend_admitted_despite_dip_watching: 0,
 };
 
-function noteTrendFunnel(key: keyof typeof trendFunnel, n = 1): void {
+export function noteTrendFunnel(key: keyof typeof trendFunnel, n = 1): void {
   trendFunnel[key] = (trendFunnel[key] || 0) + n;
 }
 
@@ -295,11 +298,11 @@ export function scoreTrendDna(input: {
 
   const pats = input.chartPatternIds || [];
   const trendPat = pats.some((p) =>
-    /trend_continuation|structured_pullback|bull_flag/i.test(String(p))
+    /trend_continuation|bull_flag/i.test(String(p))
   );
-  if (trendPat || input.nearSupport === true || input.nearKeyFib === true) {
+  if (trendPat) {
     hits += 1;
-    reasons.push(trendPat ? 'trend chart' : 'pullback/S');
+    reasons.push('trend chart');
   }
 
   if (softPreferMc) {
@@ -310,16 +313,16 @@ export function scoreTrendDna(input: {
   return { hits, reasons, softPreferMc };
 }
 
-/** Specialty Jupiter/KOL (and ≥$5M) need 3 DNA hits; scanner micros still need 4. */
+/** Specialty Jupiter/KOL (and ≥$5M) need 2 DNA hits; scanner micros still need 3. */
 export function trendWatchMinDnaHits(input: {
   marketCapUsd?: number;
   specialtyFeed?: string;
 }): number {
   const feed = String(input.specialtyFeed || '').toLowerCase();
-  if (feed === 'jupiter' || feed === 'kolscan') return 3;
+  if (feed === 'jupiter' || feed === 'kolscan') return 2;
   const mc = Number(input.marketCapUsd ?? 0);
-  if (mc >= TREND_WATCH_SOFT_MC_USD) return 3;
-  return 4;
+  if (mc >= TREND_WATCH_SOFT_MC_USD) return 2;
+  return 3;
 }
 
 function mutualExclusionBlocked(mint: string): string | null {
@@ -340,12 +343,27 @@ function mutualExclusionBlocked(mint: string): string | null {
           e.mint === mint &&
           (e.status === 'watching' || e.status === 'armed')
       );
+      if (!row) return null;
       const src = String(row?.source || '');
-      // Don't steal Steady Medium/Majors quality parks
-      if (src === 'medium' || src === 'majors') return 'Steady quality park';
-      // Dip minors Fib parks — leave to Dip unless Trend DNA already stronger
-      if (row?.preferredProfileId === 'steady_compounder') {
-        return 'Steady preferred on dip-watch';
+      const dumpBand =
+        Number(row.dropFromPeakPct ?? 0) >= 8 &&
+        (row.nearKeyFib === true || row.nearSupport === true);
+      if (row.status === 'armed') {
+        noteTrendFunnel('trend_yield_to_dip_armed');
+        return 'Dip armed';
+      }
+      if (dumpBand) return 'Dip dump-reclaim';
+      // Yield to Steady quality park only when Trend DNA is weak
+      if (src === 'medium' || src === 'majors') {
+        const dna = scoreTrendDna({
+          marketCapUsd: row.marketCapUsd,
+          volumeH1Usd: row.volumeH1Usd,
+          nearSupport: row.nearSupport,
+          nearKeyFib: row.nearKeyFib,
+        });
+        if (dna.hits < 4) return 'Steady quality park';
+        noteTrendFunnel('trend_admitted_despite_dip_watching');
+        return null;
       }
     }
   } catch {
@@ -739,7 +757,7 @@ export async function tickTrendSetupWatches(opts?: {
       w.status === 'watching' &&
       (w.nearSupport === true ||
         w.nearKeyFib === true ||
-        (w.dnaHits ?? 0) >= 5)
+        (w.dnaHits ?? 0) >= 4)
     ) {
       if (
         shouldSkipArmForCap('trend_rider', countArmedWatches(watches.values())) ||
@@ -797,15 +815,14 @@ export async function tickTrendSetupWatches(opts?: {
         reclaim =
           w.nearSupport === true ||
           w.nearKeyFib === true ||
-          (w.dnaHits ?? 0) >= 5;
+          (w.dnaHits ?? 0) >= 4;
       }
 
-      // Continuation confirm without level: strong DNA + live vol not collapsed
+      // Continuation confirm without level: DNA 4+ + live vol not collapsed
       if (
         !reclaim &&
-        (w.dnaHits ?? 0) >= 5 &&
-        String(w.volumeDecayState || '') !== 'collapsed' &&
-        String(w.volumeDecayState || '') !== 'decaying'
+        (w.dnaHits ?? 0) >= 4 &&
+        String(w.volumeDecayState || '') !== 'collapsed'
       ) {
         reclaim = true;
       }
@@ -913,6 +930,11 @@ export function isMintOnActiveTrendWatch(mint: string): boolean {
   return w != null && isActiveWatch(w);
 }
 
+export function getActiveTrendWatch(mint: string): TrendWatchEntry | undefined {
+  const w = watches.get(String(mint || '').trim());
+  return w != null && isActiveWatch(w) ? w : undefined;
+}
+
 /**
  * Expire an active Trend watch so Dip/Steady can park the mint.
  * No unwatch cooldown (bots may re-admit Trend later if DNA wins).
@@ -930,6 +952,7 @@ export function expireTrendWatchForDipAdmit(
   w.updatedAt = now;
   w.lastReason = reason;
   noteTrendFunnel('expired');
+  noteTrendFunnel('trend_expired_by_dip_admit');
   try {
     const { clearOneSetupProfileLock } =
       require('./expectancyLift') as typeof import('./expectancyLift');

@@ -8775,8 +8775,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <label class="switch"><input type="checkbox" id="ms-jup-enabled" checked /><span class="slider"></span></label>
           </div>
           <div class="toggle-row">
-            <span>Pump.fun only <span class="tip" tabindex="0" data-tip="Keep tokens whose mint ends with pump, or tags/launchpad/name hint Pump.fun. Focuses entries on that launchpad."></span></span>
-            <label class="switch"><input type="checkbox" id="ms-jup-pump" checked /><span class="slider"></span></label>
+            <span>Pump.fun only <span class="tip" tabindex="0" data-tip="Keep tokens whose mint ends with pump, or tags/launchpad/name hint Pump.fun. Default off so Jupiter categories can include non-pump names."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-jup-pump" /><span class="slider"></span></label>
           </div>
           <div class="toggle-row">
             <span>Merge intervals <span class="tip" tabindex="0" data-tip="Fetch 5m + 1h + 6h + 24h top lists and union by mint (fresher + broader universe). Off = 1h only. Source: Jupiter Tokens API."></span></span>
@@ -8784,7 +8784,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div class="filters-row mt-2">
             <label class="ctl ctl-md">
-              <span>Category <span class="tip" tabindex="0" data-tip="Jupiter list type: toptraded (volume), toptrending (price move), toporganicscore (organic activity). Source: Jupiter Tokens API."></span></span>
+              <span>Primary rank <span class="tip" tabindex="0" data-tip="Jupiter list used for rank preference. Scanner still pulls all three categories (trending / traded / organic) and merges by mint."></span></span>
               <select id="ms-jup-category">
                 <option value="toptraded">toptraded</option>
                 <option value="toptrending">toptrending</option>
@@ -8811,6 +8811,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span>Min vol 24h ($) <span class="tip" tabindex="0" data-tip="Minimum 24h volume USD to pass hard floor (0 = off). DexScreener h24 / Jupiter stats24h."></span></span>
               <input type="number" id="ms-vol-h24" value="15000" min="0" max="200000000" step="1000" />
             </label>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-3" style="border-top:1px solid #1e293b">
+          <div class="section-title !mb-2 text-sm">Discovery feeds <span class="tip" tabindex="0" data-tip="Additive candidate-only feeds. Same mint merge; still pass watch/arm/TA. No Trading-lane logsSubscribe."></span></div>
+          <div class="mint text-xs mb-2" id="ms-fanin-status" style="color:#94a3b8">Fan-in: —</div>
+          <div class="toggle-row">
+            <span>PumpPortal stream <span class="tip" tabindex="0" data-tip="WebSocket token create / graduation off Solana RPC. Tags source=pump_stream. Fail-soft if the stream is down."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-pump-stream" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>Graduating / soon feed <span class="tip" tabindex="0" data-tip="AlphaScan Soon/Bonded plus optional Solana Tracker graduating HTTP. Tags source=graduating_feed. Prefer Migration Sniper watch — no naked curve buys."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-grad-feed" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>On-chain Helius discovery <span class="tip" tabindex="0" data-tip="Reuse existing migration WS events as scanner tags. Default off. Never adds a second pump-program logsSubscribe on Trading."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-onchain-helius" /><span class="slider"></span></label>
           </div>
         </div>
 
@@ -10801,6 +10818,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="card">
           <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
           <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="toggle-row mb-2"><span title="Extra Critical failover after Helius → Alchemy (scanners) → QuickNode. OFF by default. Does not probe BACKUP2 until Helius is actually failing.">Helius extra fallback</span><label class="switch"><input type="checkbox" id="rpc-helius-extra" onchange="toggleHeliusExtraFallback(this.checked)" /><span class="slider"></span></label></div>
+          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-md" title="BACKUP2 preferred for live. Public is paper/emergency only (rate limits miss buys).">
+              <span>Extra fallback target</span>
+              <select id="rpc-helius-extra-target" onchange="toggleHeliusExtraFallback(document.getElementById('rpc-helius-extra').checked)">
+                <option value="backup2">ALCHEMY_API_KEY_BACKUP2</option>
+                <option value="public">Public RPC (paper/emergency)</option>
+              </select>
+            </label>
+            <span class="mint text-xs" id="rpc-helius-extra-status">OFF — lane map unchanged</span>
+          </div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
               <span>Soft watch cap</span>
@@ -13720,7 +13748,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ' · stagnant ' +
           (wp.expired_stagnant_count || 0) +
           ' · volX ' +
-          (wp.expired_from_volume_collapse_count || 0);
+          (wp.expired_from_volume_collapse_count || 0) +
+          (wp.duplicate_token_across_steady_hwr != null
+            ? ' · dup S/HWR ' + wp.duplicate_token_across_steady_hwr
+            : '') +
+          (function () {
+            const hwr = wp.hwr_watch_rejects_by_reason || {};
+            const top = Object.keys(hwr)
+              .filter(function (k) {
+                return (hwr[k] || 0) > 0 && k.indexOf('hwr_') === 0;
+              })
+              .sort(function (a, b) {
+                return (hwr[b] || 0) - (hwr[a] || 0);
+              })
+              .slice(0, 2)
+              .map(function (k) {
+                return k + '×' + hwr[k];
+              })
+              .join(' ');
+            return top ? ' · HWR deny ' + top : '';
+          })() +
+          (function () {
+            const ex = wp.exclusive_route_counts || {};
+            const bits = ['routed_steady', 'routed_hwr', 'both_eligible_but_split', 'rejected_both']
+              .filter(function (k) {
+                return (ex[k] || 0) > 0;
+              })
+              .map(function (k) {
+                return k.replace('routed_', '') + '×' + ex[k];
+              })
+              .join(' ');
+            return bits ? ' · route ' + bits : '';
+          })();
       })();
       const scalperCount = document.getElementById('scalper-watch-count');
       const scalperList = document.getElementById('scalper-watch-list');
@@ -14067,6 +14126,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (status === 'armed' && qualityChips.indexOf('is-armed') < 0) {
           scoreChipBits.push(
             '<span class="setup-watch-chip is-armed">armed</span>'
+          );
+        }
+        const route = String(e.exclusiveRouteReason || e.preferredProfileId || '');
+        if (panelPid === 'steady_compounder' && (route === 'routed_steady' || route === 'steady_compounder' || route === 'both_eligible_but_split')) {
+          scoreChipBits.push(
+            '<span class="setup-watch-chip">routed_steady</span>'
+          );
+        }
+        if (panelPid === 'high_win_rate' && (route === 'routed_hwr' || route === 'high_win_rate' || route === 'both_eligible_but_split')) {
+          scoreChipBits.push(
+            '<span class="setup-watch-chip">routed_hwr</span>'
           );
         }
         const scoreChips = scoreChipBits.length
@@ -27116,6 +27186,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
       const shareToggle = document.getElementById('rpc-share-load');
       if (shareToggle) shareToggle.checked = rpc.shareLoad === true;
+      const extraToggle = document.getElementById('rpc-helius-extra');
+      if (extraToggle) extraToggle.checked = rpc.heliusExtraFallbackEnabled === true;
+      const extraTarget = document.getElementById('rpc-helius-extra-target');
+      if (extraTarget) {
+        extraTarget.value =
+          rpc.heliusExtraFallbackTarget === 'public' ? 'public' : 'backup2';
+      }
+      const extraSt = document.getElementById('rpc-helius-extra-status');
+      if (extraSt) {
+        extraSt.textContent = rpc.heliusExtraFallbackEnabled
+          ? 'ON · lazy until Helius fails → ' +
+            (rpc.heliusExtraFallbackTarget === 'public'
+              ? 'public'
+              : 'BACKUP2')
+          : 'OFF — lane map unchanged';
+      }
       const shareAlloc = document.getElementById('rpc-share-alloc');
       if (shareAlloc) shareAlloc.style.display = rpc.shareLoad ? 'block' : 'none';
       const softCapEl = document.getElementById('rpc-soft-watch-cap');
@@ -30967,7 +31053,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const jupEn = document.getElementById('ms-jup-enabled');
       if (jupEn) jupEn.checked = cfg.jupiterTrendingEnabled !== false;
       const jupPump = document.getElementById('ms-jup-pump');
-      if (jupPump) jupPump.checked = cfg.jupiterPumpFunOnly !== false;
+      if (jupPump) jupPump.checked = cfg.jupiterPumpFunOnly === true;
       const jupMerge = document.getElementById('ms-jup-merge');
       if (jupMerge) jupMerge.checked = cfg.jupiterMergeIntervals !== false;
       const jupCat = document.getElementById('ms-jup-category');
@@ -31004,6 +31090,46 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const err = j.lastError ? ' · ' + String(j.lastError).slice(0, 80) : '';
           jupSt.textContent = 'Jupiter: ' + key + cnt + err;
         }
+      }
+      const pumpEl = document.getElementById('ms-pump-stream');
+      if (pumpEl) pumpEl.checked = cfg.pumpStreamEnabled !== false;
+      const gradEl = document.getElementById('ms-grad-feed');
+      if (gradEl) gradEl.checked = cfg.graduatingFeedEnabled !== false;
+      const onchainEl = document.getElementById('ms-onchain-helius');
+      if (onchainEl) onchainEl.checked = cfg.heliusOnchainDiscoveryEnabled === true;
+      const fanin = document.getElementById('ms-fanin-status');
+      if (fanin && status) {
+        const src = status.candidatesBySource || {};
+        const cat = status.candidatesByCategory || {};
+        const srcBits = Object.keys(src)
+          .slice(0, 6)
+          .map(function (k) {
+            return k + '=' + src[k];
+          })
+          .join(' ');
+        const catBits = Object.keys(cat)
+          .slice(0, 6)
+          .map(function (k) {
+            return k + '=' + cat[k];
+          })
+          .join(' ');
+        const pump = status.pumpStream
+          ? ' · pump ' +
+            (status.pumpStream.connected ? 'up' : 'down') +
+            ' ' +
+            (status.pumpStream.eventsPerMin || 0) +
+            '/min'
+          : '';
+        const grad = status.graduating
+          ? ' · grad ' + (status.graduating.graduatingCandidates || 0)
+          : '';
+        fanin.textContent =
+          'Fan-in: dedupe ' +
+          (status.mergeDedupedCount || 0) +
+          (srcBits ? ' · ' + srcBits : '') +
+          (catBits ? ' · ' + catBits : '') +
+          pump +
+          grad;
       }
       const statusEl = document.getElementById('scanner-status-tab');
       if (statusEl && status && status.regime) {
@@ -31065,7 +31191,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             : true,
           jupiterPumpFunOnly: document.getElementById('ms-jup-pump')
             ? document.getElementById('ms-jup-pump').checked
+            : false,
+          pumpStreamEnabled: document.getElementById('ms-pump-stream')
+            ? document.getElementById('ms-pump-stream').checked
             : true,
+          graduatingFeedEnabled: document.getElementById('ms-grad-feed')
+            ? document.getElementById('ms-grad-feed').checked
+            : true,
+          heliusOnchainDiscoveryEnabled: document.getElementById('ms-onchain-helius')
+            ? document.getElementById('ms-onchain-helius').checked
+            : false,
           jupiterMergeIntervals: document.getElementById('ms-jup-merge')
             ? document.getElementById('ms-jup-merge').checked
             : true,
@@ -36222,6 +36357,37 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.saveRpcSoftWatchCap = saveRpcSoftWatchCap;
+
+    async function toggleHeliusExtraFallback(enabled) {
+      const st = document.getElementById('rpc-helius-extra-status');
+      const targetEl = document.getElementById('rpc-helius-extra-target');
+      const target = targetEl ? targetEl.value : 'backup2';
+      if (st) st.textContent = 'Saving…';
+      try {
+        const data = await fetchJSON('/api/rpc/helius-extra-fallback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: Boolean(enabled),
+            target: target === 'public' ? 'public' : 'backup2',
+          }),
+        });
+        if (st) {
+          st.textContent = data.heliusExtraFallbackEnabled
+            ? 'ON · lazy until Helius fails → ' +
+              (data.heliusExtraFallbackTarget === 'public'
+                ? 'public'
+                : 'BACKUP2')
+            : 'OFF — lane map unchanged';
+        }
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        const t = document.getElementById('rpc-helius-extra');
+        if (t) t.checked = !enabled;
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+    window.toggleHeliusExtraFallback = toggleHeliusExtraFallback;
 
     async function runRpcDiagnostic() {
       const st = document.getElementById('rpc-diag-status');

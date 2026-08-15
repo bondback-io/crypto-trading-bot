@@ -100,8 +100,8 @@ const WEIGHTS: Record<string, WeightSet> = {
   momentum_burst: { setup: 0.22, timing: 0.18, activity: 0.42, risk: 0.18 },
   trend_rider: { setup: 0.38, timing: 0.14, activity: 0.3, risk: 0.18 },
   migration_sniper: { setup: 0.28, timing: 0.32, activity: 0.28, risk: 0.12 },
-  steady_compounder: { setup: 0.42, timing: 0.12, activity: 0.28, risk: 0.18 },
-  high_win_rate: { setup: 0.42, timing: 0.12, activity: 0.28, risk: 0.18 },
+  steady_compounder: { setup: 0.32, timing: 0.12, activity: 0.38, risk: 0.18 },
+  high_win_rate: { setup: 0.46, timing: 0.12, activity: 0.18, risk: 0.24 },
   smart_money_mirror: { setup: 0.2, timing: 0.35, activity: 0.3, risk: 0.15 },
 };
 
@@ -113,7 +113,7 @@ const GRACE_MS: Record<string, number> = {
   migration_sniper: 6 * 60_000,
   trend_rider: 10 * 60_000,
   steady_compounder: 10 * 60_000,
-  high_win_rate: 10 * 60_000,
+  high_win_rate: 6 * 60_000,
   smart_money_mirror: 8 * 60_000,
 };
 
@@ -124,8 +124,8 @@ const DECAY_PER_MIN: Record<string, number> = {
   dip_buyer: 1.2,
   migration_sniper: 1.3,
   trend_rider: 0.7,
-  steady_compounder: 0.55,
-  high_win_rate: 0.55,
+  steady_compounder: 0.5,
+  high_win_rate: 1.15,
   smart_money_mirror: 1.0,
 };
 
