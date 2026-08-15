@@ -6,10 +6,14 @@
  * When Data RPC looks healthy, never whole-tick-skip scanners (1.2.313 restore).
  */
 
-import { getRpcGateSnapshot, type RpcGateRole } from './rpcGate';
+import {
+  getRpcGateSnapshot,
+  isTradingLaneWedged,
+  type RpcGateRole,
+} from './rpcGate';
 
-/** Data-lane EWMA below this → treat scanners as healthy for intake protect. */
-export const SIGNALS_RPC_HEALTHY_MS = 400;
+/** Data-lane probe below this → treat scanners as healthy for intake protect. */
+export const SIGNALS_RPC_HEALTHY_MS = 700;
 
 export type RpcLoadControlSnapshot = {
   scannerSlowFactor: number;
@@ -104,7 +108,6 @@ function recompute(): void {
   const bgSkips = gate.lanes.background.skipsPerMin;
   const dataLat = lastSignals.dataLatencyMs;
   const bgLat = lastSignals.backgroundLatencyMs;
-  const tradeLat = lastSignals.tradingLatencyMs;
   const latSpike = dataLat != null && dataLat >= 2_500;
   const reasons: string[] = [];
   const scannerReasons: string[] = [];
@@ -124,26 +127,18 @@ function recompute(): void {
     /* */
   }
 
-  // Trading pressure → Favourites/Background only (NOT scanner×).
-  // 1.2.350: ignore Trading latency/queue during post-deploy settle (0–180s)
-  // so a cold getSlot EWMA cannot pin shedBackground for 5–10 minutes.
+  // Trading pressure → Favourites only when the Trading gate is wedged.
+  // A slow-but-idle getSlot (q=0) must not freeze copy intake — Favourites
+  // rides Background, not Alchemy. 1.2.350 still ignores this during settle.
   if (!bootSettling && !lastSignals.tradingOnEmergency) {
-    if (tradeLat != null && tradeLat >= 700) {
+    const p = gate.lanes.primary;
+    if (isTradingLaneWedged(p)) {
       shedBackground = true;
       utilitySlowFactor = Math.max(utilitySlowFactor, 2);
       reasons.push(
-        `Trading latency ${Math.round(tradeLat)}ms → shed Favourites (scanners free)`
-      );
-    } else if (tradeLat != null && tradeLat >= 450) {
-      shedBackground = true;
-      reasons.push(
-        `Trading latency ${Math.round(tradeLat)}ms → defer Favourites (scanners free)`
+        `Trading lane wedged (inFlight ${p.inFlight}/${p.max}, queue ${p.queued}) → shed Favourites`
       );
     }
-  }
-  if (!bootSettling && lastSignals.primaryQueued > 0) {
-    shedBackground = true;
-    reasons.push('Trading queue > 0 → shed Favourites (scanners free)');
   }
   if (bootSettling) {
     reasons.push('boot settling — Trading shed grace (migration deferred)');

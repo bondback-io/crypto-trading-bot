@@ -4,6 +4,17 @@
 
 export type RpcGateRole = 'primary' | 'secondary' | 'background';
 
+/** True when Trading cannot accept more work (full in-flight + deep queue). */
+export function isTradingLaneWedged(p: {
+  inFlight: number;
+  queued: number;
+  max: number;
+}): boolean {
+  const max = Math.max(1, Number(p.max) || 0);
+  const deepQueue = Math.max(8, Math.floor(max / 2));
+  return p.inFlight >= max && p.queued >= deepQueue;
+}
+
 export type RpcLaneGateStats = {
   inFlight: number;
   max: number;
@@ -319,7 +330,7 @@ export function shouldDeferBackgroundForCritical(
   }
 
   // Favourites/utility: after scanners open, only yield when Trading is
-  // wedged or recovered EWMA is hot — not because a single probe is in flight.
+  // wedged — a slow-but-idle Alchemy probe must not freeze copy intake.
   if (kind === 'utility') {
     let scannersOpen = false;
     try {
@@ -330,25 +341,10 @@ export function shouldDeferBackgroundForCritical(
       scannersOpen = true;
     }
     if (scannersOpen) {
-      const deepQueue = Math.max(8, Math.floor(p.max / 2));
-      const wedged = p.inFlight >= p.max && p.queued >= deepQueue;
-      let ewmaHot = false;
-      try {
-        const { isTradingEwmaRecovered, getRpcStats } =
-          require('./connection') as typeof import('./connection');
-        if (isTradingEwmaRecovered()) {
-          const ms = getRpcStats({ lite: true }).lanes?.trading?.latencyMs;
-          ewmaHot = ms != null && ms >= 700;
-        }
-      } catch {
-        /* */
-      }
-      if (wedged || ewmaHot) {
+      if (isTradingLaneWedged(p)) {
         return {
           defer: true,
-          reason: wedged
-            ? `Trading lane wedged (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`
-            : 'Trading EWMA hot',
+          reason: `Trading lane wedged (inFlight ${p.inFlight}/${p.max}, queue ${p.queued})`,
         };
       }
       return { defer: false, reason: null };

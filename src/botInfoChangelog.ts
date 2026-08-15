@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.357',
+    title: 'Stop post-Ready Alchemy spike from freezing Favourites',
+    sections: ['copy', 'scanners', 'overview'],
+    items: [
+      'Migration stays seed-only for 90s after start and keeps tiny polls when Trading getSlot is already warm — the +4min full parse no longer saturates Alchemy.',
+      'Favourites no longer sheds on a slow-but-idle Trading probe (q=0); copy yields only when the Trading gate is wedged.',
+      'SIGNALS “RPC healthy” uses a 700ms Data-probe floor so a 495ms Helius tick no longer flips the widget while admits are flowing.',
+    ],
+  },
+  {
     version: '1.2.356',
     title: 'Unstick hung signal polls',
     sections: ['scanners', 'copy', 'overview'],

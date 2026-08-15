@@ -1547,9 +1547,15 @@ function refreshRpcLoadSignalsFromLanes(): void {
     const bActive = bgFeatureOn ? laneState('background') : null;
     const gate = getRpcGateSnapshot();
     updateRpcLoadSignals({
-      primaryLatencyMs: tradingEwmaRecovered ? tActive?.latencyMs ?? null : null,
-      secondaryLatencyMs: dataEwmaRecovered ? dActive?.latencyMs ?? null : null,
-      backgroundLatencyMs: bgFeatureOn ? bActive?.latencyMs ?? null : null,
+      primaryLatencyMs: tradingEwmaRecovered
+        ? tActive?.probeLatencyMs ?? tActive?.latencyMs ?? null
+        : null,
+      secondaryLatencyMs: dataEwmaRecovered
+        ? dActive?.probeLatencyMs ?? dActive?.latencyMs ?? null
+        : null,
+      backgroundLatencyMs: bgFeatureOn
+        ? bActive?.probeLatencyMs ?? bActive?.latencyMs ?? null
+        : null,
       tradingOnEmergency: tradingHop >= 1 && Boolean(emergencyPublic),
       dataHealthy: Boolean(dActive?.healthy),
       dataRateLimited: Boolean(

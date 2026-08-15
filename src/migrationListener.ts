@@ -105,6 +105,10 @@ const POLL_MS = 12_000;
 /** When Critical is warm/hot or the gate is stressed, back off polls (still Critical lane). */
 const POLL_MS_WARM = 30_000;
 const POLL_MS_STRESSED = 45_000;
+/** Seed-only window after listener start so the first full parse is not the 4min Alchemy cliff. */
+export const MIGRATION_POST_START_SEED_MS = 90_000;
+/** Trading getSlot probe at/above this → keep migration polls tiny. */
+export const MIGRATION_PROBE_WARM_MS = 400;
 const MAX_PROCESSED_SIGS = 800;
 const WS_STALE_MS = 4 * 60 * 1000;
 const HEALTH_CHECK_MS = 45_000;
@@ -123,6 +127,57 @@ let lastMigrationPollAt = 0;
 let lastTimeoutLogAt = 0;
 /** First post-boot poll is seed-only; parses allowed after this timestamp. */
 let allowMigrationParseAt = 0;
+/** Wall clock when startMigrationListener last succeeded. */
+let listenerStartedAt = 0;
+
+export function isMigrationSeedOnly(input: {
+  bootSettling: boolean;
+  listenerStartedAt: number;
+  now: number;
+  allowParseAt: number;
+}): boolean {
+  if (input.bootSettling) return true;
+  if (
+    input.listenerStartedAt > 0 &&
+    input.now - input.listenerStartedAt < MIGRATION_POST_START_SEED_MS
+  ) {
+    return true;
+  }
+  if (!input.allowParseAt || input.now < input.allowParseAt) return true;
+  return false;
+}
+
+export function migrationPollWeight(input: {
+  seedOnly: boolean;
+  probeMs: number | null;
+  softRpc: boolean;
+}): { sigLimit: number; parseCap: number; minGapMs: number; probeWarm: boolean } {
+  const probeWarm =
+    input.probeMs != null && input.probeMs >= MIGRATION_PROBE_WARM_MS;
+  const minGapMs =
+    input.seedOnly || probeWarm
+      ? POLL_MS_STRESSED
+      : input.probeMs != null && input.probeMs >= 200
+        ? POLL_MS_WARM
+        : POLL_MS;
+  if (input.seedOnly) {
+    return { sigLimit: 1, parseCap: 0, minGapMs, probeWarm };
+  }
+  if (probeWarm) {
+    return {
+      sigLimit: input.softRpc ? 1 : 3,
+      parseCap: 1,
+      minGapMs,
+      probeWarm,
+    };
+  }
+  return {
+    sigLimit: input.softRpc ? 8 : 15,
+    parseCap: input.softRpc ? 2 : 5,
+    minGapMs,
+    probeWarm,
+  };
+}
 
 /** True 429 / provider rate-limit only — timeouts must not mark Helius unhealthy. */
 function isRpcRateLimitError(err: unknown): boolean {
@@ -412,7 +467,8 @@ export function startMigrationListener(): void {
   running = true;
   reconnectAttempts = 0;
   seededPollPrograms.clear();
-  allowMigrationParseAt = 0;
+  listenerStartedAt = Date.now();
+  allowMigrationParseAt = listenerStartedAt + MIGRATION_POST_START_SEED_MS;
   try {
     const { markMigrationResumeWanted } =
       require('./connection') as typeof import('./connection');
@@ -436,6 +492,9 @@ export function startMigrationListener(): void {
 
   // 1.2.333: hard poll-only — never open logsSubscribe / onLogs (web3.js retry storms).
   // WS may return later only behind a dedicated supported WS URL (out of scope).
+  console.log(
+    `[migration] First ${Math.round(MIGRATION_POST_START_SEED_MS / 1000)}s after start stay seed-only (limit 1)`
+  );
   console.warn(
     '[migration] poll-only — logsSubscribe hard-disabled in code (1.2.333)'
   );
@@ -471,6 +530,7 @@ export function startMigrationListener(): void {
 export function stopMigrationListener(): void {
   running = false;
   wsMode = false;
+  listenerStartedAt = 0;
 
   if (migrationTimer) {
     clearInterval(migrationTimer);
@@ -741,19 +801,15 @@ async function pollMigrations(): Promise<void> {
   } catch {
     gateStressed = false;
   }
-  const primaryMs = (() => {
+  const probeMs = (() => {
     try {
-      const stats = getRpcStats();
-      const active =
-        stats.endpoints.find((e) => e.lane === 'primary' && e.isActive) ||
-        stats.endpoints.find((e) => e.isActive);
-      return active?.latencyMs ?? null;
+      const stats = getRpcStats({ lite: true });
+      const trading = stats.lanes?.trading;
+      return trading?.probeLatencyMs ?? trading?.latencyMs ?? null;
     } catch {
       return null;
     }
   })();
-  const primaryWarm = primaryMs != null && primaryMs >= 200;
-  const primaryHot = primaryMs != null && primaryMs >= 500;
   let bootSettling = false;
   try {
     const { isBootSettling } =
@@ -762,14 +818,22 @@ async function pollMigrations(): Promise<void> {
   } catch {
     /* */
   }
-  const seedOnly =
-    bootSettling || !allowMigrationParseAt || Date.now() < allowMigrationParseAt;
+  const now = Date.now();
+  const seedOnly = isMigrationSeedOnly({
+    bootSettling,
+    listenerStartedAt,
+    now,
+    allowParseAt: allowMigrationParseAt,
+  });
+  const weight = migrationPollWeight({
+    seedOnly,
+    probeMs,
+    softRpc: false,
+  });
   const minGap =
-    seedOnly || gateStressed || primaryHot
+    seedOnly || gateStressed || weight.probeWarm
       ? POLL_MS_STRESSED
-      : primaryWarm
-        ? POLL_MS_WARM
-        : POLL_MS;
+      : weight.minGapMs;
   if (lastMigrationPollAt && Date.now() - lastMigrationPollAt < minGap) return;
   let heavyHeld = false;
   try {
@@ -801,6 +865,11 @@ async function pollMigrations(): Promise<void> {
   try {
     const conn = getConnection();
     const softRpc = isSoftThrottleRpcUrl(conn.rpcEndpoint);
+    const pollWeight = migrationPollWeight({
+      seedOnly: earlyBootSoft,
+      probeMs,
+      softRpc,
+    });
     // Poll both PumpSwap (post-migrate venue) and Pump.fun (migrate ix)
     const targets = [
       { id: config.pumpSwapProgramId, label: 'pumpswap' as const },
@@ -809,8 +878,8 @@ async function pollMigrations(): Promise<void> {
 
     for (const target of targets) {
       if (Date.now() < rateLimitedUntil) break;
-      // Soft first minute: seed with limit 1 / no burst parses (post-deploy overlap).
-      const sigLimit = earlyBootSoft ? 1 : softRpc ? 8 : 15;
+      // Soft first 90s / warm probe: seed with limit 1–3 / no burst parses.
+      const sigLimit = pollWeight.sigLimit;
       const signatures = await conn.getSignaturesForAddress(
         new PublicKey(target.id),
         { limit: sigLimit }
@@ -848,8 +917,9 @@ async function pollMigrations(): Promise<void> {
 
       if (newSigs.length === 0) continue;
 
-      // Newest first for latency; tighter cap on free/public RPCs to avoid 429 storms
-      const parseCap = softRpc ? 2 : 5;
+      // Newest first for latency; tighter cap when Alchemy probe is already warm
+      const parseCap = pollWeight.parseCap;
+      if (parseCap <= 0) continue;
       for (const sig of newSigs.slice(0, parseCap)) {
         if (Date.now() < rateLimitedUntil) break;
         const ok = await processMigrationTx(sig, 'poll', target.label);
@@ -858,9 +928,9 @@ async function pollMigrations(): Promise<void> {
     }
 
     if (!allowMigrationParseAt) {
-      allowMigrationParseAt = Date.now() + POLL_MS_STRESSED;
+      allowMigrationParseAt = Date.now() + MIGRATION_POST_START_SEED_MS;
       console.log(
-        `[migration] Post-boot cursor seeded — parses start in ${Math.round(POLL_MS_STRESSED / 1000)}s`
+        `[migration] Post-boot cursor seeded — parses start in ${Math.round(MIGRATION_POST_START_SEED_MS / 1000)}s`
       );
     }
 
