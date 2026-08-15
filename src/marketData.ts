@@ -87,6 +87,8 @@ export interface LaunchEvent {
   scannerSources?: string[];
   scannerCategories?: string[];
   curvePct?: number;
+  /** Near-grad / soon tag from graduating_feed / AlphaScan (not a buy stamp) */
+  nearMigration?: boolean;
 }
 
 function isValidMint(m: string): boolean {

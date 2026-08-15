@@ -1501,6 +1501,10 @@ export interface TradeProfileMatchContext {
   dipWatchTriggered?: boolean;
   /** Preferred entry style from armed watch / scanner */
   entryStyleHint?: string | null;
+  scannerSources?: string[] | null;
+  scannerCategories?: string[] | null;
+  /** True when curveProgressPct was seeded from feed tags, not live RPC */
+  curveProgressSeeded?: boolean;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);
@@ -1989,6 +1993,80 @@ export function getScalperMcBand(): { min: number; max: number } {
       max: SCALPER_DEFAULT_MAX_MC_USD,
     };
   }
+}
+
+export interface McHandoffContinuity {
+  scalperMinEffective: number;
+  dipMinEffective: number;
+  msMax: number;
+  reversalMax: number | null;
+  scalperMin: number;
+  scalperMax: number;
+  dipMin: number;
+}
+
+/**
+ * Close documented MC seams (MS/Reversal → Scalper at $150k, Scalper → Dip at $1M)
+ * when operator overrides leave a gap. Never raises a max. Never pulls Scalper
+ * below catalog $150k unless the lower lane's own max already sits at/above it.
+ */
+export function getMcHandoffContinuity(): McHandoffContinuity {
+  const msMax = getMigrationSniperMaxMcUsd();
+  const scalper = getScalperMcBand();
+  const dip = getDipBuyerMcBand();
+  let reversalMax: number | null = null;
+  try {
+    const flags = getTradeProfileEnabledFlags();
+    if (flags.reversal_scalper !== false) {
+      const n = Number(
+        resolveTradeProfileDefinition('reversal_scalper').match.maxMarketCapUsd
+      );
+      if (Number.isFinite(n) && n > 0) reversalMax = n;
+    }
+  } catch {
+    /* optional */
+  }
+  const lowerMax = Math.max(msMax, reversalMax ?? 0);
+  // Do not pull Scalper into sub-$150k junk unless the lower lane already covers it
+  const scalperFloor = Math.max(SCALPER_DEFAULT_MIN_MC_USD, lowerMax);
+  const scalperMinEffective =
+    scalper.min > lowerMax && lowerMax >= SCALPER_DEFAULT_MIN_MC_USD
+      ? Math.min(scalper.min, lowerMax)
+      : scalper.min > scalperFloor && lowerMax >= scalperFloor
+        ? Math.min(scalper.min, scalperFloor)
+        : scalper.min;
+  const dipMinEffective =
+    dip.min > scalper.max && scalper.max >= SCALPER_DEFAULT_MIN_MC_USD
+      ? Math.min(dip.min, scalper.max)
+      : dip.min;
+  return {
+    scalperMinEffective,
+    dipMinEffective,
+    msMax,
+    reversalMax,
+    scalperMin: scalper.min,
+    scalperMax: scalper.max,
+    dipMin: dip.min,
+  };
+}
+
+/** Resolved lane min after seam continuity (Scalper / Dip only). */
+export function resolveContinuousLaneMinMcUsd(
+  profileId: string,
+  catalogMin: number
+): number {
+  try {
+    const c = getMcHandoffContinuity();
+    if (profileId === 'scalper') {
+      return Math.min(catalogMin > 0 ? catalogMin : c.scalperMin, c.scalperMinEffective);
+    }
+    if (profileId === 'dip_buyer') {
+      return Math.min(catalogMin > 0 ? catalogMin : c.dipMin, c.dipMinEffective);
+    }
+  } catch {
+    /* catalog */
+  }
+  return catalogMin;
 }
 
 /**
@@ -2854,6 +2932,34 @@ export function resetTradeProfilesToCatalogDefaults(options?: {
 export const FRESH_MIGRATION_MAX_AGE_HOURS = 3;
 export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
 
+export const MIGRATION_GRAD_CATEGORIES = new Set([
+  'soon',
+  'graduating',
+  'graduated',
+  'bonded',
+  'near-grad',
+  'mig_fresh',
+]);
+
+/** Scanner/feed tags that identify a graduating / near-grad candidate. */
+export function hasMigrationSourceTag(ctx: {
+  nearMigration?: boolean;
+  scannerCategories?: string[] | null;
+  scannerSources?: string[] | null;
+  preferProfileId?: string | null;
+}): boolean {
+  if (ctx.nearMigration === true) return true;
+  if (ctx.preferProfileId === 'migration_sniper') return true;
+  for (const c of ctx.scannerCategories || []) {
+    if (MIGRATION_GRAD_CATEGORIES.has(String(c).toLowerCase())) return true;
+  }
+  for (const s of ctx.scannerSources || []) {
+    const k = String(s).toLowerCase();
+    if (k === 'graduating_feed' || k === 'alphascan') return true;
+  }
+  return false;
+}
+
 /**
  * Migration Sniper eligibility — primary: pre-grad curve fire (≥ minCurve, still
  * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 180s)
@@ -2861,6 +2967,7 @@ export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
  *
  * Near-curve below fire band stays on the graduation watchlist (not a buy).
  * Mature PumpSwap / stale migrations are rejected.
+ * Seeded curve % (feed tags) never naked-buys — watching until live enrich.
  */
 export function evaluateFreshMigrationEligibility(
   ctx: TradeProfileMatchContext,
@@ -2896,22 +3003,25 @@ export function evaluateFreshMigrationEligibility(
     ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
       ? Number(ctx.marketCapUsd)
       : null;
+  const tagged = hasMigrationSourceTag(ctx);
+  const seeded = ctx.curveProgressSeeded === true;
 
   if (mc != null && mc > maxMc) {
     return {
       ok: false,
-      reason: `MC $${Math.round(mc)} too mature for Migration Sniper (max $${maxMc})`,
+      reason: `migration_mc_band: MC $${Math.round(mc)} too mature for Migration Sniper (max $${maxMc})`,
     };
   }
 
-  // Primary: pre-grad fire — ≥ minCurve while not yet migrated (no upper miss)
+  // Primary: pre-grad fire — live curve only (seeded % is watch, not a buy)
   const inFireBand =
     progress != null &&
     progress >= minCurve &&
     progress < 100 &&
-    ctx.isMigration !== true;
+    ctx.isMigration !== true &&
+    !seeded;
 
-  if (inFireBand && (ctx.nearMigration === true || progress != null)) {
+  if (inFireBand && (ctx.nearMigration === true || tagged || progress != null)) {
     return {
       ok: true,
       reason: `pre-grad curve ${progress!.toFixed(1)}% (fire ≥${minCurve}%)`,
@@ -2921,12 +3031,26 @@ export function evaluateFreshMigrationEligibility(
   // Watching band — not yet a sniper buy
   if (
     ctx.isMigration !== true &&
-    (ctx.nearMigration === true || (progress != null && progress >= 70))
+    (ctx.nearMigration === true ||
+      tagged ||
+      (progress != null && progress >= 70))
   ) {
+    if (seeded) {
+      return {
+        ok: false,
+        reason: `curve ${progress != null ? progress.toFixed(1) : '?'}% seeded — watching, need live enrich`,
+      };
+    }
     if (progress != null && progress < minCurve) {
       return {
         ok: false,
         reason: `curve ${progress.toFixed(1)}% — watching, fire at ≥${minCurve}%`,
+      };
+    }
+    if (progress == null) {
+      return {
+        ok: false,
+        reason: 'migration_not_setup: tagged graduating but no curve progress',
       };
     }
   }
@@ -2968,11 +3092,18 @@ export function evaluateFreshMigrationEligibility(
   if (ctx.earlyBuy === true && !inFireBand) {
     return {
       ok: false,
-      reason: 'early curve buy — not in sniper fire band',
+      reason: 'migration_not_setup: early curve buy — not in sniper fire band',
     };
   }
 
-  return { ok: false, reason: 'not a migration sniper setup' };
+  if (tagged) {
+    return {
+      ok: false,
+      reason: 'migration_not_setup: tagged graduating but not a buy setup',
+    };
+  }
+
+  return { ok: false, reason: 'migration_not_setup' };
 }
 
 /** Soft category: fresh mig only — stale DEX tokens must compete as trend/dip/HWR. */
@@ -2988,6 +3119,7 @@ export function hasMigrationLaneSignals(
 ): boolean {
   if (ctx.preferProfileId === 'migration_sniper') return true;
   if (ctx.isMigration === true || ctx.nearMigration === true) return true;
+  if (hasMigrationSourceTag(ctx)) return true;
   if (ctx.migrationFresh === true) return true;
   if (String(ctx.setupWatchFamily || '').toLowerCase() === 'grad') return true;
   if (ctx.armedWatch === true && /grad|mig/i.test(String(ctx.setupWatchFamily || ''))) {
@@ -3644,13 +3776,14 @@ export function evaluateLaneEntryFloors(
   const armedDipSoft = armedSetupWatchSoft;
 
   const eased = dipBuyerEasedFloors(def, ctx);
-  const profileMin =
+  const rawProfileMin =
     eased?.minMarketCapUsd ??
     (m.minMarketCapUsd != null &&
     Number.isFinite(m.minMarketCapUsd) &&
     m.minMarketCapUsd > 0
       ? Number(m.minMarketCapUsd)
       : 0);
+  const profileMin = resolveContinuousLaneMinMcUsd(def.id, rawProfileMin);
   const globalMin = effectiveMinMarketCapUsd();
   const laneMinMc = Math.max(globalMin, profileMin);
 
@@ -4590,11 +4723,13 @@ function scoreProfile(
         m.minMarketCapUsd != null &&
         Number.isFinite(m.minMarketCapUsd) &&
         m.minMarketCapUsd > 0 &&
-        mc < m.minMarketCapUsd
+        mc < resolveContinuousLaneMinMcUsd('scalper', Number(m.minMarketCapUsd))
       ) {
         return {
           score: 0,
-          reason: `MC $${Math.round(mc)} below scalper min $${m.minMarketCapUsd}`,
+          reason: `MC $${Math.round(mc)} below scalper min $${Math.round(
+            resolveContinuousLaneMinMcUsd('scalper', Number(m.minMarketCapUsd))
+          )}`,
         };
       }
     }

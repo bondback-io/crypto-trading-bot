@@ -5,6 +5,7 @@
 import {
   evaluateFreshMigrationEligibility,
   evaluateLaneEntryFloors,
+  getMcHandoffContinuity,
   getTradeProfileDefinition,
   isSwingLaneMustKnowMc,
   swingLaneFillMinMarketCapUsd,
@@ -56,6 +57,91 @@ check(
   armedCont.ok === true,
   armedCont.reason
 );
+check(
+  'post-grad deny uses migration_quality_reject',
+  /migration_quality_reject/i.test(cold.reason)
+);
+
+const taggedFire = evaluateFreshMigrationEligibility({
+  nearMigration: true,
+  scannerCategories: ['soon'],
+  scannerSources: ['graduating_feed'],
+  curveProgressPct: 93,
+  marketCapUsd: 50_000,
+});
+check(
+  'tagged soon + fire-band is MS setup',
+  taggedFire.ok === true,
+  taggedFire.reason
+);
+
+const taggedNoCurve = evaluateFreshMigrationEligibility({
+  nearMigration: true,
+  scannerCategories: ['graduating'],
+  scannerSources: ['graduating_feed'],
+  marketCapUsd: 50_000,
+});
+check(
+  'tagged graduating no curve is migration_not_setup',
+  taggedNoCurve.ok === false &&
+    taggedNoCurve.reason.startsWith('migration_not_setup'),
+  taggedNoCurve.reason
+);
+
+const genericGone = evaluateFreshMigrationEligibility({
+  marketCapUsd: 40_000,
+});
+check(
+  'untagged fallthrough is migration_not_setup not generic string',
+  genericGone.reason === 'migration_not_setup' &&
+    !/not a migration sniper setup/i.test(genericGone.reason)
+);
+
+const mcBand = evaluateFreshMigrationEligibility(
+  {
+    nearMigration: true,
+    curveProgressPct: 93,
+    marketCapUsd: 500_000,
+  },
+  { maxMarketCapUsd: 150_000 }
+);
+check(
+  'MC over max is migration_mc_band',
+  mcBand.ok === false && mcBand.reason.startsWith('migration_mc_band'),
+  mcBand.reason
+);
+
+const seededNoBuy = evaluateFreshMigrationEligibility({
+  nearMigration: true,
+  scannerCategories: ['soon'],
+  curveProgressPct: 93,
+  curveProgressSeeded: true,
+  marketCapUsd: 50_000,
+});
+check(
+  'seeded curve does not naked-buy',
+  seededNoBuy.ok === false,
+  seededNoBuy.reason
+);
+
+const cont = getMcHandoffContinuity();
+check(
+  'MC handoff never raises Scalper min',
+  cont.scalperMinEffective <= cont.scalperMin + 1e-9,
+  `effective ${cont.scalperMinEffective} vs min ${cont.scalperMin}`
+);
+check(
+  'MC handoff never raises Dip min',
+  cont.dipMinEffective <= cont.dipMin + 1e-9,
+  `effective ${cont.dipMinEffective} vs min ${cont.dipMin}`
+);
+if (cont.scalperMin > cont.msMax && cont.msMax >= 150_000) {
+  check(
+    'MS→Scalper seam closes to MS max',
+    cont.scalperMinEffective <= cont.msMax + 1e-9,
+    `effective ${cont.scalperMinEffective} vs MS max ${cont.msMax}`
+  );
+}
 
 check('late-chase share cap is 35%', getLateChaseMaxShare() === 0.35);
 
@@ -377,16 +463,16 @@ check(
 );
 
 check(
-  'trend DNA minHits 3 for Jupiter specialty',
-  trendWatchMinDnaHits({ specialtyFeed: 'jupiter', marketCapUsd: 4_200_000 }) === 3
+  'trend DNA minHits 2 for Jupiter specialty',
+  trendWatchMinDnaHits({ specialtyFeed: 'jupiter', marketCapUsd: 4_200_000 }) === 2
 );
 check(
-  'trend DNA minHits 4 without specialty under $5M',
-  trendWatchMinDnaHits({ marketCapUsd: 4_200_000 }) === 4
+  'trend DNA minHits 3 without specialty under $5M',
+  trendWatchMinDnaHits({ marketCapUsd: 4_200_000 }) === 3
 );
 check(
-  'trend DNA minHits 3 at ≥$5M',
-  trendWatchMinDnaHits({ marketCapUsd: 6_000_000 }) === 3
+  'trend DNA minHits 2 at ≥$5M',
+  trendWatchMinDnaHits({ marketCapUsd: 6_000_000 }) === 2
 );
 
 const dna42jup = scoreTrendDna({
@@ -460,11 +546,11 @@ const deny42 = considerTrendWatchSetup({
   symbol: 'T42N',
   marketCapUsd: 4_200_000,
   volumeH1Usd: 20_000,
-  holderCount: 200,
+  holderCount: 5,
   priceChangeH1Pct: 10,
 });
 check(
-  'Trend watch $4.2M without specialty 3 DNA hits blocked',
+  'Trend watch $4.2M without specialty below minHits blocked',
   deny42 == null && getTrendFunnelCounters().blocked === blockedMid + 1
 );
 

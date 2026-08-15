@@ -14,7 +14,7 @@ let cachedTracker: LaunchEvent[] = [];
 let lastError: string | null = null;
 let graduatingCount = 0;
 
-function rowToEvent(
+    function rowToEvent(
   mint: string,
   extra: {
     symbol?: string;
@@ -24,12 +24,17 @@ function rowToEvent(
     category?: string;
   }
 ): LaunchEvent {
+  const category = extra.category || 'soon';
+  const bonded =
+    category === 'bonded' || category === 'graduated';
+  const soon =
+    category === 'soon' || category === 'graduating' || category === 'near-grad';
   return {
     mint,
     symbol: String(extra.symbol || mint.slice(0, 6)).slice(0, 24),
     name: String(extra.name || extra.symbol || 'Graduating').slice(0, 64),
     launchedAt: Date.now(),
-    migrated: extra.category === 'bonded' || extra.category === 'graduated',
+    migrated: bonded,
     entryPriceSol: 0,
     lastPriceSol: 0,
     priceChangePct: 0,
@@ -37,8 +42,9 @@ function rowToEvent(
     candles: [],
     source: 'graduating_feed',
     isPumpFun: true,
+    nearMigration: soon,
     scannerSources: ['graduating_feed'],
-    scannerCategories: [extra.category || 'soon'],
+    scannerCategories: [category],
     curvePct: extra.curvePct,
   };
 }

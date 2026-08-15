@@ -5279,6 +5279,34 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       max-width: 36rem;
       line-height: 1.35;
     }
+    .src-funnel-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.7rem;
+      margin: 0.35rem 0 0.65rem;
+      color: #94a3b8;
+    }
+    .src-funnel-table th,
+    .src-funnel-table td {
+      padding: 0.22rem 0.35rem;
+      text-align: left;
+      border-bottom: 1px solid #1e293b;
+      white-space: nowrap;
+    }
+    .src-funnel-table th { color: #64748b; font-weight: 600; }
+    .src-chip {
+      display: inline-block;
+      padding: 0 0.35rem;
+      border-radius: 999px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .src-chip-ok { color: #5eead4; background: rgba(45, 212, 191, 0.12); }
+    .src-chip-zero { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
+    .src-chip-stale { color: #f87171; background: rgba(248, 113, 113, 0.14); }
+    .src-chip-off { color: #64748b; background: rgba(100, 116, 139, 0.18); }
     .setup-watch-tabs {
       display: inline-flex;
       flex-wrap: wrap;
@@ -8817,6 +8845,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="mt-4 pt-3" style="border-top:1px solid #1e293b">
           <div class="section-title !mb-2 text-sm">Discovery feeds <span class="tip" tabindex="0" data-tip="Additive candidate-only feeds. Same mint merge; still pass watch/arm/TA. No Trading-lane logsSubscribe."></span></div>
           <div class="mint text-xs mb-2" id="ms-fanin-status" style="color:#94a3b8">Fan-in: —</div>
+          <div id="ms-source-funnel" class="overflow-x-auto mb-2"></div>
           <div class="toggle-row">
             <span>PumpPortal stream <span class="tip" tabindex="0" data-tip="WebSocket token create / graduation off Solana RPC. Tags source=pump_stream. Fail-soft if the stream is down."></span></span>
             <label class="switch"><input type="checkbox" id="ms-pump-stream" checked /><span class="slider"></span></label>
@@ -13693,6 +13722,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         data.watchReadiness = window._lastSetupWatches.watchReadiness;
       }
       renderWatchReadinessStrip(data);
+      try {
       (function paintWatchPipeline() {
         const el = document.getElementById('watch-pipeline-strip');
         if (!el) return;
@@ -13716,6 +13746,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           wp.orphan_example_mc != null && Number(wp.orphan_example_mc) > 0
             ? ' e.g. $' + Math.round(Number(wp.orphan_example_mc)).toLocaleString()
             : '';
+        const orphanMints = Array.isArray(wp.orphan_examples)
+          ? wp.orphan_examples
+              .slice(0, 3)
+              .map(function (ex) {
+                if (!ex || typeof ex !== 'object') return '';
+                const mint = String(ex.mint || '').slice(0, 6);
+                const mcN = Number(ex.mc);
+                return (
+                  mint +
+                  (Number.isFinite(mcN) && mcN > 0
+                    ? ' $' + Math.round(mcN).toLocaleString()
+                    : '')
+                );
+              })
+              .filter(Boolean)
+              .join(', ')
+          : '';
+        const convSrc =
+          wp.conversion_by_source && typeof wp.conversion_by_source === 'object'
+            ? wp.conversion_by_source
+            : {};
+        const srcConvBits = Object.keys(convSrc)
+          .filter(function (k) {
+            return (convSrc[k] && (convSrc[k].candidates_in || 0) > 0);
+          })
+          .slice(0, 5)
+          .map(function (k) {
+            const r = convSrc[k];
+            const sw = Math.round((Number(r.source_to_watch) || 0) * 100);
+            return k.replace(/_.*/, '').slice(0, 6) + ' ' + sw + '%';
+          })
+          .join(' ');
         const avgScores = wp.avg_watch_score_by_profile || {};
         const avgBits = Object.keys(avgScores)
           .slice(0, 4)
@@ -13735,6 +13797,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ' · orphan MC ' +
           orphanN +
           orphanEx +
+          (orphanMints ? ' [' + orphanMints + ']' : '') +
           (topRej ? ' · reject ' + topRej : '') +
           (avgBits ? ' · score ' + avgBits : '') +
           ' · topQ ' +
@@ -13779,8 +13842,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               })
               .join(' ');
             return bits ? ' · route ' + bits : '';
-          })();
+          })() +
+          (srcConvBits ? ' · src→watch ' + srcConvBits : '');
       })();
+      } catch (e) {
+        const strip = document.getElementById('watch-pipeline-strip');
+        if (strip && !strip.textContent) strip.textContent = 'Pipeline: —';
+      }
       const scalperCount = document.getElementById('scalper-watch-count');
       const scalperList = document.getElementById('scalper-watch-list');
       const trendCount = document.getElementById('trend-watch-count');
@@ -31130,6 +31198,99 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (catBits ? ' · ' + catBits : '') +
           pump +
           grad;
+      }
+      const funnelEl = document.getElementById('ms-source-funnel');
+      if (funnelEl) {
+        try {
+          const rows = Array.isArray(status && status.sourceFunnel)
+            ? status.sourceFunnel
+            : [];
+          if (!rows.length) {
+            funnelEl.textContent = 'Source funnel: waiting for first poll';
+          } else {
+            const pct = function (n) {
+              const v = Number(n);
+              if (!Number.isFinite(v) || v <= 0) return '0%';
+              return Math.round(v * 1000) / 10 + '%';
+            };
+            const topDrop = function (obj) {
+              const map = obj && typeof obj === 'object' ? obj : {};
+              const keys = Object.keys(map);
+              if (!keys.length) return '—';
+              keys.sort(function (a, b) {
+                return (map[b] || 0) - (map[a] || 0);
+              });
+              return String(keys[0]).slice(0, 24) + '×' + map[keys[0]];
+            };
+            const chip = function (st) {
+              const s = String(st || 'zero').replace(/[^a-z0-9_-]/gi, '');
+              return (
+                '<span class="src-chip src-chip-' +
+                s +
+                '">' +
+                escHtml(s || 'zero') +
+                '</span>'
+              );
+            };
+            funnelEl.innerHTML =
+              '<table class="src-funnel-table"><thead><tr>' +
+              '<th>source</th><th></th><th>in</th><th>dedup</th><th>GK</th><th>watch</th><th>arm</th><th>open</th>' +
+              '<th>to watch</th><th>to arm</th><th>to open</th><th>drop</th></tr></thead><tbody>' +
+              rows
+                .map(function (r) {
+                  if (!r || typeof r !== 'object') return '';
+                  const zero = (r.candidates_in || 0) === 0;
+                  const tone =
+                    zero && r.status !== 'off' ? 'color:#fbbf24' : '';
+                  return (
+                    '<tr>' +
+                    '<td>' +
+                    escHtml(String(r.source || '')) +
+                    '</td>' +
+                    '<td>' +
+                    chip(r.status) +
+                    '</td>' +
+                    '<td style="' +
+                    tone +
+                    '">' +
+                    (Number(r.candidates_in) || 0) +
+                    '</td>' +
+                    '<td>' +
+                    (Number(r.deduped) || 0) +
+                    '</td>' +
+                    '<td>' +
+                    (Number(r.passed_gatekeeper) || 0) +
+                    '</td>' +
+                    '<td>' +
+                    (Number(r.watch_inserted) || 0) +
+                    '</td>' +
+                    '<td>' +
+                    (Number(r.armed) || 0) +
+                    '</td>' +
+                    '<td>' +
+                    (Number(r.opened) || 0) +
+                    '</td>' +
+                    '<td>' +
+                    pct(r.source_to_watch_rate) +
+                    '</td>' +
+                    '<td>' +
+                    pct(r.watch_to_arm_rate) +
+                    '</td>' +
+                    '<td>' +
+                    pct(r.arm_to_open_rate) +
+                    '</td>' +
+                    '<td>' +
+                    escHtml(topDrop(r.drop_reasons)) +
+                    '</td></tr>'
+                  );
+                })
+                .join('') +
+              '</tbody></table>';
+          }
+        } catch (err) {
+          funnelEl.textContent =
+            'Source funnel: ' + (err && err.message ? err.message : 'unavailable');
+        }
       }
       const statusEl = document.getElementById('scanner-status-tab');
       if (statusEl && status && status.regime) {

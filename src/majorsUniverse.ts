@@ -850,6 +850,15 @@ export async function runMajorsUniversePass(): Promise<number> {
         isPumpFun: c.isPumpFun === true,
       });
       offered += 1;
+      try {
+        const { noteSourceCandidatesIn } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        noteSourceCandidatesIn(
+          c.watchBand === 'medium' ? 'medium' : 'majors'
+        );
+      } catch {
+        /* optional */
+      }
     }
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);

@@ -395,8 +395,11 @@ export function classifySetup(
     if (r.startsWith('specialty:')) return false;
     if (r.startsWith('jupiter:')) return false;
     return (
-      /\bgrad(?:-watch|uation|uated)?\b/.test(r) ||
+      /\bgrad(?:-watch|uating|uation|uated)?\b/.test(r) ||
       /\bmigrat(?:ion|ed)\b/.test(r) ||
+      /\bsoon\b/.test(r) ||
+      /\bnear-?grad\b/.test(r) ||
+      /\bmig_fresh\b/.test(r) ||
       r.includes('bonded') ||
       r.includes('curve')
     );
@@ -1210,7 +1213,26 @@ export function recordGatekeeperDecision(input: {
   mint: string;
   symbol?: string;
   profileHint?: string | null;
+  scannerSources?: string[] | null;
+  source?: string | null;
 }): void {
+  try {
+    const { noteSourceGatekeeper, listScannerSources } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    const sources = listScannerSources({
+      source: input.source,
+      scannerSources: input.scannerSources || undefined,
+    });
+    noteSourceGatekeeper(
+      sources,
+      input.result.decision === 'allow',
+      input.result.decision === 'block'
+        ? input.result.reasonCodes.slice(0, 2).join('+') || 'gk_block'
+        : undefined
+    );
+  } catch {
+    /* optional */
+  }
   try {
     const { recordAgentDecision } =
       require('./agentDecisionLog') as typeof import('./agentDecisionLog');

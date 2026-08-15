@@ -528,6 +528,9 @@ export async function runAlphaScanFeedPass(): Promise<number> {
           nearMigration: true,
           preferredProfileId: 'migration_sniper',
           specialtyFeed: 'alphascan',
+          scannerSources: ['alphascan'],
+          scannerCategories: ['soon'],
+          isPumpFun: true,
         });
 
         // Soft handoff so monitor can also see the mint

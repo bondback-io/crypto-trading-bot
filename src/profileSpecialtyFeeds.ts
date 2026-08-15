@@ -72,7 +72,7 @@ function buildCandidate(
   // Other profiles ingest Jupiter/KOL as normal scanner TA — not migration events.
   const migratedForLane =
     profileId === 'migration_sniper' ? Boolean(event.migrated) : false;
-  return {
+  const row: ScannerCandidate & { launch: LaunchEvent } = {
     id: `feed-${profileId}-${event.mint.slice(0, 8)}-${now}`,
     mint: event.mint,
     symbol: event.symbol,
@@ -105,6 +105,14 @@ function buildCandidate(
       specialtyFeed: feed,
     },
   };
+  try {
+    const { noteSourceCandidatesIn } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteSourceCandidatesIn(feed || event.source || 'jupiter');
+  } catch {
+    /* optional */
+  }
+  return row;
 }
 
 function kolCandidateToLaunch(c: {

@@ -119,7 +119,8 @@ function funnelFor(profileId: string): ProfileWatchFunnel {
 export function noteProfileWatchFunnel(
   profileId: string | null | undefined,
   kind: ProfileWatchFunnelKind,
-  blockedReason?: string
+  blockedReason?: string,
+  source?: string | string[] | null
 ): void {
   const id = String(profileId || '').trim();
   if (!id) return;
@@ -130,6 +131,18 @@ export function noteProfileWatchFunnel(
     return;
   }
   row[kind] += 1;
+  try {
+    const {
+      noteSourceWatchInsert,
+      noteSourceArmed,
+      noteSourceOpened,
+    } = require('./watchPipeline') as typeof import('./watchPipeline');
+    if (kind === 'sent_to_watch') noteSourceWatchInsert(source, id);
+    else if (kind === 'armed') noteSourceArmed(source, id);
+    else if (kind === 'opened') noteSourceOpened(source, id);
+  } catch {
+    /* optional */
+  }
 }
 
 export function noteProfileWatchOpenQuality(opts: {

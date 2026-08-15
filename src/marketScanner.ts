@@ -89,6 +89,10 @@ export interface ScannerCandidate {
   /** Graduation watch / near-mig */
   nearMigration?: boolean;
   curveProgressPct?: number | null;
+  /** True when curveProgressPct was seeded from feed tags, not live RPC */
+  curveProgressSeeded?: boolean;
+  scannerSources?: string[];
+  scannerCategories?: string[];
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
@@ -173,6 +177,7 @@ export interface ScannerStatus {
     typeof import('./graduatingFeed').getGraduatingFeedStatus
   >;
   onchainEventsPerMin?: number;
+  sourceFunnel?: import('./watchPipeline').SourceFunnelRow[];
 }
 
 type ScannerHandler = (candidate: ScannerCandidate & { launch: LaunchEvent }) => Promise<void>;
@@ -381,6 +386,13 @@ export function getScannerStatus(): ScannerStatus {
   } catch {
     /* optional */
   }
+  try {
+    const { getWatchPipelineSnapshot } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    status.sourceFunnel = getWatchPipelineSnapshot().source_funnel;
+  } catch {
+    /* optional */
+  }
   return status;
 }
 
@@ -446,6 +458,78 @@ function hardFloorsOk(event: LaunchEvent): boolean {
   }
 
   return true;
+}
+
+const GRAD_WATCH_CATS = new Set([
+  'soon',
+  'graduating',
+  'graduated',
+  'bonded',
+  'near-grad',
+  'mig_fresh',
+]);
+
+function launchHasGradTag(e: {
+  nearMigration?: boolean;
+  source?: string;
+  scannerSources?: string[];
+  scannerCategories?: string[];
+  preferredProfileId?: string;
+}): boolean {
+  if (e.nearMigration === true) return true;
+  if (e.preferredProfileId === 'migration_sniper') return true;
+  if (e.source === 'graduating_feed') return true;
+  for (const src of e.scannerSources || []) {
+    if (src === 'graduating_feed') return true;
+  }
+  for (const c of e.scannerCategories || []) {
+    if (GRAD_WATCH_CATS.has(String(c).toLowerCase())) return true;
+  }
+  return false;
+}
+
+function seedCurveFromLaunch(event: LaunchEvent): {
+  progressPct: number | null;
+  seeded: boolean;
+  nearMigration: boolean;
+} {
+  const tagged = launchHasGradTag(event);
+  const pct =
+    event.curvePct != null && Number.isFinite(event.curvePct)
+      ? Number(event.curvePct)
+      : null;
+  return {
+    progressPct: pct,
+    seeded: pct != null,
+    nearMigration: tagged || event.nearMigration === true,
+  };
+}
+
+function sourceFieldsFromLaunch(event: LaunchEvent): {
+  scannerSources?: string[];
+  scannerCategories?: string[];
+} {
+  return {
+    scannerSources: event.scannerSources?.slice(),
+    scannerCategories: event.scannerCategories?.slice(),
+  };
+}
+
+function noteEventDrop(event: LaunchEvent, reason: string): void {
+  try {
+    const { noteSourceDrop, listScannerSources } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteSourceDrop(
+      listScannerSources({
+        source: event.source,
+        scannerSources: event.scannerSources,
+        specialtyFeed: event.specialtyFeed,
+      }),
+      reason
+    );
+  } catch {
+    /* optional */
+  }
 }
 
 function crudeLiqVolScore(event: LaunchEvent): number {
@@ -1095,8 +1179,19 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
       ) {
         existing.volumeOrganicH1Usd = e.volumeOrganicH1Usd;
       }
+      if (e.nearMigration === true) existing.nearMigration = true;
+      if (e.migrated === true) existing.migrated = true;
+      if (e.isPumpFun === true) existing.isPumpFun = true;
       bump(bySource, source);
       if (category) bump(byCategory, category);
+      try {
+        const { noteSourceCandidatesIn, noteSourceDeduped } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        noteSourceCandidatesIn(source);
+        noteSourceDeduped(source);
+      } catch {
+        /* optional */
+      }
       return;
     }
     e.scannerSources = [
@@ -1111,6 +1206,13 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
     bump(bySource, source);
     if (category) bump(byCategory, category);
     for (const c of e.scannerCategories || []) bump(byCategory, c);
+    try {
+      const { noteSourceCandidatesIn } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteSourceCandidatesIn(source);
+    } catch {
+      /* optional */
+    }
   };
 
   for (const e of events) {
@@ -1308,6 +1410,7 @@ export async function selectScannerCandidates(
     } catch {
       /* optional */
     }
+    for (const ev of events) noteEventDrop(ev, 'queue_yield');
     return [];
   }
 
@@ -1320,8 +1423,15 @@ export async function selectScannerCandidates(
     .filter((raw) => {
       if (!raw.mint) return false;
       const cd = cooldowns.get(raw.mint) ?? 0;
-      if (cd > now) return false;
-      return hardFloorsOk(raw);
+      if (cd > now) {
+        noteEventDrop(raw, 'cooldown');
+        return false;
+      }
+      if (!hardFloorsOk(raw)) {
+        noteEventDrop(raw, 'hard_floor');
+        return false;
+      }
+      return true;
     })
     .sort((a, b) => crudeLiqVolScore(b) - crudeLiqVolScore(a))
     .slice(0, enrichBudget);
@@ -1333,6 +1443,11 @@ export async function selectScannerCandidates(
     for (const event of prefiltered) {
       const ranked = rankLaunchForScanner(event);
       if (ranked.veto?.startsWith('bearish:')) continue;
+      const seed = seedCurveFromLaunch(event);
+      if (seed.nearMigration) ranked.reasons.push('graduating');
+      for (const cat of event.scannerCategories || []) {
+        if (cat && !ranked.reasons.includes(cat)) ranked.reasons.push(cat);
+      }
       crude.push({
         id: `scan-${event.mint.slice(0, 8)}-${now}`,
         mint: event.mint,
@@ -1357,8 +1472,10 @@ export async function selectScannerCandidates(
         organicScore: event.organicScore,
         jupiterCategory:
           event.source === 'jupiter' ? cfg.jupiterCategory : undefined,
-        nearMigration: false,
-        curveProgressPct: null,
+        nearMigration: seed.nearMigration,
+        curveProgressPct: seed.progressPct,
+        curveProgressSeeded: seed.seeded,
+        ...sourceFieldsFromLaunch(event),
         nearKeyFib: ranked.nearKeyFib,
         nearSupport: ranked.nearSupport,
         nearResistance: ranked.nearResistance,
@@ -1423,17 +1540,26 @@ export async function selectScannerCandidates(
 
     const ranked = rankLaunchForScanner(event);
     const curve = await enrichCurve(event);
+    const seed = seedCurveFromLaunch(event);
+    const liveProgress = curve.progressPct;
+    const seeded = liveProgress == null && seed.progressPct != null;
+    const progressPct = liveProgress ?? seed.progressPct;
+    const nearMig =
+      curve.nearMigration || seed.nearMigration || event.nearMigration === true;
     let score = Math.min(100, ranked.score + curve.bonus);
     if (curve.bonus > 0) ranked.reasons.push('curve');
-    if (curve.nearMigration && ranked.playbook !== 'curve_migration_sniper') {
+    if (nearMig && ranked.playbook !== 'curve_migration_sniper') {
       score = Math.min(100, score + 4);
+    }
+    if (nearMig) ranked.reasons.push('graduating');
+    for (const cat of event.scannerCategories || []) {
+      if (cat && !ranked.reasons.includes(cat)) ranked.reasons.push(cat);
     }
 
     // Curve-first watch offer — even if TA / rank gates reject this mint below
     if (
       !event.migrated &&
-      (curve.nearMigration ||
-        (curve.progressPct != null && curve.progressPct >= 70))
+      (nearMig || (progressPct != null && progressPct >= 70))
     ) {
       try {
         const { offerMigrationGradWatchFromCandidate } =
@@ -1445,8 +1571,13 @@ export async function selectScannerCandidates(
           marketCapUsd: event.marketCapUsd,
           volumeH1Usd: event.volumeH1Usd,
           holderCount: event.holderCount,
-          curveProgressPct: curve.progressPct,
-          nearMigration: curve.nearMigration,
+          curveProgressPct: progressPct,
+          nearMigration: nearMig,
+          preferredProfileId: event.preferredProfileId,
+          specialtyFeed: event.specialtyFeed,
+          scannerSources: event.scannerSources,
+          scannerCategories: event.scannerCategories,
+          isPumpFun: event.isPumpFun,
         });
       } catch {
         /* non-fatal */
@@ -1641,8 +1772,10 @@ export async function selectScannerCandidates(
       organicScore: event.organicScore,
       jupiterCategory:
         event.source === 'jupiter' ? cfg.jupiterCategory : undefined,
-      nearMigration: curve.nearMigration,
-      curveProgressPct: curve.progressPct,
+      nearMigration: nearMig,
+      curveProgressPct: progressPct,
+      curveProgressSeeded: seeded,
+      ...sourceFieldsFromLaunch(event),
       nearKeyFib: ranked.nearKeyFib,
       nearSupport: ranked.nearSupport,
       nearResistance: ranked.nearResistance,
@@ -1696,7 +1829,11 @@ async function offerGradWatchesCurveFirst(
     if (!e?.mint) return false;
     if (e.migrated) return false;
     const mint = String(e.mint).toLowerCase();
-    return mint.endsWith('pump') || e.isPumpFun === true;
+    return (
+      mint.endsWith('pump') ||
+      e.isPumpFun === true ||
+      launchHasGradTag(e)
+    );
   });
 
   // Broader than TA enrich budget; still capped for RPC health
@@ -1709,10 +1846,12 @@ async function offerGradWatchesCurveFirst(
   await mapPool(sample, 2, async (event) => {
     if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return;
     const curve = await enrichCurve(event);
-    const progress = curve.progressPct;
-    // Below useful near-mig band — skip RPC noise
-    if (progress != null && progress < 70 && !curve.nearMigration) return;
-    if (progress == null && !curve.nearMigration) return;
+    const seed = seedCurveFromLaunch(event);
+    const progress = curve.progressPct ?? seed.progressPct;
+    const tagged = seed.nearMigration;
+    // Below useful near-mig band — skip RPC noise (tagged names may still park)
+    if (progress != null && progress < 70 && !curve.nearMigration && !tagged) return;
+    if (progress == null && !curve.nearMigration && !tagged) return;
 
     const entry = considerMigrationGradWatch({
       mint: event.mint,
@@ -1722,8 +1861,12 @@ async function offerGradWatchesCurveFirst(
       volumeH1Usd: event.volumeH1Usd,
       holderCount: event.holderCount,
       curveProgressPct:
-        progress ?? (curve.nearMigration ? 80 : null),
-      source: event.source === 'jupiter' ? 'jupiter' : 'curve-first',
+        progress ?? (curve.nearMigration || tagged ? 80 : null),
+      source: event.source === 'jupiter' ? 'jupiter' : event.source || 'curve-first',
+      nearMigration: tagged || curve.nearMigration,
+      scannerSources: event.scannerSources,
+      scannerCategories: event.scannerCategories,
+      isPumpFun: event.isPumpFun === true || tagged,
     });
     if (entry) offered += 1;
   });
@@ -1790,6 +1933,12 @@ function offerSetupWatchesFromEnriched(c: {
   supportTfHits?: string[] | null;
   curveProgressPct?: number | null;
   nearMigration?: boolean;
+  scannerSources?: string[];
+  scannerCategories?: string[];
+  source?: string;
+  specialtyFeed?: string;
+  preferredProfileId?: string;
+  isPumpFun?: boolean;
   playbook?: string;
   chartPatternIds?: string[];
   kolCount?: number;
@@ -1871,6 +2020,11 @@ function offerSetupWatchesFromEnriched(c: {
       holderCount: c.holderCount ?? undefined,
       curveProgressPct: c.curveProgressPct,
       nearMigration: c.nearMigration,
+      preferredProfileId: c.preferredProfileId,
+      specialtyFeed: c.specialtyFeed,
+      scannerSources: c.scannerSources,
+      scannerCategories: c.scannerCategories,
+      isPumpFun: c.isPumpFun,
     });
   } catch {
     /* optional */
@@ -2246,6 +2400,9 @@ export async function runScannerPollOnce(): Promise<number> {
           nearMigration: c.nearMigration,
           preferredProfileId: c.preferredProfileId,
           specialtyFeed: c.specialtyFeed,
+          scannerSources: c.scannerSources,
+          scannerCategories: c.scannerCategories,
+          isPumpFun: c.isPumpFun,
         });
       }
       const gTriggered = await tickMigrationGradWatches();

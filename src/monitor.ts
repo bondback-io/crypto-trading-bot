@@ -211,11 +211,14 @@ function buildTradeProfileMatchContext(
     migrationFresh: isRecentlyMigrated(signal.mint),
     migrationAgeMs,
     curveProgressPct:
-      signal.bondingCurve?.progressPct != null &&
-      Number.isFinite(signal.bondingCurve.progressPct)
-        ? Number(signal.bondingCurve.progressPct)
-        : (signal as { curveProgressPct?: number | null }).curveProgressPct ??
-          null,
+      signal.curveProgressSeeded === true
+        ? (signal as { curveProgressPct?: number | null }).curveProgressPct ??
+          null
+        : signal.bondingCurve?.progressPct != null &&
+            Number.isFinite(signal.bondingCurve.progressPct)
+          ? Number(signal.bondingCurve.progressPct)
+          : (signal as { curveProgressPct?: number | null }).curveProgressPct ??
+            null,
     scalpMode: extras?.scalpMode,
     shortTermStrategyId: extras?.shortTermStrategyId,
     convictionScore: signal.convictionScore,
@@ -329,6 +332,9 @@ function buildTradeProfileMatchContext(
     entrySource: signal.entrySource,
     preferProfileId: signal.candidateTradeProfileId ?? null,
     specialtyFeed: signal.specialtyFeed ?? null,
+    scannerSources: signal.scannerSources ?? null,
+    scannerCategories: signal.scannerCategories ?? null,
+    curveProgressSeeded: signal.curveProgressSeeded === true,
     armedWatch:
       signal.armedWatch === true ||
       signal.dipWatchTriggered === true ||
@@ -1195,6 +1201,10 @@ export interface TradeSignal {
   organicScore?: number | null;
   /** Specialty feed tag when from per-profile Kolscan/Jupiter pass */
   specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium' | null;
+  scannerSources?: string[];
+  scannerCategories?: string[];
+  curveProgressSeeded?: boolean;
+  curveProgressPct?: number | null;
   /** Scanner / setup-watch reason tags (e.g. grad-watch:triggered) */
   scannerReasons?: string[];
   /** Armed setup-watch handoff (Mode B / Dip / Grad) */
@@ -3968,7 +3978,8 @@ async function handleScannerCandidate(
       isMigration: Boolean(candidate.migrated || launch.migrated),
       nearMigration: Boolean(
         candidate.nearMigration ||
-          (candidate.curveProgressPct != null &&
+          (!candidate.curveProgressSeeded &&
+            candidate.curveProgressPct != null &&
             candidate.curveProgressPct >= 80)
       ),
       timestamp: Date.now(),
@@ -4003,9 +4014,35 @@ async function handleScannerCandidate(
         undefined,
       specialtyFeed:
         candidate.specialtyFeed || launch.specialtyFeed || null,
-      scannerReasons: Array.isArray(candidate.reasons)
-        ? candidate.reasons.map(String)
-        : undefined,
+      scannerSources:
+        candidate.scannerSources ||
+        launch.scannerSources ||
+        (candidate.source ? [candidate.source] : undefined),
+      scannerCategories:
+        candidate.scannerCategories || launch.scannerCategories,
+      curveProgressSeeded: candidate.curveProgressSeeded === true,
+      curveProgressPct:
+        candidate.curveProgressPct != null &&
+        Number.isFinite(candidate.curveProgressPct)
+          ? Number(candidate.curveProgressPct)
+          : null,
+      scannerReasons: (() => {
+        const reasons = Array.isArray(candidate.reasons)
+          ? candidate.reasons.map(String)
+          : [];
+        for (const cat of candidate.scannerCategories ||
+          launch.scannerCategories ||
+          []) {
+          if (cat && !reasons.includes(cat)) reasons.push(cat);
+        }
+        if (
+          candidate.nearMigration &&
+          !reasons.some((r) => /graduat|soon|near-grad|curve/i.test(r))
+        ) {
+          reasons.push('graduating');
+        }
+        return reasons.length ? reasons : undefined;
+      })(),
       armedWatch:
         candidate.armedWatch === true ||
         (Array.isArray(candidate.reasons) &&
@@ -4064,6 +4101,7 @@ async function handleScannerCandidate(
             ? launch.organicScore
             : null,
       bondingCurve:
+        candidate.curveProgressSeeded !== true &&
         candidate.curveProgressPct != null &&
         Number.isFinite(candidate.curveProgressPct)
           ? {
@@ -7391,6 +7429,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           mint: signal.mint,
           symbol: signal.symbol,
           profileHint,
+          scannerSources: signal.scannerSources,
+          source: (signal.metrics as { source?: string } | undefined)?.source,
         });
         signal.gateDecision = gk.decision;
         if (gk.decision === 'block') {
@@ -7710,7 +7750,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         const mcN =
           mc != null && Number.isFinite(Number(mc)) ? Number(mc) : null;
         const mcBandRe =
-          /MC \$\d+ (<|>) (?:lane )?min|MC \$\d+ > max|too mature for Migration Sniper/i;
+          /MC \$\d+ (<|>) (?:lane )?min|MC \$\d+ > max|too mature for Migration Sniper|migration_mc_band/i;
         const isMcBandOnly = (reason?: string | null) =>
           mcBandRe.test(String(reason || ''));
 
@@ -7768,6 +7808,73 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           }
         }
 
+        // Neighbor hand-off: MC-only miss on the intended lane → covering neighbor
+        if (!lanePassers.length && mcN != null && mcN > 0) {
+          const intendedMc =
+            (preferId
+              ? lanes.find((l) => l.profileId === preferId)
+              : null) || lanes.find((l) => !l.passed && isMcBandOnly(l.failReason));
+          if (intendedMc && isMcBandOnly(intendedMc.failReason)) {
+            let retryPref: string[] | null = null;
+            try {
+              const {
+                getMcHandoffContinuity,
+                getScalperMcBand,
+                getDipBuyerMcBand,
+              } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+              const cont = getMcHandoffContinuity();
+              const scalper = getScalperMcBand();
+              const dip = getDipBuyerMcBand();
+              if (
+                mcN >= cont.scalperMinEffective &&
+                mcN <= scalper.max &&
+                intendedMc.profileId !== 'scalper'
+              ) {
+                retryPref = [
+                  'scalper',
+                  'momentum_burst',
+                  'reversal_scalper',
+                ];
+              } else if (
+                mcN >= cont.dipMinEffective &&
+                mcN <= dip.max &&
+                intendedMc.profileId !== 'dip_buyer'
+              ) {
+                retryPref = [
+                  'dip_buyer',
+                  'trend_rider',
+                  'steady_compounder',
+                ];
+              }
+            } catch {
+              /* optional */
+            }
+            if (retryPref) {
+              const retry = evaluateTradeProfileLanes(ctx, {
+                silent: false,
+                eligibleProfileIds: softLaneMode
+                  ? null
+                  : classifierEligibleIds || lanes.map((l) => l.profileId),
+                preferredProfileIds: retryPref,
+                softEligibility: true,
+              });
+              logLaneFightDecisions(
+                signal,
+                retry,
+                lastHmcGate,
+                lastHmcClassifier
+              );
+              const retryPassers = retry.filter(
+                (l) => l.passed && l.assignment
+              );
+              if (retryPassers.length) {
+                lanes = retry;
+                lanePassers = retryPassers;
+              }
+            }
+          }
+        }
+
         if (!lanePassers.length) {
           const intended =
             (preferId
@@ -7785,7 +7892,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             try {
               const { noteMcGapOrphan } =
                 require('./watchPipeline') as typeof import('./watchPipeline');
-              noteMcGapOrphan(mcN);
+              noteMcGapOrphan(mcN, signal.mint);
             } catch {
               /* optional */
             }

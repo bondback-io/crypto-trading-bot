@@ -127,9 +127,13 @@ function stampGradWatchEligibility(
     w.preferredProfileId = w.preferredProfileId || 'migration_sniper';
     const ids = stampEligibleOnWatchEntry('grad', w);
     if (isNew) {
-      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      for (const id of ids) {
+        noteProfileWatchFunnel(id, 'sent_to_watch', undefined, w.source);
+      }
       if (w.status === 'armed') {
-        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+        for (const id of ids) {
+          noteProfileWatchFunnel(id, 'armed', undefined, w.source);
+        }
       }
     }
   } catch {
@@ -370,12 +374,34 @@ export function considerMigrationGradWatch(input: {
   holderGrowthPct?: number | null;
   buyPressureUsd?: number | null;
   source?: string;
+  nearMigration?: boolean;
+  scannerSources?: string[];
+  scannerCategories?: string[];
+  isPumpFun?: boolean;
+  preferredProfileId?: string;
 }): GradWatchEntry | null {
   if (!isMigProfileEnabled()) return null;
   if (!input.mint) return null;
   if (isManualUnwatchCooldown(input.mint)) return null;
-  // Pump.fun mint heuristic
-  if (!String(input.mint).toLowerCase().endsWith('pump')) return null;
+  const tagged =
+    input.nearMigration === true ||
+    input.preferredProfileId === 'migration_sniper' ||
+    input.isPumpFun === true ||
+    (input.scannerSources || []).some(
+      (s) =>
+        s === 'graduating_feed' ||
+        s === 'alphascan' ||
+        s === 'pump_stream'
+    ) ||
+    (input.scannerCategories || []).some((c) =>
+      /^(soon|graduating|graduated|bonded|near-grad|mig_fresh)$/i.test(
+        String(c)
+      )
+    );
+  // Pump.fun mint heuristic — tagged graduating names may not end with pump
+  if (!String(input.mint).toLowerCase().endsWith('pump') && !tagged) {
+    return null;
+  }
 
   const progress =
     input.curveProgressPct != null && Number.isFinite(input.curveProgressPct)
@@ -1053,6 +1079,9 @@ export function offerMigrationGradWatchFromCandidate(c: {
   nearMigration?: boolean;
   preferredProfileId?: string;
   specialtyFeed?: string;
+  scannerSources?: string[];
+  scannerCategories?: string[];
+  isPumpFun?: boolean;
 }): boolean {
   try {
     const { noteWatchInsertAttempt } =
@@ -1061,9 +1090,23 @@ export function offerMigrationGradWatchFromCandidate(c: {
   } catch {
     /* optional */
   }
+  const tagged =
+    c.nearMigration === true ||
+    c.preferredProfileId === 'migration_sniper' ||
+    c.isPumpFun === true ||
+    (c.scannerSources || []).some(
+      (s) =>
+        s === 'graduating_feed' || s === 'alphascan' || s === 'pump_stream'
+    ) ||
+    (c.scannerCategories || []).some((cat) =>
+      /^(soon|graduating|graduated|bonded|near-grad|mig_fresh)$/i.test(
+        String(cat)
+      )
+    );
   const progress = c.curveProgressPct;
   if (
     progress == null &&
+    !tagged &&
     c.nearMigration !== true &&
     c.preferredProfileId !== 'migration_sniper'
   ) {
@@ -1073,11 +1116,20 @@ export function offerMigrationGradWatchFromCandidate(c: {
     mint: c.mint,
     symbol: c.symbol,
     name: c.name,
-    curveProgressPct: progress ?? (c.nearMigration ? watchPct() : null),
+    curveProgressPct:
+      progress ?? (tagged || c.nearMigration ? watchPct() : null),
     marketCapUsd: c.marketCapUsd,
     volumeH1Usd: c.volumeH1Usd,
     holderCount: c.holderCount,
-    source: c.specialtyFeed || 'scanner',
+    source:
+      c.specialtyFeed ||
+      (c.scannerSources || [])[0] ||
+      'scanner',
+    nearMigration: tagged || c.nearMigration,
+    scannerSources: c.scannerSources,
+    scannerCategories: c.scannerCategories,
+    isPumpFun: c.isPumpFun,
+    preferredProfileId: c.preferredProfileId,
   });
   if (!row) {
     try {

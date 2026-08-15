@@ -107,6 +107,13 @@ export function normalizeSkipReason(reason: string): string {
     .trim()
     .replace(/\s+/g, ' ');
   if (!r) return 'unknown';
+  if (/^migration_late_chase(?:_blocked)?/i.test(r)) {
+    return 'migration_late_chase';
+  }
+  if (/^migration_not_setup/i.test(r)) return 'migration_not_setup';
+  if (/^migration_mc_band/i.test(r)) return 'migration_mc_band';
+  if (/^migration_quality_reject/i.test(r)) return 'migration_quality_reject';
+  if (/^migration_share_cap/i.test(r)) return 'migration_share_cap';
   // Collapse numeric suffixes (e.g. max positions (40) → max positions)
   return r
     .replace(/\s*\(\d+(?:\.\d+)?%?\)\s*$/i, '')

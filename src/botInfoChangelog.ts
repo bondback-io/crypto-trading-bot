@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.374',
+    title: 'Scanner conversion: source funnel, Migration tags, MC seams',
+    sections: ['scanners', 'microbots', 'tradecraft'],
+    items: [
+      'Scanner diagnostics now show a per-source funnel (in / deduped / gatekeeper / watch / arm / open) with ok / zero / stale / off chips. Enabled sources sitting at zero for ~12 minutes flag stale.',
+      'Graduating / soon / bonded tags map into Migration watch when quality rules pass. Skip codes: migration_not_setup, migration_mc_band, migration_quality_reject, migration_share_cap, migration_late_chase. Seeded curve % never naked-buys.',
+      'Resolved MC hand-off seams (MS → Scalper, Scalper → Dip) close operator-override gaps without widening every profile. Orphan MC strip shows example mints. Late-chase and arm preference stay on.',
+    ],
+  },
+  {
     version: '1.2.373',
     title: 'Unique Steady/HWR, Trend path, scanner coverage',
     sections: ['microbots', 'scanners', 'tradecraft', 'execution'],
