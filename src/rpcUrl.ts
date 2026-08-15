@@ -96,6 +96,11 @@ export function buildAlchemyRpcUrl(apiKey?: string | null): string | null {
   return `https://solana-mainnet.g.alchemy.com/v2/${key}`;
 }
 
+/** Exclusive Watchers-lane Alchemy URL. Null if ALCHEMY_API_KEY_BACKUP unset — do not probe. */
+export function buildAlchemyBackupRpcUrl(apiKey?: string | null): string | null {
+  return buildAlchemyRpcUrl(apiKey ?? process.env.ALCHEMY_API_KEY_BACKUP);
+}
+
 /** True for QuickNode hosted Solana HTTP endpoints. */
 export function isQuicknodeRpcUrl(url: string | null | undefined): boolean {
   const u = (url || '').toLowerCase();
@@ -185,7 +190,7 @@ export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
   return false;
 }
 
-export type RpcLaneRole = 'primary' | 'secondary' | 'utility' | 'fallback';
+export type RpcLaneRole = 'primary' | 'secondary' | 'utility' | 'watchers' | 'fallback';
 
 export interface NormalizedRpcEndpoint {
   url: string;
@@ -240,9 +245,11 @@ export function normalizeRpcEndpoints(
           ? 'secondary'
           : c.label === 'utility'
             ? 'utility'
-            : i === 0
-              ? 'primary'
-              : 'fallback');
+            : c.label === 'watchers' || c.label === 'alchemy-backup'
+              ? 'watchers'
+              : i === 0
+                ? 'primary'
+                : 'fallback');
     push(
       c.url,
       c.label ||
@@ -252,7 +259,9 @@ export function normalizeRpcEndpoints(
             ? 'secondary'
             : role === 'utility'
               ? 'utility'
-              : `rpc-${i + 1}`),
+              : role === 'watchers'
+                ? 'watchers'
+                : `rpc-${i + 1}`),
       role,
       c.wsUrl
     );
@@ -452,6 +461,11 @@ export function rpcEndpointsFromEnv(
     add(utilityUrl, labelFor(utilityUrl, 'utility'), 'utility');
   }
 
+  const alchemyBackup = buildAlchemyBackupRpcUrl();
+  if (alchemyBackup) {
+    add(alchemyBackup, 'alchemy-backup', 'watchers');
+  }
+
   for (const c of pool) {
     add(c.url, c.label, 'fallback', c.wsUrl);
   }
@@ -502,6 +516,10 @@ export const RPC_LANE_SUPPORTS = {
     'Other light non-entry polls',
     'Preferred: official mainnet-beta → publicnode → Triton → last-resort fallbacks',
   ],
+  watchers: [
+    'Setup watch list poll, arm level checks, graduation curve, TA enrich for watch/arm/trigger',
+    'Preferred: ALCHEMY_API_KEY_BACKUP (exclusive). Emergency: public/utility if backup unset — never Trading or Scanners',
+  ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
     'Wallet discovery / search (GMGN, Kolscan, etc. — HTTP APIs)',
@@ -516,6 +534,9 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
   ],
   scanners: [
     'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
+  ],
+  watchers: [
+    'Alchemy backup (ALCHEMY_API_KEY_BACKUP) — setup watch / arm / trigger. Trading stays Helius.',
   ],
   utility: [
     'mainnet-beta — wallet buy watch (Favourites), import checks, activity refresh, light polls',

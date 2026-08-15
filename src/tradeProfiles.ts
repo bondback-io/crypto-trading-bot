@@ -396,6 +396,11 @@ export interface TradeProfileMatchRules {
    */
   armingEnabled?: boolean;
   /**
+   * When false, this profile does not accept watch-list inserts or parks.
+   * Watch OFF + Arming ON is treated as Arming OFF (legacy spot) so opens do not deadlock.
+   */
+  watchEnabled?: boolean;
+  /**
    * Integer count of passed Profile TA playbook tools required at trigger.
    * 0 = off (no count gate). Distinct from playbook minConfluenceScore (0–100).
    */
@@ -534,7 +539,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     ],
     priority: 0,
     defaultEnabled: true,
-    match: { always: true, armingEnabled: false, minTaPlaybookConfluences: 0 },
+    match: { always: true, armingEnabled: false, watchEnabled: false, minTaPlaybookConfluences: 0 },
     exitRules: {},
     // Empty = inherit all globally ON modules (even when Smart Bot Profiles is ON)
   },
@@ -583,6 +588,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['late_chase'],
       hardLateChase: false,
       armingEnabled: true,
+      watchEnabled: true,
       minTaPlaybookConfluences: 1,
     },
     exitRules: {
@@ -622,7 +628,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Key levels: Fib 0.5 & 0.618 or clear support',
       'Established tokens: MC $1M–$500M (prefer ≥$2M) · holders ≥100 · top10 ≤38%',
       'Dip ≥8% from peak (max ~45%) · one watchlist → arm near Fib/S → trigger on reclaim',
-      'Min TA playbook confluence 1 at trigger · Arming ON',
+      'Min TA playbook confluence 2 at trigger · Arming ON',
       'Overlap with Scalper resolved by Fib dip watch vs support reclaim',
       'Size: normal / slightly larger on high conviction',
     ],
@@ -664,7 +670,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['level_momentum_expansion', 'late_chase'],
       hardLateChase: true,
       armingEnabled: true,
-      minTaPlaybookConfluences: 1,
+      watchEnabled: true,
+      minTaPlaybookConfluences: 2,
     },
     exitRules: {
       shortTermStrategyId: 'post_run_dip',
@@ -754,6 +761,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['scalp_reclaim_burst', 'late_chase'],
       hardLateChase: true,
       armingEnabled: true,
+      watchEnabled: true,
       minTaPlaybookConfluences: 2,
     },
     exitRules: {
@@ -779,11 +787,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '🚀',
     color: TRADE_PROFILE_COLORS.migration_sniper,
     description:
-      'Event lane: arm in the pre-mig sweet spot (~80–90% curve), enter without TA, hold through migration, exit on first spike + volume.',
+      'Event lane: arm in the pre-mig sweet spot (~80–90% curve), quality-arm then TA confluence ≥1, hold through migration, exit on first spike + volume.',
     recommendedRisk: 'High / Medium',
     style: 'Event / Momentum',
     rulesSummary: [
-      'Watch ~80% curve · fire / enter from ~92% when armed (no TA setup)',
+      'Watch ~80% curve · quality arm · reclaim/hold · min 1 TA confluence at trigger',
       'Hold through migration · exit on first spike + volume step-up',
       'SL ~15% · post-mig max hold ~4 min · total safety ~12 min',
       'Soft quality: holders / buy pressure / volume (not chart patterns)',
@@ -823,7 +831,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['support_dip_reclaim'],
       hardLateChase: false,
       armingEnabled: true,
-      minTaPlaybookConfluences: 0,
+      watchEnabled: true,
+      minTaPlaybookConfluences: 1,
     },
     exitRules: {
       takeProfitPctMin: 10,
@@ -929,6 +938,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['late_chase', 'scalp_reclaim_burst'],
       hardLateChase: true,
       armingEnabled: true,
+      watchEnabled: true,
       minTaPlaybookConfluences: 2,
     },
     exitRules: {
@@ -1011,6 +1021,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['support_dip_reclaim'],
       hardLateChase: false,
       armingEnabled: true,
+      watchEnabled: true,
       minTaPlaybookConfluences: 1,
     },
     exitRules: {
@@ -1095,6 +1106,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['scalp_reclaim_burst'],
       hardLateChase: false,
       armingEnabled: true,
+      watchEnabled: true,
       minTaPlaybookConfluences: 2,
     },
     exitRules: {
@@ -1157,6 +1169,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['trend_pullback_continuation', 'late_chase'],
       hardLateChase: false,
       armingEnabled: true,
+      watchEnabled: true,
       minTaPlaybookConfluences: 1,
     },
     exitRules: {
@@ -1224,6 +1237,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       forbiddenEntryStyles: ['late_chase'],
       hardLateChase: true,
       armingEnabled: false,
+      watchEnabled: false,
       minTaPlaybookConfluences: 0,
     },
     exitRules: {
@@ -1275,6 +1289,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     match: {
       // No auto-match flags — Place Trade stamps zion; lane fight skips this id
       armingEnabled: false,
+      watchEnabled: false,
       minTaPlaybookConfluences: 0,
     },
     exitRules: {},
@@ -1837,6 +1852,19 @@ export function isProfileArmingEnabled(
     return resolveTradeProfileDefinition(id).match.armingEnabled === true;
   } catch {
     return false;
+  }
+}
+
+/** Watch-list insert enabled. Missing → true for family profiles, false if catalog says false. */
+export function isProfileWatchEnabled(
+  profileId: string | null | undefined
+): boolean {
+  const id = String(profileId || '').trim();
+  if (!id || id === 'default' || id === 'zion') return false;
+  try {
+    return resolveTradeProfileDefinition(id).match.watchEnabled !== false;
+  } catch {
+    return true;
   }
 }
 

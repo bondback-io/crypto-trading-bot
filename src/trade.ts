@@ -373,6 +373,11 @@ export interface BuyOptions {
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
   dipWatchTriggered?: boolean;
+  playbookPassed?: string[];
+  watchToArmMs?: number;
+  armToTriggerMs?: number;
+  confluenceCountAtTrigger?: number;
+  falseArmExpired?: boolean;
   /** Specialty feed stamp for pump.fun-only bypass (majors/medium/jupiter/kolscan) */
   specialtyFeed?: string | null;
   /** Set when non-pump open allowed via mature specialty bypass */
@@ -1186,6 +1191,18 @@ export async function executeBuy(
         scalperWatchTriggered: meta?.scalperWatchTriggered,
         dipWatchTriggered: meta?.dipWatchTriggered,
         armedWatch: meta?.armedWatch === true,
+        playbookPassed: Array.isArray(meta?.playbookPassed)
+          ? meta.playbookPassed
+          : Array.isArray(meta?.taToolsPassedAtEntry)
+            ? meta.taToolsPassedAtEntry
+            : undefined,
+        watchToArmMs: meta?.watchToArmMs,
+        armToTriggerMs: meta?.armToTriggerMs,
+        confluenceCountAtTrigger:
+          meta?.confluenceCountAtTrigger != null
+            ? Number(meta.confluenceCountAtTrigger)
+            : undefined,
+        falseArmExpired: meta?.falseArmExpired === true,
         entryPath:
           meta?.entryPath ||
           (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
@@ -1346,6 +1363,18 @@ export async function executeBuy(
         scalperWatchTriggered: meta?.scalperWatchTriggered,
         dipWatchTriggered: meta?.dipWatchTriggered,
         armedWatch: meta?.armedWatch === true,
+        playbookPassed: Array.isArray(meta?.playbookPassed)
+          ? meta.playbookPassed
+          : Array.isArray(meta?.taToolsPassedAtEntry)
+            ? meta.taToolsPassedAtEntry
+            : undefined,
+        watchToArmMs: meta?.watchToArmMs,
+        armToTriggerMs: meta?.armToTriggerMs,
+        confluenceCountAtTrigger:
+          meta?.confluenceCountAtTrigger != null
+            ? Number(meta.confluenceCountAtTrigger)
+            : undefined,
+        falseArmExpired: meta?.falseArmExpired === true,
         entryPath:
           meta?.entryPath ||
           (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),

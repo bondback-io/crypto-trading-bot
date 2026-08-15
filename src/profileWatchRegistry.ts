@@ -7,6 +7,7 @@ import type { TradeProfileId } from './tradeProfiles';
 import {
   getMinTaPlaybookConfluences,
   isProfileArmingEnabled,
+  isProfileWatchEnabled,
   resolveWatchEligibleProfileIds,
   WATCH_FAMILY_PROFILE_IDS,
   type WatchFamilyId,
@@ -149,11 +150,13 @@ export function noteProfileWatchOpenQuality(opts: {
 
 export function getProfileWatchFunnels(): Record<string, ProfileWatchFunnel> {
   const out: Record<string, ProfileWatchFunnel> = {};
+  for (const id of PROFILE_ORDER) {
+    const row = funnels.get(id) || EMPTY_FUNNEL();
+    out[id] = { ...row, blocked: { ...row.blocked } };
+  }
   for (const [id, row] of funnels) {
-    out[id] = {
-      ...row,
-      blocked: { ...row.blocked },
-    };
+    if (out[id]) continue;
+    out[id] = { ...row, blocked: { ...row.blocked } };
   }
   return out;
 }
@@ -437,7 +440,7 @@ export function shouldParkUnarmedOpen(opts: {
   if (!id || id === 'default' || id === 'zion') {
     return { park: false, reason: 'no_arming_profile' };
   }
-  if (!isProfileArmingEnabled(id)) {
+  if (!isProfileWatchEnabled(id) || !isProfileArmingEnabled(id)) {
     return { park: false, reason: 'arming_off' };
   }
   return {
@@ -543,10 +546,24 @@ export function applyTriggerConfluenceToWatch(
     entry.triggerBlockReason = r.reason;
     entry.lastReason = r.reason;
     noteProfileWatchFunnel(pid, 'blocked', r.reason);
+    try {
+      const { noteTriggerOpenBlocked } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteTriggerOpenBlocked(r.reason || 'confluence');
+    } catch {
+      /* optional */
+    }
     return false;
   }
   entry.triggerBlockReason = undefined;
   noteProfileWatchFunnel(pid, 'trigger_ready');
+  try {
+    const { noteTriggerReady } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteTriggerReady();
+  } catch {
+    /* optional */
+  }
   return true;
 }
 
@@ -571,6 +588,16 @@ export function parkSignalOnProfileWatch(opts: {
   const pid = String(opts.profileId || '').trim();
   const mint = String(opts.mint || '').trim();
   if (!mint) return false;
+  if (pid && !isProfileWatchEnabled(pid)) {
+    try {
+      const { noteWatchInsertReject } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteWatchInsertReject('watch_off');
+    } catch {
+      /* optional */
+    }
+    return false;
+  }
   try {
     if (
       pid === 'dip_buyer' ||
@@ -579,7 +606,7 @@ export function parkSignalOnProfileWatch(opts: {
     ) {
       const { offerDipWatchFromCandidate } =
         require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-      offerDipWatchFromCandidate({
+      const ok = offerDipWatchFromCandidate({
         mint,
         symbol: opts.symbol || mint.slice(0, 6),
         name: opts.name,
@@ -591,7 +618,16 @@ export function parkSignalOnProfileWatch(opts: {
         dropFromPeakPct: opts.dropFromPeakPct,
         preferredProfileId: pid,
       });
-      return true;
+      if (!ok) {
+        try {
+          const { noteWatchInsertReject } =
+            require('./watchPipeline') as typeof import('./watchPipeline');
+          noteWatchInsertReject('park_unverified');
+        } catch {
+          /* optional */
+        }
+      }
+      return Boolean(ok);
     }
     if (
       pid === 'scalper' ||
@@ -633,16 +669,17 @@ export function parkSignalOnProfileWatch(opts: {
     if (pid === 'migration_sniper' || pid === 'migration') {
       const { offerMigrationGradWatchFromCandidate } =
         require('./migrationGradWatch') as typeof import('./migrationGradWatch');
-      offerMigrationGradWatchFromCandidate({
-        mint,
-        symbol: opts.symbol || mint.slice(0, 6),
-        name: opts.name,
-        marketCapUsd: opts.marketCapUsd ?? undefined,
-        volumeH1Usd: opts.volumeH1Usd ?? undefined,
-        holderCount: opts.holderCount ?? undefined,
-        curveProgressPct: opts.curveProgressPct,
-      });
-      return true;
+      return Boolean(
+        offerMigrationGradWatchFromCandidate({
+          mint,
+          symbol: opts.symbol || mint.slice(0, 6),
+          name: opts.name,
+          marketCapUsd: opts.marketCapUsd ?? undefined,
+          volumeH1Usd: opts.volumeH1Usd ?? undefined,
+          holderCount: opts.holderCount ?? undefined,
+          curveProgressPct: opts.curveProgressPct,
+        })
+      );
     }
   } catch {
     return false;

@@ -132,6 +132,13 @@ function isTrendProfileEnabled(): boolean {
   const { config } = require('./config') as typeof import('./config');
   if (config.tradeProfiles?.enabled === false) return false;
   if (config.tradeProfiles?.profiles?.trend_rider === false) return false;
+  try {
+    const { isProfileWatchEnabled } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (!isProfileWatchEnabled('trend_rider')) return false;
+  } catch {
+    /* optional */
+  }
   return true;
 }
 
@@ -584,6 +591,16 @@ async function refreshWatchMarket(w: TrendWatchEntry, now: number): Promise<void
 export async function tickTrendSetupWatches(opts?: {
   priceByMint?: Map<string, number>;
 }): Promise<number> {
+  if ((tickTrendSetupWatches as { _lane?: boolean })._lane !== true) {
+    (tickTrendSetupWatches as { _lane?: boolean })._lane = true;
+    try {
+      const { runSetupWatchLane } =
+        require('./rpcRouting') as typeof import('./rpcRouting');
+      return await runSetupWatchLane(() => tickTrendSetupWatches(opts));
+    } finally {
+      (tickTrendSetupWatches as { _lane?: boolean })._lane = false;
+    }
+  }
   if (!isTrendProfileEnabled()) return 0;
   pruneTerminal();
   const now = Date.now();
@@ -853,6 +870,13 @@ export function offerTrendWatchFromCandidate(c: {
   chartPatternIds?: string[];
   volumeDecayState?: string | null;
 }): boolean {
+  try {
+    const { noteWatchInsertAttempt } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteWatchInsertAttempt();
+  } catch {
+    /* optional */
+  }
   let decay = c.volumeDecayState ?? null;
   if (!decay && (c.volumeM5Usd != null || c.volumeH1Usd != null)) {
     try {
@@ -890,5 +914,14 @@ export function offerTrendWatchFromCandidate(c: {
     chartPatternIds: c.chartPatternIds,
     volumeDecayState: decay,
   });
+  if (!row) {
+    try {
+      const { noteWatchInsertReject } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteWatchInsertReject('admit_failed');
+    } catch {
+      /* optional */
+    }
+  }
   return row != null;
 }

@@ -171,6 +171,13 @@ function isMigProfileEnabled(): boolean {
   const { config } = require('./config') as typeof import('./config');
   if (config.tradeProfiles?.enabled === false) return false;
   if (config.tradeProfiles?.profiles?.migration_sniper === false) return false;
+  try {
+    const { isProfileWatchEnabled } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (!isProfileWatchEnabled('migration_sniper')) return false;
+  } catch {
+    /* optional */
+  }
   return true;
 }
 
@@ -497,6 +504,13 @@ function buildHandoff(
     armedWatch: true,
     entryStyleHint: 'migration_hold_reclaim',
     setupWatchFamily: 'grad',
+    playbookPassed: Array.isArray(w.playbookPassed) ? w.playbookPassed : undefined,
+    confluenceCountAtTrigger:
+      w.confluenceCount != null ? Number(w.confluenceCount) : undefined,
+    watchToArmMs:
+      w.armedAt != null && w.createdAt > 0 ? Math.max(0, w.armedAt - w.createdAt) : undefined,
+    armToTriggerMs:
+      w.armedAt != null ? Math.max(0, now - w.armedAt) : undefined,
     launch,
   };
 }
@@ -546,6 +560,16 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
  * until complete, then post-grad handoff. Returns number of triggered handoffs.
  */
 export async function tickMigrationGradWatches(): Promise<number> {
+  if ((tickMigrationGradWatches as { _lane?: boolean })._lane !== true) {
+    (tickMigrationGradWatches as { _lane?: boolean })._lane = true;
+    try {
+      const { runSetupWatchLane } =
+        require('./rpcRouting') as typeof import('./rpcRouting');
+      return await runSetupWatchLane(() => tickMigrationGradWatches());
+    } finally {
+      (tickMigrationGradWatches as { _lane?: boolean })._lane = false;
+    }
+  }
   try {
     const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
       shouldIdleIsolate?: () => boolean;
@@ -669,7 +693,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
     }
 
     const quality = qualitySoftOk(w);
-    if (w.status === 'watching' && quality && progress < fMin) {
+    if (w.status === 'watching' && quality) {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
@@ -734,17 +758,12 @@ export async function tickMigrationGradWatches(): Promise<number> {
       continue;
     }
 
-    // Require armed OR quality soft-ok (junk watches in fire band do not buy)
-    if (w.status !== 'armed' && !quality) {
+    // Require quality arm before fire — no naked curve free-fire
+    if (w.status !== 'armed') {
       funnel.fireMissNotArmed += 1;
       w.lastReason = `fire ${progress.toFixed(0)}% — waiting quality arm`;
       w.updatedAt = now;
       continue;
-    }
-    if (w.status === 'watching' && quality) {
-      w.status = 'armed';
-      w.armedAt = w.armedAt ?? now;
-      funnel.armed += 1;
     }
 
     // Prefer reclaim/hold after fire touch (touchedFireBand + still inFire)
@@ -909,16 +928,23 @@ export function offerMigrationGradWatchFromCandidate(c: {
   nearMigration?: boolean;
   preferredProfileId?: string;
   specialtyFeed?: string;
-}): void {
+}): boolean {
+  try {
+    const { noteWatchInsertAttempt } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteWatchInsertAttempt();
+  } catch {
+    /* optional */
+  }
   const progress = c.curveProgressPct;
   if (
     progress == null &&
     c.nearMigration !== true &&
     c.preferredProfileId !== 'migration_sniper'
   ) {
-    return;
+    return false;
   }
-  considerMigrationGradWatch({
+  const row = considerMigrationGradWatch({
     mint: c.mint,
     symbol: c.symbol,
     name: c.name,
@@ -928,4 +954,14 @@ export function offerMigrationGradWatchFromCandidate(c: {
     holderCount: c.holderCount,
     source: c.specialtyFeed || 'scanner',
   });
+  if (!row) {
+    try {
+      const { noteWatchInsertReject } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteWatchInsertReject('admit_failed');
+    } catch {
+      /* optional */
+    }
+  }
+  return row != null;
 }

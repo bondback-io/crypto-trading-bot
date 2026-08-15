@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.370',
+    title: 'Complete armed per-profile Watch system',
+    sections: ['microbots', 'scanners', 'tradecraft', 'learning'],
+    items: [
+      'Watch pipeline diagnostics on setup-watches: insert attempts, reject reasons, throttle state. Park only counts as success when a row is actually admitted.',
+      'Watch Enabled on each Micro Bot card. Watch OFF skips list insert; Arming ON + Watch OFF uses the legacy spot path (no deadlock). Funnels always show zeros + top block, never a bare dash.',
+      'Dip trigger needs 2 TA playbook tools (Support + Fib). Migration quality-arms then requires ≥1 TA confluence — no naked curve free-fire. Steady/HWR can quality-arm in the $20M–$500M overlap without stealing Dip identity.',
+      'Open/closed trades show a TA badge (hover lists tools). Watch→arm / arm→trigger timings stamp onto episodes without wiping learning.',
+      'Exclusive Watchers RPC lane on ALCHEMY_API_KEY_BACKUP for watch/arm/trigger. Trading stays Helius; Market Scanner stays Alchemy. Emergency public/utility if backup is unset.',
+    ],
+  },
+  {
     version: '1.2.369',
     title: 'Unify Dip Buyer watchlist ($1M–$500M)',
     sections: ['microbots', 'scanners', 'tradecraft'],

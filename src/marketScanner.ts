@@ -99,6 +99,10 @@ export interface ScannerCandidate {
   nearMultiTfResistance?: boolean;
   /** Armed setup-watch handoff stamps (Mode B / Dip / Grad) */
   armedWatch?: boolean;
+  playbookPassed?: string[];
+  watchToArmMs?: number;
+  armToTriggerMs?: number;
+  confluenceCountAtTrigger?: number;
   entryStyleHint?: string;
   qualityScoreHint?: number;
   sizePlanSol?: number;
@@ -1182,6 +1186,16 @@ export async function selectScannerCandidates(
     console.log(
       `[marketScanner] crude-only ${prefiltered.length}/${events.length} → ${out.length}`
     );
+    try {
+      const { noteScannerThrottle } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteScannerThrottle({ crudeOnly: true });
+    } catch {
+      /* optional */
+    }
+    for (const row of out) {
+      offerSetupWatchesFromEnriched(row);
+    }
     return out;
   }
 
@@ -1523,6 +1537,113 @@ export function clearScannerMintCooldown(mint: string): void {
   cooldowns.delete(mint);
 }
 
+function offerSetupWatchesFromEnriched(c: {
+  mint: string;
+  symbol: string;
+  name?: string;
+  marketCapUsd?: number | null;
+  volumeH1Usd?: number | null;
+  volumeM5Usd?: number | null;
+  holderCount?: number | null;
+  priceChangeH1Pct?: number | null;
+  nearKeyFib?: boolean;
+  nearSupport?: boolean;
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+  nearMultiTfSupport?: boolean;
+  srConfluenceScore?: number | null;
+  supportTfHits?: string[] | null;
+  curveProgressPct?: number | null;
+  nearMigration?: boolean;
+  playbook?: string;
+  chartPatternIds?: string[];
+  kolCount?: number;
+}): void {
+  try {
+    const { offerDipWatchFromCandidate } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    offerDipWatchFromCandidate({
+      mint: c.mint,
+      symbol: c.symbol,
+      name: c.name,
+      marketCapUsd: c.marketCapUsd ?? undefined,
+      volumeH1Usd: c.volumeH1Usd ?? undefined,
+      holderCount: c.holderCount ?? undefined,
+      priceChangeH1Pct: c.priceChangeH1Pct ?? undefined,
+      nearKeyFib: c.nearKeyFib,
+      nearSupport: c.nearSupport,
+      lastPriceSol: c.lastPriceSol ?? null,
+      supportPriceSol: c.supportPriceSol ?? null,
+      fib05PriceSol: c.fib05PriceSol ?? null,
+      fib618PriceSol: c.fib618PriceSol ?? null,
+      kolCount: c.kolCount,
+    });
+  } catch {
+    /* optional */
+  }
+  try {
+    const { offerScalperWatchFromCandidate } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    offerScalperWatchFromCandidate({
+      mint: c.mint,
+      symbol: c.symbol,
+      name: c.name,
+      marketCapUsd: c.marketCapUsd ?? undefined,
+      volumeH1Usd: c.volumeH1Usd ?? undefined,
+      volumeM5Usd: c.volumeM5Usd ?? undefined,
+      holderCount: c.holderCount ?? undefined,
+      nearKeyFib: c.nearKeyFib,
+      nearSupport: c.nearSupport,
+      nearMultiTfSupport: c.nearMultiTfSupport,
+      srConfluenceScore: c.srConfluenceScore ?? undefined,
+      supportTfHits: c.supportTfHits as import('./technicalLevels').SrTimeframe[] | undefined,
+      lastPriceSol: c.lastPriceSol ?? null,
+      supportPriceSol: c.supportPriceSol ?? null,
+      playbook: c.playbook,
+      chartPatternIds: c.chartPatternIds,
+    });
+  } catch {
+    /* optional */
+  }
+  try {
+    const { offerTrendWatchFromCandidate } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    offerTrendWatchFromCandidate({
+      mint: c.mint,
+      symbol: c.symbol,
+      name: c.name,
+      marketCapUsd: c.marketCapUsd ?? undefined,
+      volumeH1Usd: c.volumeH1Usd ?? undefined,
+      volumeM5Usd: c.volumeM5Usd ?? undefined,
+      holderCount: c.holderCount ?? undefined,
+      nearKeyFib: c.nearKeyFib,
+      nearSupport: c.nearSupport,
+      lastPriceSol: c.lastPriceSol ?? null,
+      supportPriceSol: c.supportPriceSol ?? null,
+    });
+  } catch {
+    /* optional */
+  }
+  try {
+    const { offerMigrationGradWatchFromCandidate } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    offerMigrationGradWatchFromCandidate({
+      mint: c.mint,
+      symbol: c.symbol,
+      name: c.name,
+      marketCapUsd: c.marketCapUsd ?? undefined,
+      volumeH1Usd: c.volumeH1Usd ?? undefined,
+      holderCount: c.holderCount ?? undefined,
+      curveProgressPct: c.curveProgressPct,
+      nearMigration: c.nearMigration,
+    });
+  } catch {
+    /* optional */
+  }
+}
+
 /** Synthetic setup-watch / specialty handoffs skip Require-TA playbook/confluence. */
 export function isScannerSetupWatchHandoff(
   preferId: string | null | undefined,
@@ -1602,6 +1723,13 @@ export async function runScannerPollOnce(): Promise<number> {
     logBackgroundDeferred('Market Scanner', defer.reason || 'Critical busy');
     lastSkipReason = `delayed — ${defer.reason}`;
     lastPollMs = 0;
+    try {
+      const { noteScannerThrottle } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteScannerThrottle({ criticalDefer: true });
+    } catch {
+      /* optional */
+    }
     return 0;
   }
   const adapt = shouldSkipScannerTick('market_scanner');
@@ -1619,6 +1747,13 @@ export async function runScannerPollOnce(): Promise<number> {
       `[marketScanner] Skipping poll — ${qDepth} wallet buy(s) pending ` +
         `(threshold ${SCANNER_YIELD_QUEUE_DEPTH})`
     );
+    try {
+      const { noteScannerThrottle } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteScannerThrottle({ queueYield: true });
+    } catch {
+      /* optional */
+    }
     return 0;
   }
   pollInFlight = true;
@@ -1629,6 +1764,18 @@ export async function runScannerPollOnce(): Promise<number> {
     const universe = await collectScannerUniverse();
     const crudeOnly = shouldDegradeScannerEnrich();
     const picked = await selectScannerCandidates(universe, { crudeOnly });
+    try {
+      const { noteScannerCandidate, noteScannerThrottle } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteScannerCandidate(Math.max(1, universe.length || picked.length || 1));
+      noteScannerThrottle({
+        crudeOnly: Boolean(crudeOnly),
+        queueYield: false,
+        criticalDefer: false,
+      });
+    } catch {
+      /* optional */
+    }
     let handed = 0;
     // Non-blocking hand-off: fire handlers without serial await so the
     // scanner poll lock releases quickly; mint locks still serialize buys.

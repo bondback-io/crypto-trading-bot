@@ -4808,6 +4808,39 @@ export function createServer(): express.Application {
       } catch {
         diagnostics = null;
       }
+      const byProfile = (() => {
+        try {
+          const { getProfileWatchInventory, getProfileWatchFunnels } =
+            require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+          return {
+            inventory: getProfileWatchInventory(),
+            funnels: getProfileWatchFunnels(),
+          };
+        } catch {
+          return { inventory: {}, funnels: {} };
+        }
+      })();
+      const watchPipeline = (() => {
+        try {
+          const { getWatchPipelineSnapshot } =
+            require('./watchPipeline') as typeof import('./watchPipeline');
+          const inv = (byProfile.inventory || {}) as Record<
+            string,
+            { active?: number; entries?: Array<{ status?: string }> }
+          >;
+          const activeByProfile: Record<string, number> = {};
+          const armedByProfile: Record<string, number> = {};
+          for (const [pid, bucket] of Object.entries(inv)) {
+            activeByProfile[pid] = Number(bucket?.active) || 0;
+            armedByProfile[pid] = (bucket?.entries || []).filter(
+              (e) => String(e?.status || '') === 'armed'
+            ).length;
+          }
+          return getWatchPipelineSnapshot({ activeByProfile, armedByProfile });
+        } catch {
+          return null;
+        }
+      })();
       res.json({
         dipWatch: getDipSetupWatchStatus(200),
         gradWatch: getMigrationGradWatchStatus(16),
@@ -4816,18 +4849,8 @@ export function createServer(): express.Application {
         trendFunnel: getTrendFunnelCounters(),
         migSniperFunnel: getMigrationSniperFunnel(),
         diagnostics,
-        byProfile: (() => {
-          try {
-            const { getProfileWatchInventory, getProfileWatchFunnels } =
-              require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-            return {
-              inventory: getProfileWatchInventory(),
-              funnels: getProfileWatchFunnels(),
-            };
-          } catch {
-            return { inventory: {}, funnels: {} };
-          }
-        })(),
+        byProfile,
+        watchPipeline,
         watchReadiness: (() => {
           try {
             const { getWatchSystemsReadiness } =

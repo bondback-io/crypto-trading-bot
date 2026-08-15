@@ -1189,6 +1189,10 @@ export interface TradeSignal {
   scannerReasons?: string[];
   /** Armed setup-watch handoff (Mode B / Dip / Grad) */
   armedWatch?: boolean;
+  playbookPassed?: string[];
+  watchToArmMs?: number;
+  armToTriggerMs?: number;
+  confluenceCountAtTrigger?: number;
   entryStyleHint?: string;
   qualityScoreHint?: number;
   sizePlanSol?: number;
@@ -1230,7 +1234,7 @@ function maybeParkArmingOpen(
       armedWatch: armed,
     });
     if (!gate.park) return gate;
-    parkSignalOnProfileWatch({
+    const parked = parkSignalOnProfileWatch({
       profileId,
       mint: signal.mint,
       symbol: signal.symbol,
@@ -1247,8 +1251,17 @@ function maybeParkArmingOpen(
       curveProgressPct: signal.bondingCurve?.progressPct ?? null,
       dropFromPeakPct: signal.dropFromPeakPct,
     });
-    noteProfileWatchFunnel(String(profileId || ''), 'blocked', 'unarmed_spot_parked');
-    return gate;
+    noteProfileWatchFunnel(
+      String(profileId || ''),
+      'blocked',
+      parked ? 'unarmed_spot_parked' : 'park_failed'
+    );
+    return {
+      park: true,
+      reason: parked
+        ? gate.reason
+        : `Arming ON — park failed for ${profileId || 'profile'}`,
+    };
   } catch {
     return { park: false, reason: 'park_eval_fail_open' };
   }
@@ -1316,6 +1329,40 @@ function applyProfileTaPlaybookGate(
       getProfileTaPlaybook
     );
     Object.assign(buyOpts, gate.stamp);
+    if (
+      Array.isArray(signal.playbookPassed) &&
+      signal.playbookPassed.length
+    ) {
+      (buyOpts as { playbookPassed?: string[] }).playbookPassed =
+        signal.playbookPassed;
+      if (
+        !Array.isArray((buyOpts as { taToolsPassedAtEntry?: string[] }).taToolsPassedAtEntry) ||
+        !(buyOpts as { taToolsPassedAtEntry?: string[] }).taToolsPassedAtEntry!.length
+      ) {
+        (buyOpts as { taToolsPassedAtEntry?: string[] }).taToolsPassedAtEntry =
+          signal.playbookPassed;
+      }
+    }
+    if (
+      signal.confluenceCountAtTrigger != null &&
+      Number.isFinite(Number(signal.confluenceCountAtTrigger))
+    ) {
+      (buyOpts as { confluenceCountAtTrigger?: number }).confluenceCountAtTrigger =
+        Number(signal.confluenceCountAtTrigger);
+    } else if (
+      Array.isArray((buyOpts as { taToolsPassedAtEntry?: string[] }).taToolsPassedAtEntry)
+    ) {
+      (buyOpts as { confluenceCountAtTrigger?: number }).confluenceCountAtTrigger =
+        (buyOpts as { taToolsPassedAtEntry?: string[] }).taToolsPassedAtEntry!.length;
+    }
+    if (signal.watchToArmMs != null && Number.isFinite(Number(signal.watchToArmMs))) {
+      (buyOpts as { watchToArmMs?: number }).watchToArmMs = Number(signal.watchToArmMs);
+    }
+    if (signal.armToTriggerMs != null && Number.isFinite(Number(signal.armToTriggerMs))) {
+      (buyOpts as { armToTriggerMs?: number }).armToTriggerMs = Number(
+        signal.armToTriggerMs
+      );
+    }
     if (
       Array.isArray(signal.scannerReasons) &&
       signal.scannerReasons.some((r) =>
@@ -3763,6 +3810,41 @@ async function handleScannerCandidate(
     // Playbook / confluence only hard-gate when Require TA setup is ON
     // (Risk Off always skips these so scanner-only can still open).
     if (!hybrid && requireTa && !setupWatchHandoff && !scalperMcEligible) {
+      if (!candidate.playbook ||
+        candidate.confluence == null ||
+        candidate.confluence < minConfluence
+      ) {
+        try {
+          const { parkSignalOnProfileWatch, noteProfileWatchFunnel } =
+            require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+          const pid = String(preferId || '').trim();
+          if (pid && pid !== 'default' && pid !== 'zion') {
+            const ok = parkSignalOnProfileWatch({
+              profileId: pid,
+              mint: candidate.mint,
+              symbol: candidate.symbol,
+              name: candidate.name,
+              marketCapUsd: candidate.marketCapUsd,
+              volumeH1Usd: candidate.volumeH1Usd,
+              volumeM5Usd: candidate.volumeM5Usd,
+              holderCount: candidate.holderCount,
+              nearKeyFib: candidate.nearKeyFib === true,
+              nearSupport: candidate.nearSupport === true,
+              nearMultiTfSupport: candidate.nearMultiTfSupport === true,
+              srConfluenceScore: candidate.srConfluenceScore,
+              supportTfHits: candidate.supportTfHits,
+              curveProgressPct: candidate.curveProgressPct ?? null,
+            });
+            noteProfileWatchFunnel(
+              pid,
+              'blocked',
+              ok ? 'require_ta_parked' : 'park_failed'
+            );
+          }
+        } catch {
+          /* optional */
+        }
+      }
       if (!candidate.playbook) {
         finishBuy(candidate.mint, false);
         annotateScannerCandidate(candidate.mint, {
@@ -3897,6 +3979,12 @@ async function handleScannerCandidate(
             )
           )) ||
         undefined,
+      playbookPassed: Array.isArray(candidate.playbookPassed)
+        ? candidate.playbookPassed
+        : undefined,
+      watchToArmMs: candidate.watchToArmMs,
+      armToTriggerMs: candidate.armToTriggerMs,
+      confluenceCountAtTrigger: candidate.confluenceCountAtTrigger,
       setupWatchFamily:
         candidate.setupWatchFamily ||
         (candidate.dipWatchTriggered === true

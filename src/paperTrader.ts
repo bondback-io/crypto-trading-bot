@@ -442,9 +442,11 @@ export interface Position {
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
   dipWatchTriggered?: boolean;
+  playbookPassed?: string[];
   watchToArmMs?: number;
   armToTriggerMs?: number;
   confluenceCountAtTrigger?: number;
+  falseArmExpired?: boolean;
   /** Armed setup-watch handoff */
   armedWatch?: boolean;
   entryPath?: 'armed_trigger' | 'discretionary' | string;
@@ -915,6 +917,7 @@ function maybeRecordLearningEpisode(
           position.scalperWatchTriggered === true ||
           position.dipWatchTriggered === true) &&
         metrics.maxRunupPct <= 0.05,
+      falseArmExpired: position.falseArmExpired === true,
       mirrorWalletId: position.mirrorWalletId,
       mirrorWalletName: position.mirrorWalletName,
       learningTags: (() => {
@@ -987,7 +990,11 @@ function maybeRecordLearningEpisode(
           ?.heikinAshiExitEnabled === true,
       taModeAtOpen: position.taModeAtOpen,
       taToolsAtOpen: position.taToolsAtOpen,
-      taToolsPassedAtEntry: position.taToolsPassedAtEntry,
+      taToolsPassedAtEntry:
+        Array.isArray(position.taToolsPassedAtEntry) &&
+        position.taToolsPassedAtEntry.length
+          ? position.taToolsPassedAtEntry
+          : position.playbookPassed,
       taToolScoresAtEntry: position.taToolScoresAtEntry,
       taConfluenceAtEntry: position.taConfluenceAtEntry,
       haBiasAtEntry: position.haBiasAtEntry,
@@ -2195,6 +2202,11 @@ export class PaperTrader {
     scalperWatchTriggered?: boolean;
     dipWatchTriggered?: boolean;
     armedWatch?: boolean;
+    playbookPassed?: string[];
+    watchToArmMs?: number;
+    armToTriggerMs?: number;
+    confluenceCountAtTrigger?: number;
+    falseArmExpired?: boolean;
     entryPath?: string;
     setupWatchFamily?: string;
     whaleStateAtEntry?: string;
@@ -2307,6 +2319,20 @@ export class PaperTrader {
       scalperWatchTriggered: input.scalperWatchTriggered,
       dipWatchTriggered: input.dipWatchTriggered === true,
       armedWatch: input.armedWatch === true,
+      playbookPassed: Array.isArray(input.playbookPassed)
+        ? input.playbookPassed
+        : Array.isArray(input.taToolsPassedAtEntry)
+          ? input.taToolsPassedAtEntry
+          : undefined,
+      watchToArmMs: input.watchToArmMs,
+      armToTriggerMs: input.armToTriggerMs,
+      confluenceCountAtTrigger:
+        input.confluenceCountAtTrigger != null
+          ? Number(input.confluenceCountAtTrigger)
+          : Array.isArray(input.taToolsPassedAtEntry)
+            ? input.taToolsPassedAtEntry.length
+            : undefined,
+      falseArmExpired: input.falseArmExpired === true,
       entryPath:
         input.entryPath ||
         (input.armedWatch === true ? 'armed_trigger' : 'discretionary'),
@@ -2730,6 +2756,11 @@ export class PaperTrader {
       scalperWatchTriggered?: boolean;
       dipWatchTriggered?: boolean;
       armedWatch?: boolean;
+      playbookPassed?: string[];
+      watchToArmMs?: number;
+      armToTriggerMs?: number;
+      confluenceCountAtTrigger?: number;
+      falseArmExpired?: boolean;
       entryPath?: string;
       setupWatchFamily?: string;
       whaleStateAtEntry?: string;
@@ -2928,6 +2959,20 @@ export class PaperTrader {
       scalperWatchTriggered: meta?.scalperWatchTriggered,
       dipWatchTriggered: meta?.dipWatchTriggered === true,
       armedWatch: meta?.armedWatch === true,
+      playbookPassed: Array.isArray(meta?.playbookPassed)
+        ? meta.playbookPassed
+        : Array.isArray(meta?.taToolsPassedAtEntry)
+          ? meta.taToolsPassedAtEntry
+          : undefined,
+      watchToArmMs: meta?.watchToArmMs,
+      armToTriggerMs: meta?.armToTriggerMs,
+      confluenceCountAtTrigger:
+        meta?.confluenceCountAtTrigger != null
+          ? Number(meta.confluenceCountAtTrigger)
+          : Array.isArray(meta?.taToolsPassedAtEntry)
+            ? meta.taToolsPassedAtEntry.length
+            : undefined,
+      falseArmExpired: meta?.falseArmExpired === true,
       entryPath:
         meta?.entryPath ||
         (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),

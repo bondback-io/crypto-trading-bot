@@ -39,7 +39,7 @@ dotenv.config();
 const DEFAULT_RPC = PUBLIC_SOLANA_RPC;
 
 /** Workload lane — primary=critical; secondary=scanners/Zion; utility=import/activity */
-export type RpcRole = 'primary' | 'secondary' | 'utility';
+export type RpcRole = 'primary' | 'secondary' | 'utility' | 'watchers';
 
 export interface RpcEndpoint {
   url: string;
@@ -107,12 +107,14 @@ let endpoints: EndpointState[] = [];
 let preferredPrimary = 0;
 let preferredSecondary = 0;
 let preferredUtility = 0;
+let preferredWatchers = 0;
 /** Mid-tier paid failover (QuickNode); -1 when unset */
 let preferredQuicknode = -1;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
 let activeUtility = 0;
+let activeWatchers = 0;
 /** Legacy single active pointer — mirrors primary lane for older callers */
 let activeIndex = 0;
 
@@ -520,7 +522,9 @@ function ensureEndpoints(): void {
           ? 'secondary'
           : endpoint.label === 'utility'
             ? 'utility'
-            : 'fallback');
+            : endpoint.label === 'watchers' || endpoint.label === 'alchemy-backup'
+              ? 'watchers'
+              : 'fallback');
     return {
       endpoint: { ...endpoint, role },
       connection: new Connection(endpoint.url, {
@@ -556,6 +560,11 @@ function ensureEndpoints(): void {
   preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
   const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
   preferredUtility = pickPreferredUtilityIndex();
+  const watchIdx = endpoints.findIndex(
+    (e) =>
+      e.role === 'watchers' || e.endpoint.label === 'alchemy-backup'
+  );
+  preferredWatchers = watchIdx >= 0 ? watchIdx : preferredUtility;
   if (utilIdx >= 0 && preferredUtility !== utilIdx) {
     console.log(
       `[rpc] Utility preferred ${endpoints[preferredUtility]?.endpoint.label} ` +
@@ -569,6 +578,7 @@ function ensureEndpoints(): void {
   activePrimary = preferredPrimary;
   activeSecondary = preferredSecondary;
   activeUtility = preferredUtility;
+  activeWatchers = preferredWatchers;
   activeIndex = activePrimary;
 
   console.log(
@@ -583,7 +593,9 @@ function ensureEndpoints(): void {
       `secondary→${endpoints[preferredSecondary]?.endpoint.label} ` +
       `(${maskUrlForLog(endpoints[preferredSecondary]?.endpoint.url)}) · ` +
       `utility→${endpoints[preferredUtility]?.endpoint.label} ` +
-      `(${maskUrlForLog(endpoints[preferredUtility]?.endpoint.url)})` +
+      `(${maskUrlForLog(endpoints[preferredUtility]?.endpoint.url)}) · ` +
+      `watchers→${endpoints[preferredWatchers]?.endpoint.label} ` +
+      `(${maskUrlForLog(endpoints[preferredWatchers]?.endpoint.url)})` +
       (preferredQuicknode >= 0
         ? ` · mid-tier→${endpoints[preferredQuicknode]?.endpoint.label}`
         : '') +
@@ -685,6 +697,7 @@ function preferredIndexFor(role: RpcRole): number {
   ensureEndpoints();
   if (role === 'secondary') return preferredSecondary;
   if (role === 'utility') return preferredUtility;
+  if (role === 'watchers') return preferredWatchers;
   return preferredPrimary;
 }
 
@@ -699,6 +712,8 @@ function setActiveForRole(role: RpcRole, index: number): void {
     activeIndex = index;
   } else if (role === 'secondary') {
     activeSecondary = index;
+  } else if (role === 'watchers') {
+    activeWatchers = index;
   } else {
     activeUtility = index;
   }
@@ -711,6 +726,7 @@ function piggybackOrder(role: RpcRole): RpcRole[] {
   // Paid cross-lane only here; QuickNode + utility are inserted after in resolve/withRpc.
   if (role === 'primary') return ['secondary'];
   if (role === 'secondary') return ['primary'];
+  if (role === 'watchers') return ['utility'];
   return ['secondary', 'primary'];
 }
 
@@ -758,7 +774,9 @@ function acceptFailoverTarget(
       ? activePrimary
       : role === 'secondary'
         ? activeSecondary
-        : activeUtility;
+        : role === 'watchers'
+          ? activeWatchers
+          : activeUtility;
   if (active !== altIdx) {
     const reason = rateLimited
       ? 'rate-limited'
@@ -916,7 +934,8 @@ function resolveIndexForRole(role: RpcRole): number {
 
   // 1) Other paid free lane (Helius ↔ Alchemy)
   // Share+Utility: skip paid-lane piggyback (soft-watch must not burn Critical/Scanners).
-  if (!(shareLoad && role === 'utility')) {
+  // Share+Utility / Watchers: skip paid-lane piggyback (must not burn Critical/Scanners).
+  if (!(shareLoad && (role === 'utility' || role === 'watchers'))) {
     for (const otherRole of piggybackOrder(role)) {
       const otherPreferred = preferredIndexFor(otherRole);
       if (
@@ -986,6 +1005,17 @@ function resolveIndexForRole(role: RpcRole): number {
       if (!isAltPublic && !(isQn && pref && utilityMayUseQuicknodeSoft(pref))) {
         continue;
       }
+    }
+    // Watchers: exclusive backup, else public/utility — never steal Trading or Scanners.
+    if (role === 'watchers') {
+      const e = endpoints[i]!;
+      const isWatchPref = i === preferredWatchers;
+      const isUtilish =
+        i === preferredUtility ||
+        e.role === 'utility' ||
+        e.role === 'watchers' ||
+        isPublicRpcUrl(e.endpoint.url);
+      if (!isWatchPref && !isUtilish) continue;
     }
     // Utility soft-failover: skip QuickNode unless severe stress and QN is free
     if (
@@ -1398,6 +1428,14 @@ export function getRpcStats(): {
     failover: boolean;
     downForMs: number;
   };
+  watchers: {
+    label: string;
+    url: string;
+    healthy: boolean;
+    failover: boolean;
+    downForMs: number;
+    configured: boolean;
+  };
   shareLoad: boolean;
   shareSupports: typeof RPC_SHARE_LOAD_SUPPORTS;
   failoverDownMs: number;
@@ -1432,12 +1470,15 @@ export function getRpcStats(): {
   const pIdx = resolveIndexForRole('primary');
   const sIdx = resolveIndexForRole('secondary');
   const uIdx = resolveIndexForRole('utility');
+  const wIdx = resolveIndexForRole('watchers');
   const pPref = endpoints[preferredPrimary];
   const sPref = endpoints[preferredSecondary];
   const uPref = endpoints[preferredUtility];
+  const wPref = endpoints[preferredWatchers];
   const pActive = endpoints[pIdx];
   const sActive = endpoints[sIdx];
   const uActive = endpoints[uIdx];
+  const wActive = endpoints[wIdx];
   const anyHealthy = endpoints.some(
     (e) => e.healthy && !isEndpointRateLimited(e)
   );
@@ -1533,7 +1574,7 @@ export function getRpcStats(): {
     }
   };
 
-  return {
+  const stats = {
     active: getActiveEndpointLabel('primary'),
     activeUrl: maskUrl(getRpcUrl('primary')),
     primary: {
@@ -1557,6 +1598,15 @@ export function getRpcStats(): {
       failover: uIdx !== preferredUtility,
       downForMs: downForMs(uPref),
     },
+    watchers: {
+      label: wActive?.endpoint.label || 'watchers',
+      url: maskUrl(wActive?.endpoint.url || ''),
+      healthy: Boolean(wPref?.healthy),
+      failover: wIdx !== preferredWatchers,
+      downForMs: downForMs(wPref),
+      configured: preferredWatchers !== preferredUtility ||
+        Boolean(endpoints[preferredWatchers]?.endpoint.label === 'alchemy-backup'),
+    },
     shareLoad,
     shareSupports: RPC_SHARE_LOAD_SUPPORTS,
     failoverDownMs: failoverDownMs(),
@@ -1577,6 +1627,13 @@ export function getRpcStats(): {
         preferredUtility !== preferredSecondary
       )
         lane = 'utility';
+      else if (
+        i === preferredWatchers &&
+        preferredWatchers !== preferredPrimary &&
+        preferredWatchers !== preferredSecondary &&
+        preferredWatchers !== preferredUtility
+      )
+        lane = 'watchers';
       return {
         url: maskUrl(s.endpoint.url),
         label: s.endpoint.label,
@@ -1590,7 +1647,7 @@ export function getRpcStats(): {
         lastError: s.lastError,
         lastCheckedAt: s.lastCheckedAt,
         unhealthySince: s.unhealthySince,
-        isActive: i === pIdx || i === sIdx || i === uIdx,
+        isActive: i === pIdx || i === sIdx || i === uIdx || i === wIdx,
         lane,
       };
     }),
@@ -1604,6 +1661,18 @@ export function getRpcStats(): {
     loadControl,
     utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
   };
+  try {
+    const { setWatcherLaneLatency } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    setWatcherLaneLatency(
+      wActive?.latencyMs != null && Number.isFinite(wActive.latencyMs)
+        ? wActive.latencyMs
+        : '—'
+    );
+  } catch {
+    /* optional */
+  }
+  return stats;
 }
 
 let lastPriorityFeeLamports: number | null = null;
@@ -1897,10 +1966,12 @@ export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>
   push(preferredPrimary);
   push(preferredSecondary);
   push(preferredUtility);
+  push(preferredWatchers);
   push(preferredQuicknode);
   push(activePrimary);
   push(activeSecondary);
   push(activeUtility);
+  push(activeWatchers);
   for (const i of order) {
     await probeEndpoint(i, 8_000);
     await new Promise((r) => setTimeout(r, 200));
@@ -1938,6 +2009,11 @@ export function startRpcHealthMonitor(): void {
     const isPrimary = index === preferredPrimary;
     const isSecondary =
       index === preferredSecondary && preferredSecondary !== preferredPrimary;
+    const isWatchers =
+      index === preferredWatchers &&
+      preferredWatchers !== preferredUtility &&
+      preferredWatchers !== preferredPrimary &&
+      preferredWatchers !== preferredSecondary;
     // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
     // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
     if (isUtil || index === activeUtility) {
@@ -1968,6 +2044,8 @@ export function startRpcHealthMonitor(): void {
     if (isPrimary) return cycle % 3 === 0;
     // Alchemy (scanners): every 2nd cycle (~90s)
     if (isSecondary) return cycle % 2 === 0;
+    // Watchers exclusive backup: same cadence as Scanners; skip extra probes when unset (shares Utility).
+    if (isWatchers) return cycle % 2 === 0;
     // QuickNode: rare when failing; otherwise every 4th (~180s) — avoid retry storms
     if (
       index === preferredQuicknode ||
@@ -1994,6 +2072,7 @@ export function startRpcHealthMonitor(): void {
       }
       push(preferredPrimary);
       push(preferredSecondary);
+      if (preferredWatchers !== preferredUtility) push(preferredWatchers);
       push(preferredQuicknode);
     } else {
       for (let i = 0; i < endpoints.length; i++) push(i);

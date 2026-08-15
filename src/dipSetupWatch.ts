@@ -259,8 +259,27 @@ const dipFunnel = {
   quality_out_of_band_mc: 0,
 };
 
+let lastDipAdmitReject = '';
+export function getLastDipAdmitReject(): string {
+  return lastDipAdmitReject;
+}
+
 function noteDipFunnel(key: keyof typeof dipFunnel, n = 1): void {
   dipFunnel[key] = (dipFunnel[key] || 0) + n;
+  if (
+    key === 'mc' ||
+    key === 'vol' ||
+    key === 'liq' ||
+    key === 'no_setup' ||
+    key === 'max_drop' ||
+    key === 'at_cap' ||
+    key === 'unwatch_cd' ||
+    key === 'mutual_exclude' ||
+    key === 'mx_scalper' ||
+    key === 'mx_trend'
+  ) {
+    lastDipAdmitReject = String(key);
+  }
 }
 
 function noteQualityBandFunnel(
@@ -788,17 +807,41 @@ function buildTargetDipEntries(w: {
 }
 
 function isDipProfileEnabled(): boolean {
-  if (!isSmartBotProfilesEnabled()) return false;
-  if (!isStrategyEnabledGlobal('ta_market_scanner')) return false;
+  if (!isSmartBotProfilesEnabled()) {
+    lastDipAdmitReject = 'profile_off';
+    return false;
+  }
+  if (!isStrategyEnabledGlobal('ta_market_scanner')) {
+    lastDipAdmitReject = 'profile_off';
+    return false;
+  }
   const { config } = require('./config') as typeof import('./config');
-  if (config.tradeProfiles?.enabled === false) return false;
+  if (config.tradeProfiles?.enabled === false) {
+    lastDipAdmitReject = 'profile_off';
+    return false;
+  }
   // Minors need Dip; medium/majors may run on Steady or HWR alone
   if (
     config.tradeProfiles?.profiles?.dip_buyer === false &&
     config.tradeProfiles?.profiles?.steady_compounder === false &&
     config.tradeProfiles?.profiles?.high_win_rate === false
   ) {
+    lastDipAdmitReject = 'profile_off';
     return false;
+  }
+  try {
+    const { isProfileWatchEnabled } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (
+      !isProfileWatchEnabled('dip_buyer') &&
+      !isProfileWatchEnabled('steady_compounder') &&
+      !isProfileWatchEnabled('high_win_rate')
+    ) {
+      lastDipAdmitReject = 'watch_off';
+      return false;
+    }
+  } catch {
+    /* optional */
   }
   return true;
 }
@@ -937,11 +980,11 @@ function buildQualityParkEvalInput(w: DipWatchEntry) {
 function maybeArmQualityPark(
   w: DipWatchEntry,
   now: number,
-  dropOk: boolean
+  dropOk: boolean,
+  opts?: { keepDipIdentity?: boolean }
 ): boolean {
   if (w.status !== 'watching') return false;
   if (!isQualityBandSource(w.source)) return false;
-  if (isInDipBuyerMcBand(w.marketCapUsd)) return false;
   try {
     const { classifyQualityParkNameExclusion } =
       require('./qualityParkNameExclusions') as typeof import('./qualityParkNameExclusions');
@@ -990,7 +1033,9 @@ function maybeArmQualityPark(
     } else {
       w.softMovement = false;
     }
-    w.preferredProfileId = verdict.profileId;
+    w.preferredProfileId = opts?.keepDipIdentity
+      ? w.preferredProfileId || 'dip_buyer'
+      : verdict.profileId;
     w.armTag = verdict.armTag || undefined;
     w.status = 'armed';
     w.armedAt = now;
@@ -1480,6 +1525,7 @@ export function considerDipWatchSetup(input: {
   tokenAgeHours?: number;
   isPumpFun?: boolean;
 }): DipWatchEntry | null {
+  lastDipAdmitReject = '';
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
   if (isManualUnwatchCooldown(input.mint)) {
@@ -1816,6 +1862,20 @@ export function considerDipWatchSetup(input: {
   watches.set(input.mint, entry);
   stampDipWatchEligibility(entry, true);
   noteDipFunnel('offered');
+  try {
+    const { recordSetupWatchEvent } =
+      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+    recordSetupWatchEvent({
+      kind: 'watch_admitted',
+      family: 'dip',
+      mint: entry.mint,
+      symbol: entry.symbol,
+      profileId: entry.preferredProfileId || 'dip_buyer',
+      reason: entry.lastReason,
+    });
+  } catch {
+    /* optional */
+  }
   if (armed) {
     noteDipFunnel('armed');
     if (isQuality) noteQualityBandFunnel(entry.source, 'armed');
@@ -2002,6 +2062,13 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
     setupWatchFamily: 'dip',
+    playbookPassed: Array.isArray(w.playbookPassed) ? w.playbookPassed : undefined,
+    confluenceCountAtTrigger:
+      w.confluenceCount != null ? Number(w.confluenceCount) : undefined,
+    watchToArmMs:
+      w.armedAt != null && w.createdAt > 0 ? Math.max(0, w.armedAt - w.createdAt) : undefined,
+    armToTriggerMs:
+      w.armedAt != null ? Math.max(0, now - w.armedAt) : undefined,
     supportPriceSol: w.supportPriceSol ?? null,
     fib05PriceSol: w.fib05PriceSol ?? null,
     fib618PriceSol: w.fib618PriceSol ?? null,
@@ -2017,6 +2084,16 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
 export async function tickDipSetupWatches(opts?: {
   priceByMint?: Map<string, number>;
 }): Promise<number> {
+  if ((tickDipSetupWatches as { _lane?: boolean })._lane !== true) {
+    (tickDipSetupWatches as { _lane?: boolean })._lane = true;
+    try {
+      const { runSetupWatchLane } =
+        require('./rpcRouting') as typeof import('./rpcRouting');
+      return await runSetupWatchLane(() => tickDipSetupWatches(opts));
+    } finally {
+      (tickDipSetupWatches as { _lane?: boolean })._lane = false;
+    }
+  }
   if (!isRpcWorkloadEnabled('dip_setup_watch')) return 0;
   if (!isDipProfileEnabled()) return 0;
   pruneTerminal();
@@ -2046,7 +2123,7 @@ export async function tickDipSetupWatches(opts?: {
         } = require('./setupWatchEvents') as typeof import('./setupWatchEvents');
         noteSetupWatchExpiredUnused(w.mint);
         recordSetupWatchEvent({
-          kind: 'watch_expired',
+          kind: w.armedAt != null ? 'false_arm_expired' : 'watch_expired',
           family: 'dip',
           mint: w.mint,
           symbol: w.symbol,
@@ -2134,12 +2211,19 @@ export async function tickDipSetupWatches(opts?: {
       w.dropFromPeakPct >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
       w.dropFromPeakPct <= maxDrop;
 
-    // Arm: above Dip max via Steady/HWR playbook; Dip band / scanner near Fib/S.
+    // Arm: quality parks (incl. $20M–$500M overlap) via Steady/HWR playbook
+    // without stealing Dip identity; Dip band Fib/S still arms as dip_buyer.
     const aboveDipMax = isAboveDipBuyerMaxMc(w.marketCapUsd);
     const inDipBand = isInDipBuyerMcBand(w.marketCapUsd);
-    if (w.status === 'watching' && isQualityBandSource(w.source) && aboveDipMax) {
-      maybeArmQualityPark(w, now, dropOk);
-    } else if (w.status === 'watching' && nearTa) {
+    if (w.status === 'watching' && isQualityBandSource(w.source) && (aboveDipMax || inDipBand)) {
+      maybeArmQualityPark(w, now, dropOk, {
+        keepDipIdentity: inDipBand && !aboveDipMax,
+      });
+    }
+    if (inDipBand && nearTa) {
+      w.preferredProfileId = 'dip_buyer';
+    }
+    if (w.status === 'watching' && nearTa) {
       if (inDipBand || !isQualityBandSource(w.source)) {
         w.preferredProfileId = 'dip_buyer';
       }
@@ -2502,8 +2586,19 @@ export function offerDipWatchFromCandidate(c: {
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
   isPumpFun?: boolean;
-}): void {
-  if (!isRpcWorkloadEnabled('dip_setup_watch')) return;
+}): boolean {
+  try {
+    const { noteWatchInsertAttempt, noteWatchInsertReject } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteWatchInsertAttempt();
+    if (!isRpcWorkloadEnabled('dip_setup_watch')) {
+      lastDipAdmitReject = 'rpc_workload_off';
+      noteWatchInsertReject('rpc_workload_off');
+      return false;
+    }
+  } catch {
+    if (!isRpcWorkloadEnabled('dip_setup_watch')) return false;
+  }
   if (
     c.preferredProfileId &&
     c.preferredProfileId !== 'dip_buyer' &&
@@ -2550,6 +2645,16 @@ export function offerDipWatchFromCandidate(c: {
     tokenAgeHours: c.tokenAgeHours,
     isPumpFun: c.isPumpFun,
   });
+  if (!entry) {
+    try {
+      const { noteWatchInsertReject } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteWatchInsertReject(lastDipAdmitReject || 'admit_failed');
+    } catch {
+      /* optional */
+    }
+    return false;
+  }
   if (entry && (src === 'medium' || src === 'majors')) {
     if (c.priceChangeH1Pct != null) entry.priceChangeH1Pct = c.priceChangeH1Pct;
     if (c.priceChangeH6Pct != null) entry.priceChangeH6Pct = c.priceChangeH6Pct;
@@ -2558,4 +2663,5 @@ export function offerDipWatchFromCandidate(c: {
     }
     if (c.isPumpFun === true) entry.isPumpFun = true;
   }
+  return true;
 }

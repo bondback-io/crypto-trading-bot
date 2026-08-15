@@ -13,6 +13,7 @@ export type RpcFeature =
   | 'wallet_poll'
   | 'wallet_import'
   | 'activity'
+  | 'setup_watch'
   | 'default';
 
 /**
@@ -26,6 +27,7 @@ export function getRpcRoleFor(
   shareLoad: boolean
 ): RpcRole {
   if (!shareLoad) {
+    if (feature === 'setup_watch') return 'watchers';
     if (feature === 'zion' || feature === 'activity') return 'secondary';
     return 'primary';
   }
@@ -38,6 +40,8 @@ export function getRpcRoleFor(
     case 'alpha_scan':
     case 'zion':
       return 'secondary';
+    case 'setup_watch':
+      return 'watchers';
     case 'wallet_poll':
     case 'wallet_import':
     case 'activity':
@@ -52,5 +56,20 @@ export function getRpcRoleFor(
 export function shareLoadLaneTitle(role: RpcRole): string {
   if (role === 'primary') return 'Critical';
   if (role === 'secondary') return 'Scanners';
+  if (role === 'watchers') return 'Watchers';
   return 'Utility';
+}
+
+/** Run watch/arm/trigger RPC on the exclusive Watchers lane. */
+export async function runSetupWatchLane<T>(
+  fn: () => Promise<T> | T
+): Promise<T> {
+  const { runWithRpcRole } =
+    require('./connection') as typeof import('./connection');
+  const { config } = require('./config') as typeof import('./config');
+  return runWithRpcRole(
+    getRpcRoleFor('setup_watch', Boolean(config.rpc?.shareLoad)),
+    fn,
+    'setup_watch'
+  );
 }

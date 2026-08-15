@@ -170,11 +170,25 @@ function isScalperFamilyEnabled(): boolean {
   const { config } = require('./config') as typeof import('./config');
   if (config.tradeProfiles?.enabled === false) return false;
   const p = config.tradeProfiles?.profiles;
-  return (
+  const familyOn =
     p?.scalper !== false ||
     p?.momentum_burst !== false ||
-    p?.reversal_scalper !== false
-  );
+    p?.reversal_scalper !== false;
+  if (!familyOn) return false;
+  try {
+    const { isProfileWatchEnabled } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (
+      !isProfileWatchEnabled('scalper') &&
+      !isProfileWatchEnabled('momentum_burst') &&
+      !isProfileWatchEnabled('reversal_scalper')
+    ) {
+      return false;
+    }
+  } catch {
+    /* optional */
+  }
+  return true;
 }
 
 function mcAtPrice(
@@ -844,6 +858,16 @@ function buildHandoff(
 export async function tickScalperSetupWatches(opts?: {
   priceByMint?: Map<string, number>;
 }): Promise<number> {
+  if ((tickScalperSetupWatches as { _lane?: boolean })._lane !== true) {
+    (tickScalperSetupWatches as { _lane?: boolean })._lane = true;
+    try {
+      const { runSetupWatchLane } =
+        require('./rpcRouting') as typeof import('./rpcRouting');
+      return await runSetupWatchLane(() => tickScalperSetupWatches(opts));
+    } finally {
+      (tickScalperSetupWatches as { _lane?: boolean })._lane = false;
+    }
+  }
   if (!isScalperFamilyEnabled()) return 0;
   pruneTerminal();
   const now = Date.now();
@@ -1286,6 +1310,13 @@ export function offerScalperWatchFromCandidate(c: {
   preferredProfileId?: string;
   specialtyFeed?: string;
 }): boolean {
+  try {
+    const { noteWatchInsertAttempt } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteWatchInsertAttempt();
+  } catch {
+    /* optional */
+  }
   const row = considerScalperWatchSetup({
     mint: c.mint,
     symbol: c.symbol,
@@ -1311,5 +1342,14 @@ export function offerScalperWatchFromCandidate(c: {
     source: c.specialtyFeed || 'scanner',
     nearKeyFib: c.nearKeyFib,
   });
+  if (!row) {
+    try {
+      const { noteWatchInsertReject } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteWatchInsertReject('admit_failed');
+    } catch {
+      /* optional */
+    }
+  }
   return row != null;
 }

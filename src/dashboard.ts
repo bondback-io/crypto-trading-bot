@@ -8520,7 +8520,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip Buyer setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence 1. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence 2. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
@@ -8563,6 +8563,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Scalper</span>
               <span class="setup-watch-title">Scalper setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$800k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps under $150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
               <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+) in $150k–$800k. Else watch → arm near S → trigger on reclaim/hold. Microcaps &lt;$150k → Migration / Reversal. Mutual exclusion with Dip watch. Unwatch cools 15m.</p>
+              <p id="scalper-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
               <p id="setup-watch-diag-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Armed — · open rate —</p>
             </div>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
@@ -8618,7 +8619,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Migration Sniper</span>
               <span class="setup-watch-title">Graduation watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch ~80% · arm on quality · fire/enter from ~90% (no TA). Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if &lt;$8k for 5m). Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch ~80% · quality arm · reclaim/hold · min 1 TA confluence at trigger. Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if &lt;$8k for 5m). Unwatch cools 15m.</p>
+              <p id="grad-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
             </div>
             <span id="grad-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -10206,12 +10208,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
             <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
             <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
+            <div class="mb-1"><strong style="color:#a78bfa">Watchers → Alchemy backup</strong> — setup watch / arm / trigger (<code>ALCHEMY_API_KEY_BACKUP</code>)</div>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
             <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Watchers</strong> — Setup watch / arm / trigger. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>. Emergency public/utility if unset — never Trading or Scanners.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
             <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
@@ -14081,8 +14085,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               (dipF.no_levels ? '/noLvl×' + dipF.no_levels : '') +
               (dipDenyBits ? ' · deny ' + dipDenyBits : '')
             : '';
-          const dipFunnelEl = document.getElementById('dip-watch-funnel');
-          if (dipFunnelEl) {
+          if (false) {
             if (dipF) {
               dipFunnelEl.textContent =
                 'Funnel: off ' +
@@ -14396,8 +14399,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           { active: 0, entries: [] };
         const funnel =
           (data.byProfile && data.byProfile.funnels && data.byProfile.funnels[pid]) ||
-          null;
-        if (funnelEl && funnel) {
+          { sent_to_watch: 0, armed: 0, trigger_ready: 0, opened: 0, expired: 0, blocked: {} };
+        if (funnelEl) {
           const blocked = funnel.blocked || {};
           const topBlock = Object.keys(blocked)
             .sort(function (a, b) {
@@ -14445,9 +14448,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               htmlParts.push(watchRowHtml(kind, e, pid));
             });
           } else {
+            let emptyMsg = opts.empty || 'No active setups';
+            if (
+              pid === 'dip_buyer' &&
+              data.dipWatch &&
+              Number(data.dipWatch.active) > 0
+            ) {
+              emptyMsg =
+                'Family has ' +
+                data.dipWatch.active +
+                ' Dip-family row(s) not shown here (MC > $500M / eligibility).';
+            }
             htmlParts.push(
               '<div class="setup-watch-empty">' +
-                escHtml(opts.empty || 'No active setups') +
+                escHtml(emptyMsg) +
                 '</div>'
             );
           }
@@ -14499,19 +14513,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         kind: 'scalper',
         empty: 'No active Reversal setups',
       });
-      const trendFunnelEl = document.getElementById('trend-watch-funnel');
-      if (trendFunnelEl && data.byProfile && data.byProfile.funnels && data.byProfile.funnels.trend_rider) {
-        const f = data.byProfile.funnels.trend_rider;
-        trendFunnelEl.textContent =
-          'Funnel: watch ' +
-          (f.sent_to_watch || 0) +
-          ' → arm ' +
-          (f.armed || 0) +
-          ' → ready ' +
-          (f.trigger_ready || 0) +
-          ' → open ' +
-          (f.opened || 0);
-      }
+      fillProfileWatchPanel({
+        profileId: 'scalper',
+        listId: 'scalper-watch-list',
+        countId: 'scalper-watch-count',
+        funnelId: 'scalper-watch-funnel',
+        kind: 'scalper',
+        empty: 'No active Scalper setups',
+      });
+      fillProfileWatchPanel({
+        profileId: 'trend_rider',
+        listId: 'trend-watch-list',
+        countId: 'trend-watch-count',
+        funnelId: 'trend-watch-funnel',
+        kind: 'trend',
+        empty: 'No active Trend Rider setups',
+      });
+      fillProfileWatchPanel({
+        profileId: 'migration_sniper',
+        listId: 'grad-watch-list',
+        countId: 'grad-watch-count',
+        funnelId: 'grad-watch-funnel',
+        kind: 'grad',
+        empty: 'No active graduation watches',
+      });
     }
     window.renderSetupWatchLists = renderSetupWatchLists;
 
@@ -14973,6 +14998,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             return er[key] != null ? er[key] : off[key];
           };
           const baseEntryFields = [
+            selectField({
+              key: 'watchEnabled',
+              label: 'Watch Enabled',
+              title:
+                'ON = scanner/copy names can enter this profile watch list. OFF = no list insert. If Arming is ON while Watch is OFF, opens use the legacy spot path (no deadlock).',
+              match: true,
+              kind: 'boolean',
+              value:
+                matchValue('watchEnabled') === true
+                  ? 'true'
+                  : matchValue('watchEnabled') === false
+                    ? 'false'
+                    : '',
+              options: [
+                { value: '', label: 'Default' },
+                { value: 'true', label: 'ON' },
+                { value: 'false', label: 'OFF' },
+              ],
+            }),
             selectField({
               key: 'armingEnabled',
               label: 'Arming Enabled',
@@ -21754,6 +21798,58 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       };
     }
 
+    function fmtTaPlaybookBadge(p) {
+      if (!p) return '';
+      const tools = Array.isArray(p.playbookPassed) && p.playbookPassed.length
+        ? p.playbookPassed
+        : Array.isArray(p.taToolsPassedAtEntry)
+          ? p.taToolsPassedAtEntry
+          : [];
+      const n =
+        p.confluenceCountAtTrigger != null && Number.isFinite(Number(p.confluenceCountAtTrigger))
+          ? Number(p.confluenceCountAtTrigger)
+          : tools.length;
+      const labels = {
+        supportResistance: 'Support reclaim',
+        fib: 'Fib 0.618',
+        ha: 'Heikin-Ashi',
+        rsi: 'RSI',
+        ema: 'EMA',
+        vwap: 'VWAP',
+        volumeExpansion: 'Volume expansion',
+        patterns: 'Patterns',
+        whale: 'Whale',
+        macd: 'MACD',
+        macdHistSlope: 'MACD hist',
+        zigzag: 'ZigZag',
+        rsiDivergence: 'RSI divergence',
+        volumeDivergence: 'Volume divergence',
+        bollinger: 'Bollinger',
+      };
+      const named = tools.map(function (id) {
+        return labels[id] || String(id);
+      });
+      if (!named.length && !(p.armedWatch || p.dipWatchTriggered || p.scalperWatchTriggered)) {
+        return (
+          '<span class="pos-status-badge" style="background:#1e293b;color:#94a3b8;border:1px solid #334155" title="Legacy / non-arm open — no TA playbook stamp">TA —</span>'
+        );
+      }
+      if (!named.length) {
+        return (
+          '<span class="pos-status-badge" style="background:#1e3a5f;color:#93c5fd;border:1px solid #38bdf880" title="Armed open — TA tools not stamped">TA ' +
+          (n || 0) +
+          '</span>'
+        );
+      }
+      return (
+        '<span class="pos-status-badge" style="background:#1e3a5f;color:#93c5fd;border:1px solid #38bdf880" title="' +
+        escHtml(named.join(', ')) +
+        '">TA ' +
+        (n || named.length) +
+        '</span>'
+      );
+    }
+
     function fmtOpenStatusBadges(p, prog) {
       const badges = [];
       if (prog && prog.hasPartial) {
@@ -21790,6 +21886,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '<span class="pos-status-badge" style="background:#7c2d12;color:#fdba74;border:1px solid #ea580c80" title="Turbo Mode — Jito-prefer / elevated priority fees at entry">Turbo</span>'
         );
       }
+      const taBadge = fmtTaPlaybookBadge(p);
+      if (taBadge) badges.push(taBadge);
       return badges.length
         ? '<div class="pos-status-row">' + badges.join('') + '</div>'
         : '';
@@ -22315,8 +22413,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const lmSrc = opts.profileSource || p;
       const lmMark = fmtLearningModeMark(lmSrc);
       const tokenInner = summary
-        ? summary + lmMark
-        : (fmtToken(p.symbol, p.name, p.mint) + lmMark + meta);
+        ? summary + lmMark + fmtTaPlaybookBadge(p)
+        : (fmtToken(p.symbol, p.name, p.mint) + lmMark + fmtTaPlaybookBadge(p) + meta);
       const tokenCell = summary
         ? ('<div class="trade-group-head">' + toggle + tokenInner + '</div>')
         : (toggle + tokenInner);
@@ -23730,6 +23828,46 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (techBits.length) {
         lines.push({ label: 'Technicals', text: techBits.join(' · ') });
+      }
+
+      {
+        const tools = Array.isArray(p.playbookPassed) && p.playbookPassed.length
+          ? p.playbookPassed
+          : Array.isArray(p.taToolsPassedAtEntry)
+            ? p.taToolsPassedAtEntry
+            : [];
+        const n =
+          p.confluenceCountAtTrigger != null && Number.isFinite(Number(p.confluenceCountAtTrigger))
+            ? Number(p.confluenceCountAtTrigger)
+            : tools.length;
+        if (tools.length || n) {
+          const labels = {
+            supportResistance: 'Support reclaim',
+            fib: 'Fib 0.618',
+            ha: 'Heikin-Ashi',
+            rsi: 'RSI',
+            ema: 'EMA',
+            vwap: 'VWAP',
+            volumeExpansion: 'Volume expansion',
+            patterns: 'Patterns',
+            whale: 'Whale',
+            macd: 'MACD',
+            macdHistSlope: 'MACD hist',
+            zigzag: 'ZigZag',
+            rsiDivergence: 'RSI divergence',
+            volumeDivergence: 'Volume divergence',
+            bollinger: 'Bollinger',
+          };
+          const named = tools.map(function (id) {
+            return labels[id] || String(id);
+          });
+          lines.push({
+            label: 'TA playbook',
+            text:
+              (n ? n + ' confluence' + (n === 1 ? '' : 's') : 'stamped') +
+              (named.length ? ' — ' + named.join(', ') : ''),
+          });
+        }
       }
 
       if (p.scannerPlaybook || p.scannerConfluence != null) {
@@ -26830,6 +26968,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const p = rpc.primary || {};
         const s = rpc.secondary || {};
         const u = rpc.utility || {};
+        const w = rpc.watchers || {};
         laneSt.textContent =
           'Critical: ' + (p.label || '—') +
           (p.failover ? ' (FAILOVER)' : '') +
@@ -26837,6 +26976,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ' · Scanners: ' + (s.label || '—') +
           (s.failover ? ' (FAILOVER)' : '') +
           (s.healthy === false ? ' · preferred DOWN' : '') +
+          ' · Watchers: ' + (w.label || '—') +
+          (w.configured === false ? ' (utility fallback)' : '') +
+          (w.failover ? ' (FAILOVER)' : '') +
+          (w.healthy === false ? ' · preferred DOWN' : '') +
           ' · Utility: ' + (u.label || '—') +
           (u.failover ? ' (FAILOVER)' : '') +
           (u.healthy === false ? ' · preferred DOWN' : '') +
@@ -26854,7 +26997,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ' skip' + (row.skipped != null ? row.skipped : 0);
         };
         gateEl.textContent = g.lanes
-          ? ('Lane gate: ' + fmt('primary') + ' · ' + fmt('secondary') + ' · ' + fmt('utility') +
+          ? ('Lane gate: ' + fmt('primary') + ' · ' + fmt('secondary') + ' · ' + fmt('watchers') + ' · ' + fmt('utility') +
             (g.stressed ? ' · STRESSED (background queued/skipped)' : ''))
           : 'Lane gate: —';
         gateEl.style.color = g.stressed ? '#fbbf24' : '#94a3b8';
@@ -35867,7 +36010,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         if (st) {
           st.textContent = data.shareLoad
-            ? 'Share RPC load ON — critical→Helius, scanners→Alchemy, utility→public'
+            ? 'Share RPC load ON — critical→Helius, scanners→Alchemy, watchers→backup, utility→public'
             : 'Share RPC load OFF — legacy primary/secondary routing';
         }
         const shareAlloc = document.getElementById('rpc-share-alloc');
