@@ -114,6 +114,8 @@ export interface ScannerCandidate {
   fib05PriceSol?: number | null;
   fib618PriceSol?: number | null;
   chartPatternIds?: string[];
+  /** Volume tape state when known (Trend watch DNA). */
+  volumeDecayState?: string | null;
   indicatorSummary?: string;
   candleSource?: 'real' | 'synthetic';
   playbook?: string;
@@ -1511,6 +1513,26 @@ export function clearScannerMintCooldown(mint: string): void {
   cooldowns.delete(mint);
 }
 
+/** Synthetic setup-watch / specialty handoffs skip Require-TA playbook/confluence. */
+export function isScannerSetupWatchHandoff(
+  preferId: string | null | undefined,
+  reasonBits: string | null | undefined
+): boolean {
+  const id = String(preferId || '');
+  const bits = String(reasonBits || '');
+  return (
+    id === 'migration_sniper' ||
+    id === 'dip_buyer' ||
+    id === 'scalper' ||
+    id === 'momentum_burst' ||
+    id === 'reversal_scalper' ||
+    id === 'trend_rider' ||
+    /grad-watch:triggered|dip-watch:triggered|scalper-watch:triggered|trend-watch:triggered/i.test(
+      bits
+    )
+  );
+}
+
 /**
  * Hand a pre-built candidate to the monitor handler (global or specialty feed).
  * Respects cooldown unless `bypassCooldown` (pre-vetted armed setup-watch triggers).
@@ -1744,6 +1766,7 @@ export async function runScannerPollOnce(): Promise<number> {
           kolCount: c.kolCount,
           specialtyFeed: c.specialtyFeed,
           chartPatternIds: c.chartPatternIds,
+          volumeDecayState: c.volumeDecayState,
         });
       }
       const trendTriggered = await tickTrendSetupWatches();

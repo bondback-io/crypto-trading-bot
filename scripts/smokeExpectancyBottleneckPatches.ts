@@ -18,6 +18,13 @@ import {
 import { evaluateMigrationEventExit } from '../src/shortTermStrategies';
 import { resolveExitPolicy } from '../src/profileTradeIntelligence';
 import { shouldThrottleMigrationAdmit } from '../src/profileAttention';
+import { isScannerSetupWatchHandoff } from '../src/marketScanner';
+import {
+  considerTrendWatchSetup,
+  getTrendFunnelCounters,
+  scoreTrendDna,
+  trendWatchMinDnaHits,
+} from '../src/trendSetupWatch';
 
 let failed = 0;
 function check(label: string, ok: boolean, detail?: string): void {
@@ -354,6 +361,111 @@ check(
   'swingLaneFillMinMarketCapUsd Dip ≥ $350k',
   swingLaneFillMinMarketCapUsd('dip_buyer') >= 350_000,
   String(swingLaneFillMinMarketCapUsd('dip_buyer'))
+);
+
+check(
+  'isScannerSetupWatchHandoff trend_rider',
+  isScannerSetupWatchHandoff('trend_rider', '') === true
+);
+check(
+  'isScannerSetupWatchHandoff trend-watch:triggered',
+  isScannerSetupWatchHandoff('scalper', 'trend-watch:triggered foo') === true
+);
+check(
+  'isScannerSetupWatchHandoff random scanner false',
+  isScannerSetupWatchHandoff('steady_compounder', 'scanner pick') === false
+);
+
+check(
+  'trend DNA minHits 3 for Jupiter specialty',
+  trendWatchMinDnaHits({ specialtyFeed: 'jupiter', marketCapUsd: 4_200_000 }) === 3
+);
+check(
+  'trend DNA minHits 4 without specialty under $5M',
+  trendWatchMinDnaHits({ marketCapUsd: 4_200_000 }) === 4
+);
+check(
+  'trend DNA minHits 3 at ≥$5M',
+  trendWatchMinDnaHits({ marketCapUsd: 6_000_000 }) === 3
+);
+
+const dna42jup = scoreTrendDna({
+  marketCapUsd: 4_200_000,
+  volumeH1Usd: 20_000,
+  holderCount: 200,
+  specialtyFeed: 'jupiter',
+});
+check(
+  'trend DNA $4.2M Jupiter H1+holders = 3 hits',
+  dna42jup.hits === 3,
+  String(dna42jup.hits) + ' ' + dna42jup.reasons.join(',')
+);
+
+const blockedBefore = getTrendFunnelCounters().blocked;
+const skip20k = considerTrendWatchSetup({
+  mint: 'TrendSmoke20kMint111111111111111111111',
+  symbol: 'T20K',
+  marketCapUsd: 20_000,
+  volumeH1Usd: 20_000,
+  holderCount: 200,
+  specialtyFeed: 'jupiter',
+});
+const skipNull = considerTrendWatchSetup({
+  mint: 'TrendSmokeNullMint11111111111111111111',
+  symbol: 'TNULL',
+  marketCapUsd: undefined,
+  volumeH1Usd: 20_000,
+  holderCount: 200,
+  specialtyFeed: 'jupiter',
+});
+check(
+  'Trend watch $20k / unknown MC silent skip (blocked unchanged)',
+  skip20k == null &&
+    skipNull == null &&
+    getTrendFunnelCounters().blocked === blockedBefore
+);
+
+const admit6m = considerTrendWatchSetup({
+  mint: 'TrendSmoke6mMint1111111111111111111111',
+  symbol: 'T6M',
+  marketCapUsd: 6_000_000,
+  volumeH1Usd: 20_000,
+  holderCount: 200,
+  specialtyFeed: 'jupiter',
+});
+check(
+  'Trend watch $6M Jupiter H1+holders admits',
+  admit6m != null &&
+    (admit6m.status === 'watching' || admit6m.status === 'armed'),
+  admit6m?.lastReason
+);
+
+const admit42 = considerTrendWatchSetup({
+  mint: 'TrendSmoke42mMint111111111111111111111',
+  symbol: 'T42J',
+  marketCapUsd: 4_200_000,
+  volumeH1Usd: 20_000,
+  holderCount: 200,
+  specialtyFeed: 'jupiter',
+});
+check(
+  'Trend watch $4.2M Jupiter 3 DNA hits admits',
+  admit42 != null,
+  admit42?.lastReason
+);
+
+const blockedMid = getTrendFunnelCounters().blocked;
+const deny42 = considerTrendWatchSetup({
+  mint: 'TrendSmoke42nMint111111111111111111111',
+  symbol: 'T42N',
+  marketCapUsd: 4_200_000,
+  volumeH1Usd: 20_000,
+  holderCount: 200,
+  priceChangeH1Pct: 10,
+});
+check(
+  'Trend watch $4.2M without specialty 3 DNA hits blocked',
+  deny42 == null && getTrendFunnelCounters().blocked === blockedMid + 1
 );
 
 if (failed) {

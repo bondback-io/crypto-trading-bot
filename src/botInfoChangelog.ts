@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.367',
+    title: 'Unstick Trend Rider watch and buys',
+    sections: ['tradecraft', 'microbots', 'scanners'],
+    items: [
+      'Trend setup-watch and Jupiter/KOL specialty handoffs skip Require-TA playbook (same as Dip/MS) so they are not dropped as no playbook.',
+      'Trend-band Jupiter/KOL specialty names enter Trend watch. Scanner micros under $1M no longer inflate blocked; specialty DNA admits at 3 hits.',
+    ],
+  },
+  {
     version: '1.2.366',
     title: 'Block Dip ghost fills without MC',
     sections: ['tradecraft', 'microbots', 'scanners'],

@@ -156,6 +156,34 @@ function candidateInProfileMcBand(
   return true;
 }
 
+function offerTrendWatchFromSpecialty(
+  c: ScannerCandidate,
+  feed: 'jupiter' | 'kolscan'
+): void {
+  try {
+    const { offerTrendWatchFromCandidate } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    offerTrendWatchFromCandidate({
+      mint: c.mint,
+      symbol: c.symbol,
+      name: c.name,
+      marketCapUsd: c.marketCapUsd,
+      volumeH1Usd: c.volumeH1Usd,
+      volumeM5Usd: c.volumeM5Usd,
+      volumeH6Usd: c.volumeH6Usd,
+      holderCount: c.holderCount,
+      priceChangeH1Pct: c.priceChangeH1Pct,
+      priceChangePct: c.priceChangePct,
+      lastPriceSol: c.lastPriceSol ?? null,
+      kolCount: c.kolCount,
+      specialtyFeed: feed,
+      chartPatternIds: c.chartPatternIds,
+    });
+  } catch {
+    /* optional */
+  }
+}
+
 /**
  * One specialty pass for all enabled profiles with kolscanFeedEnabled.
  * Returns number of candidates handed to the scanner handler.
@@ -305,6 +333,9 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           [`specialty:${p.id}`, `jupiter:${category}/${interval}`]
         );
         c.jupiterCategory = category;
+        if (p.id === 'trend_rider') {
+          offerTrendWatchFromSpecialty(c, 'jupiter');
+        }
         if (handOffScannerCandidate(c)) {
           handed += 1;
           profileHanded += 1;
@@ -312,10 +343,15 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           if (!softPrefer) handedMints.add(ev.mint);
           // Dip minor supply from Jupiter specialty (non-quality MC only).
           // Medium/majors parks stay on majorsUniverse Steady pass.
+          // Trend-band names go to Trend watch above — not Dip minors.
           try {
             const mcN = Number(c.marketCapUsd) || 0;
             const isQualityMc = mcN >= MEDIUM_MIN_MC_USD;
-            if (!isQualityMc && (p.id === 'dip_buyer' || !softPrefer)) {
+            if (
+              p.id !== 'trend_rider' &&
+              !isQualityMc &&
+              (p.id === 'dip_buyer' || !softPrefer)
+            ) {
               const { offerDipWatchFromCandidate } =
                 require('./dipSetupWatch') as typeof import('./dipSetupWatch');
               offerDipWatchFromCandidate({
@@ -383,28 +419,33 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
         ],
         kc.kolCount
       );
+      if (p.id === 'trend_rider') {
+        offerTrendWatchFromSpecialty(c, 'kolscan');
+      }
       if (handOffScannerCandidate(c)) {
         handed += 1;
         profileHanded += 1;
         profileHandedMints.add(kc.mint);
         if (!softPrefer) handedMints.add(kc.mint);
-        try {
-          const { offerDipWatchFromCandidate } =
-            require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-          offerDipWatchFromCandidate({
-            mint: c.mint,
-            symbol: c.symbol,
-            name: c.name,
-            marketCapUsd: c.marketCapUsd,
-            volumeH1Usd: c.volumeH1Usd,
-            holderCount: c.holderCount,
-            priceChangeH1Pct: c.priceChangeH1Pct,
-            kolCount: c.kolCount,
-            specialtyFeed: 'kolscan',
-            preferredProfileId: 'dip_buyer',
-          });
-        } catch {
-          /* optional */
+        if (p.id !== 'trend_rider') {
+          try {
+            const { offerDipWatchFromCandidate } =
+              require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+            offerDipWatchFromCandidate({
+              mint: c.mint,
+              symbol: c.symbol,
+              name: c.name,
+              marketCapUsd: c.marketCapUsd,
+              volumeH1Usd: c.volumeH1Usd,
+              holderCount: c.holderCount,
+              priceChangeH1Pct: c.priceChangeH1Pct,
+              kolCount: c.kolCount,
+              specialtyFeed: 'kolscan',
+              preferredProfileId: 'dip_buyer',
+            });
+          } catch {
+            /* optional */
+          }
         }
       }
     }

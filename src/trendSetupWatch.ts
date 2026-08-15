@@ -250,6 +250,18 @@ export function scoreTrendDna(input: {
   return { hits, reasons, softPreferMc };
 }
 
+/** Specialty Jupiter/KOL (and ≥$5M) need 3 DNA hits; scanner micros still need 4. */
+export function trendWatchMinDnaHits(input: {
+  marketCapUsd?: number;
+  specialtyFeed?: string;
+}): number {
+  const feed = String(input.specialtyFeed || '').toLowerCase();
+  if (feed === 'jupiter' || feed === 'kolscan') return 3;
+  const mc = Number(input.marketCapUsd ?? 0);
+  if (mc >= TREND_WATCH_SOFT_MC_USD) return 3;
+  return 4;
+}
+
 function mutualExclusionBlocked(mint: string): string | null {
   try {
     const { isMintOnActiveScalperWatch } =
@@ -326,12 +338,10 @@ export function considerTrendWatchSetup(input: {
 
   const mc = Number(input.marketCapUsd ?? 0);
   if (!(mc >= TREND_WATCH_MIN_MC_USD)) {
-    noteTrendFunnel('blocked');
     return null;
   }
-  // Hard exclude Mode B microband
+  // Hard exclude Mode B microband (dead after $1M; keep silent)
   if (mc > 0 && mc <= 800_000) {
-    noteTrendFunnel('blocked');
     return null;
   }
 
@@ -342,8 +352,7 @@ export function considerTrendWatchSetup(input: {
   }
 
   const dna = scoreTrendDna(input);
-  // Need several DNA hits (softPreferMc alone is not enough)
-  const minHits = dna.softPreferMc ? 3 : 4;
+  const minHits = trendWatchMinDnaHits(input);
   if (dna.hits < minHits) {
     noteTrendFunnel('blocked');
     return null;
@@ -779,6 +788,21 @@ export function offerTrendWatchFromCandidate(c: {
   chartPatternIds?: string[];
   volumeDecayState?: string | null;
 }): boolean {
+  let decay = c.volumeDecayState ?? null;
+  if (!decay && (c.volumeM5Usd != null || c.volumeH1Usd != null)) {
+    try {
+      const { evaluateVolumeIntelligence } =
+        require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+      decay =
+        evaluateVolumeIntelligence({
+          volumeM5Usd: c.volumeM5Usd,
+          volumeH1Usd: c.volumeH1Usd,
+          profileId: 'trend_rider',
+        }).decayState ?? null;
+    } catch {
+      /* optional */
+    }
+  }
   const row = considerTrendWatchSetup({
     mint: c.mint,
     symbol: c.symbol,
@@ -799,7 +823,7 @@ export function offerTrendWatchFromCandidate(c: {
     specialtyFeed: c.specialtyFeed,
     source: c.specialtyFeed || 'scanner',
     chartPatternIds: c.chartPatternIds,
-    volumeDecayState: c.volumeDecayState,
+    volumeDecayState: decay,
   });
   return row != null;
 }

@@ -77,6 +77,7 @@ import {
   markScannerCooldown,
   isMarketScannerSignal,
   isMarketScannerAddress,
+  isScannerSetupWatchHandoff,
   setScannerBuyQueueDepthFn,
   resetMarketScannerSession,
   MARKET_SCANNER_WALLET,
@@ -3694,15 +3695,7 @@ async function handleScannerCandidate(
     const reasonBits = Array.isArray(candidate.reasons)
       ? candidate.reasons.join(' ')
       : '';
-    const setupWatchHandoff =
-      preferId === 'migration_sniper' ||
-      preferId === 'dip_buyer' ||
-      preferId === 'scalper' ||
-      preferId === 'momentum_burst' ||
-      preferId === 'reversal_scalper' ||
-      reasonBits.includes('grad-watch:triggered') ||
-      reasonBits.includes('dip-watch:triggered') ||
-      reasonBits.includes('scalper-watch:triggered');
+    const setupWatchHandoff = isScannerSetupWatchHandoff(preferId, reasonBits);
     // Mode B: mid-band Scalper immediate only when already at multi-TF support confluence.
     const nearMultiTfSupport =
       (candidate as { nearMultiTfSupport?: boolean }).nearMultiTfSupport ===
