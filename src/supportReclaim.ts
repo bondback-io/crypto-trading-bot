@@ -273,8 +273,8 @@ export const PROFILE_ENTRY_STYLE_DNA: Record<string, EntryStyleDna> = {
   migration_sniper: {
     primary: 'migration_hold_reclaim',
     allowed: ['level_momentum_expansion', 'scalp_reclaim_burst'],
-    forbidden: ['late_chase', 'support_dip_reclaim'],
-    hardLateChase: true,
+    forbidden: ['support_dip_reclaim'],
+    hardLateChase: false,
   },
   dip_buyer: {
     primary: 'support_dip_reclaim',
@@ -296,9 +296,13 @@ export const PROFILE_ENTRY_STYLE_DNA: Record<string, EntryStyleDna> = {
   },
   steady_compounder: {
     primary: 'quality_structure_reclaim',
-    allowed: ['trend_pullback_continuation', 'support_dip_reclaim'],
-    forbidden: ['late_chase', 'scalp_reclaim_burst'],
-    hardLateChase: true,
+    allowed: [
+      'trend_pullback_continuation',
+      'support_dip_reclaim',
+      'late_chase',
+    ],
+    forbidden: ['scalp_reclaim_burst'],
+    hardLateChase: false,
   },
   smart_money_mirror: {
     primary: 'smart_money_confirm',

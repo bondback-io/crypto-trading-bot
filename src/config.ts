@@ -5665,6 +5665,16 @@ export function initWallets(): void {
       err instanceof Error ? err.message : err
     );
   }
+  try {
+    const { migrateSteadyFlowUnblockV362 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migrateSteadyFlowUnblockV362();
+  } catch (err) {
+    console.warn(
+      '[config] steadyFlowUnblock_v362 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
   // Auto-pause OFF ⇒ Daily Loss Off — survive backup restores / bake that
   // reintroduced filters.dailyLossLimitSol=0.5 and silently blocked all buys.
   try {

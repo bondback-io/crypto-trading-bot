@@ -801,8 +801,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
         'level_momentum_expansion',
         'scalp_reclaim_burst',
       ],
-      forbiddenEntryStyles: ['late_chase', 'support_dip_reclaim'],
-      hardLateChase: true,
+      forbiddenEntryStyles: ['support_dip_reclaim'],
+      hardLateChase: false,
     },
     exitRules: {
       takeProfitPctMin: 10,
@@ -985,8 +985,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
         'scalp_reclaim_burst',
         'migration_hold_reclaim',
       ],
-      forbiddenEntryStyles: ['support_dip_reclaim', 'late_chase'],
-      hardLateChase: true,
+      forbiddenEntryStyles: ['support_dip_reclaim'],
+      hardLateChase: false,
     },
     exitRules: {
       forceScalp: true,
@@ -1025,11 +1025,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Steady / Compounding',
     rulesSummary: [
       'TP 5–10% · SL 4–7%',
-      'MC ≥$450k (prefer $1M) · holders ≥80 · decent volume',
+      'MC ≥$50k (prefer $1M) · holders ≥80 · decent volume',
       'Small pullbacks 2–20% or volume uptick — deep knives leave to Dip',
       'Patient but disciplined · no hard timer',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
-      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k (prefer ≥$20M medium) · top10 ≤35% (soft ≤68% if age≥90d + liq≥$10k; ≤75% age-unknown fallback)',
+      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$50k (prefer ≥$20M medium) · top10 ≤35% (soft ≤68% if age≥90d + liq≥$10k; ≤90% age-unknown fallback)',
       'Quality holder gate: known high insider still hard-skip; unknown insider soft-pass; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
       'Specialty Jupiter/KOL/majors/medium can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
       'Medium $20–200M + Majors ≥$200M dips soft-prefer Steady quality reclaim; Dip Buyer remains for true reclaim DNA on minors',
@@ -1050,7 +1050,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletCount: 1,
       requireCluster: false,
       minTokenAgeHours: 3,
-      minMarketCapUsd: 450_000,
+      minMarketCapUsd: 50_000,
       preferMarketCapUsd: 50_000_000,
       minHolders: 80,
       maxTop10HoldPct: 35,
@@ -1065,9 +1065,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       allowedEntryStyles: [
         'trend_pullback_continuation',
         'support_dip_reclaim',
+        'late_chase',
       ],
-      forbiddenEntryStyles: ['late_chase', 'scalp_reclaim_burst'],
-      hardLateChase: true,
+      forbiddenEntryStyles: ['scalp_reclaim_burst'],
+      hardLateChase: false,
     },
     exitRules: {
       forceScalp: false,
@@ -2705,7 +2706,7 @@ const TOP10_SOFT_CEILING_PCT: Partial<Record<string, number>> = {
 };
 /** Age-unknown Steady/HWR soft ceiling (practical mid/high books; liq/safety still apply). */
 const TOP10_SOFT_CEILING_AGE_UNKNOWN_PCT: Partial<Record<string, number>> = {
-  steady_compounder: 75,
+  steady_compounder: 90,
   high_win_rate: 75,
 };
 /**
@@ -2713,13 +2714,15 @@ const TOP10_SOFT_CEILING_AGE_UNKNOWN_PCT: Partial<Record<string, number>> = {
  * Known MC below this never evaluates HWR/Steady (armed watches included).
  */
 export const QUALITY_LANE_NOT_APPLICABLE_MC_USD = 5_000_000;
+/** Steady may fight mid-caps (MS-out-of-band $75k–$5M). HWR stays $5M NAP. */
+export const STEADY_LANE_NAP_MC_USD = 50_000;
 const TOP10_SOFT_MIN_LIQ_USD: Partial<Record<string, number>> = {
   steady_compounder: 10_000,
   high_win_rate: 20_000,
 };
 /** Stricter liq floors when age unknown (Steady/HWR fallback path). */
 const TOP10_SOFT_FALLBACK_MIN_LIQ_USD: Partial<Record<string, number>> = {
-  steady_compounder: 15_000,
+  steady_compounder: 5_000,
   high_win_rate: 30_000,
 };
 const TOP10_SOFT_MIN_AGE_HOURS = 90 * 24;
@@ -2742,9 +2745,17 @@ export function isQualityBandSpecialtyFeed(
   source?: string | null
 ): boolean {
   const f = String(specialtyFeed || '').toLowerCase();
-  if (f === 'majors' || f === 'medium') return true;
+  if (
+    f === 'majors' ||
+    f === 'medium' ||
+    f === 'jupiter' ||
+    f === 'kolscan' ||
+    f === 'migration_sniper'
+  ) {
+    return true;
+  }
   const s = String(source || '').toLowerCase();
-  return s === 'majors' || s === 'medium';
+  return s === 'majors' || s === 'medium' || s === 'jupiter' || s === 'kolscan';
 }
 
 let qualityExceptionSkippedNonBand = 0;
@@ -2786,7 +2797,11 @@ export function isQualityLaneMicrocap(
   }
   if (marketCapUsd == null || !Number.isFinite(marketCapUsd)) return false;
   const mc = Number(marketCapUsd);
-  return mc > 0 && mc < QUALITY_LANE_NOT_APPLICABLE_MC_USD;
+  const floor =
+    String(profileId || '') === 'steady_compounder'
+      ? STEADY_LANE_NAP_MC_USD
+      : QUALITY_LANE_NOT_APPLICABLE_MC_USD;
+  return mc > 0 && mc < floor;
 }
 
 /** Operator-facing NAP reason (not generic anti-rug MC too low). */
@@ -2798,7 +2813,11 @@ export function qualityLaneMicrocapNapReason(
     ? getTradeProfileDefinition(profileId as TradeProfileId)
     : null;
   const name = def?.name || String(profileId || 'quality');
-  return `${name} quality MC NAP — MC $${Math.round(marketCapUsd)} < $${QUALITY_LANE_NOT_APPLICABLE_MC_USD} (medium/major band only)`;
+  const floor =
+    String(profileId || '') === 'steady_compounder'
+      ? STEADY_LANE_NAP_MC_USD
+      : QUALITY_LANE_NOT_APPLICABLE_MC_USD;
+  return `${name} quality MC NAP — MC $${Math.round(marketCapUsd)} < $${floor}`;
 }
 
 export type QualityTop10SoftAllowGateResult = {
@@ -3057,6 +3076,39 @@ export function resolveTop10SoftAllow(
       detail: ageUnknown
         ? `${def.name} top10 soft-allow deny: age_unknown_fallback ceiling — ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`
         : `${def.name} top10 soft-allow deny: ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`,
+    };
+  }
+
+  // Steady age-unknown: grant under ceiling. Unknown vol/liq/holders/MC
+  // must not hard-deny (enrich often lags); known dust still fails.
+  if (def.id === 'steady_compounder' && ageUnknown) {
+    const volH1Early =
+      ctx.volumeH1Usd != null && Number.isFinite(ctx.volumeH1Usd)
+        ? Number(ctx.volumeH1Usd)
+        : null;
+    const liqEarly =
+      ctx.liquidityUsd != null && Number.isFinite(ctx.liquidityUsd)
+        ? Number(ctx.liquidityUsd)
+        : null;
+    if (volH1Early != null && volH1Early < 500) {
+      return {
+        allow: false,
+        rejectKey: 'volume',
+        detail: `${def.name} top10 soft-allow deny: age_unknown_fallback volume — volumeH1 $${Math.round(volH1Early)} < $500`,
+      };
+    }
+    if (liqEarly != null && liqEarly < 1_000) {
+      return {
+        allow: false,
+        rejectKey: 'liquidity',
+        detail: `${def.name} top10 soft-allow deny: age_unknown_fallback liquidity — liquidity $${Math.round(liqEarly)} < $1000`,
+      };
+    }
+    return {
+      allow: true,
+      grantTag: 'top10_soft_allow_age_unknown_fallback',
+      sizeMult: TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT,
+      detail: `${def.name} top10_soft_allow_age_unknown_fallback ${top10.toFixed(1)}% (hard max ${maxTop10}% · soft ≤${softCeil}% · Steady age-unknown grant)`,
     };
   }
 
@@ -3559,17 +3611,20 @@ export function evaluateTradeProfileLanes(
       });
       continue;
     }
-    // HWR/Steady: silent not_applicable on microcaps (stop MC-too-low cascade spam).
-    // Always apply — armed watches must not evaluate junk under $5M either.
+    // HWR stays $5M NAP. Steady fights mid-caps from $50k (MS-out-of-band).
     if (def.id === 'high_win_rate' || def.id === 'steady_compounder') {
       const mcNap =
         ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
           ? Number(ctx.marketCapUsd)
           : null;
+      const napFloor =
+        def.id === 'steady_compounder'
+          ? STEADY_LANE_NAP_MC_USD
+          : QUALITY_LANE_NOT_APPLICABLE_MC_USD;
       if (
         mcNap != null &&
         mcNap > 0 &&
-        mcNap < QUALITY_LANE_NOT_APPLICABLE_MC_USD
+        mcNap < napFloor
       ) {
         results.push({
           profileId: def.id,
@@ -3822,11 +3877,10 @@ function scoreProfile(
       const hard =
         m.hardLateChase === true ||
         def.id === 'high_win_rate' ||
-        def.id === 'steady_compounder' ||
         def.id === 'trend_rider' ||
         def.id === 'smart_money_mirror' ||
         (def.id === 'dip_buyer' && !armedDipLane);
-      if ((hard || style === 'late_chase') && !(armedDipLane && late)) {
+      if (hard && !(armedDipLane && late)) {
         return {
           score: 0,
           reason: late ? 'late_chase forbidden' : `forbidden style ${style}`,
@@ -7495,6 +7549,79 @@ export function migrateMigSniperPerfTightenV257(): boolean {
   }
   console.log(
     `[trade-profiles] Applied ${MIGRATION_ID} — MS conviction/WQ/fire/vol/size tightened`
+  );
+  return true;
+}
+
+/**
+ * 1.2.362: unblock Steady mid-cap flow + late-chase hard skips left in
+ * persisted overrides (MS $75k max, Steady $450k min, hardLateChase).
+ */
+export function migrateSteadyFlowUnblockV362(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'steadyFlowUnblock_v362';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const state = ensureState();
+  if (!state.overrides) state.overrides = {};
+
+  const stripLateChase = (
+    styles: string[] | undefined
+  ): string[] | undefined => {
+    if (!Array.isArray(styles)) return styles;
+    return styles.filter((s) => String(s) !== 'late_chase');
+  };
+
+  const prevSc = state.overrides.steady_compounder || {};
+  const scMatch = { ...(prevSc.match || {}) };
+  const scMin = Number(scMatch.minMarketCapUsd);
+  if (!Number.isFinite(scMin) || scMin <= 0 || scMin > 50_000) {
+    scMatch.minMarketCapUsd = 50_000;
+  }
+  scMatch.hardLateChase = false;
+  scMatch.forbiddenEntryStyles = stripLateChase(
+    scMatch.forbiddenEntryStyles as string[] | undefined
+  );
+  const scAllowed = Array.isArray(scMatch.allowedEntryStyles)
+    ? [...(scMatch.allowedEntryStyles as string[])]
+    : [];
+  if (!scAllowed.includes('late_chase')) scAllowed.push('late_chase');
+  scMatch.allowedEntryStyles = scAllowed;
+  state.overrides.steady_compounder = { ...prevSc, match: scMatch };
+
+  const prevMs = state.overrides.migration_sniper || {};
+  const msMatch = { ...(prevMs.match || {}) };
+  const msMax = Number(msMatch.maxMarketCapUsd);
+  if (!Number.isFinite(msMax) || msMax <= 0 || msMax < 175_000) {
+    msMatch.maxMarketCapUsd = 175_000;
+  }
+  msMatch.hardLateChase = false;
+  msMatch.forbiddenEntryStyles = stripLateChase(
+    msMatch.forbiddenEntryStyles as string[] | undefined
+  );
+  state.overrides.migration_sniper = { ...prevMs, match: msMatch };
+
+  const prevMb = state.overrides.momentum_burst || {};
+  const mbMatch = { ...(prevMb.match || {}) };
+  mbMatch.hardLateChase = false;
+  mbMatch.forbiddenEntryStyles = stripLateChase(
+    mbMatch.forbiddenEntryStyles as string[] | undefined
+  );
+  state.overrides.momentum_burst = { ...prevMb, match: mbMatch };
+
+  writeTradeProfilesState(state);
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    `[trade-profiles] Applied ${MIGRATION_ID} — Steady min MC $50k · late-chase soft · MS max ≥$175k`
   );
   return true;
 }

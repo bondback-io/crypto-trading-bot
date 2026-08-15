@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.362',
+    title: 'Unblock Steady + late-chase signal flow',
+    sections: ['tradecraft', 'microbots', 'scanners'],
+    items: [
+      'Steady Compounder now fights mid-caps from $50k (was silent NAP under $5M / floor $450k), so $75k–$200k names no longer die as “no lane covers MC”.',
+      'Age-unknown top10 soft-allow grants Steady under a 90% ceiling (unknown vol/liq/holders no longer hard-deny).',
+      'Late-chase is a soft penalty for Steady / Migration Sniper / Momentum Burst — Entry Skill no longer hard-skips all profiles; share ceiling 35%. Anti-rug and honeypot gates stay on.',
+    ],
+  },
+  {
     version: '1.2.361',
     title: 'Fix dashboard JS parse stall',
     sections: ['overview'],

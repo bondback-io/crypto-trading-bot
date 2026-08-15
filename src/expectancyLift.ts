@@ -61,8 +61,8 @@ export type FamilyGovernorState =
   | 'restricted';
 
 const MIN_SAMPLES = 18;
-/** Hard portfolio late-chase share ceiling (5% of last-50). */
-const LATE_CHASE_MAX_SHARE = 0.05;
+/** Portfolio late-chase share ceiling (last-50). Raised so mid-book flow is not frozen. */
+const LATE_CHASE_MAX_SHARE = 0.35;
 
 /** Exposed for smokes / diagnostics — do not use to loosen the ceiling. */
 export function getLateChaseMaxShare(): number {
@@ -237,19 +237,11 @@ function discShareCapRelief(): number {
 /** Match supportReclaim.DEFAULT_LATE_CHASE_EXT_PCT (avoid circular import). */
 const LATE_CHASE_EXT_PCT_LIM = 8;
 const QUALITY_LATE_CHASE_PROFILES = new Set([
-  'dip_buyer',
-  'trend_rider',
-  'steady_compounder',
-  'smart_money_mirror',
-  'scalper',
-  'migration_sniper',
-  'momentum_burst',
-  'reversal_scalper',
   'high_win_rate',
 ]);
 
 /** When true, Entry Skill hard-skips late_chase for any profile id. */
-const LATE_CHASE_HARD_SKIP_ALL_PROFILES = true;
+const LATE_CHASE_HARD_SKIP_ALL_PROFILES = false;
 
 const FILE = () => dataFile('expectancy-lift.json');
 
@@ -2060,7 +2052,7 @@ export function getRecentMixShares(
   };
 }
 
-/** Hard late_chase share ceiling (5% last-50). Require ≥20 closes. */
+/** Late_chase share ceiling (35% last-50). Require ≥20 closes. */
 export function shouldLimitLateChaseShare(input: {
   lateChase?: boolean;
   family?: string | null;
@@ -2088,9 +2080,8 @@ export function shouldLimitLateChaseShare(input: {
     profileId: input.profileId,
   });
 
-  // Portfolio 5% ceiling always binds for late candidates — even under armed
-  // reclaim relief (measured late was bypassing LC_SHARE_CAP via relief-first).
-  if (isLate) {
+  // Share ceiling binds for late candidates except Steady (mid-cap flow).
+  if (isLate && String(input.profileId || '') !== 'steady_compounder') {
     const mix = getRecentMixShares(50, { lateChaseCeilingWindow: true });
     if (mix.total >= 20 && mix.lateChaseShare > LATE_CHASE_MAX_SHARE) {
       return {

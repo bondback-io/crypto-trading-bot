@@ -43,7 +43,7 @@ check(
   armedCont.reason
 );
 
-check('late-chase share cap is 5%', getLateChaseMaxShare() === 0.05);
+check('late-chase share cap is 35%', getLateChaseMaxShare() === 0.35);
 
 check(
   'armed reclaim relief denied when lateChase even if ext in [-2,+4]',
