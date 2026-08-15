@@ -13,7 +13,11 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
+import {
+  shouldSkipScannerTick,
+  shouldDegradeScannerEnrich,
+  adaptiveScannerIntervalMs,
+} from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
@@ -1070,13 +1074,16 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
  * Enriches only a crude top-N (early-cap) with bounded parallelism.
  */
 export async function selectScannerCandidates(
-  events: LaunchEvent[]
+  events: LaunchEvent[],
+  opts?: { crudeOnly?: boolean }
 ): Promise<Array<ScannerCandidate & { launch: LaunchEvent }>> {
   const cfg = scannerCfg();
   const now = Date.now();
   const maxOut = Math.max(1, cfg.maxCandidatesPerPoll);
   // Enrich budget: keep Secondary (Alchemy ~6 RPS) breathing room
-  const enrichBudget = Math.min(16, Math.max(maxOut * 2, maxOut));
+  const enrichBudget = opts?.crudeOnly
+    ? Math.min(8, Math.max(maxOut, 4))
+    : Math.min(16, Math.max(maxOut * 2, maxOut));
 
   // Prefetch regime (cached)
   try {
@@ -1113,6 +1120,69 @@ export async function selectScannerCandidates(
     .slice(0, enrichBudget);
 
   type Enriched = ScannerCandidate & { launch: LaunchEvent };
+
+  if (opts?.crudeOnly) {
+    const crude: Enriched[] = [];
+    for (const event of prefiltered) {
+      const ranked = rankLaunchForScanner(event);
+      if (ranked.veto?.startsWith('bearish:')) continue;
+      crude.push({
+        id: `scan-${event.mint.slice(0, 8)}-${now}`,
+        mint: event.mint,
+        symbol: event.symbol,
+        name: event.name,
+        timestamp: now,
+        status: 'seen',
+        rankScore: ranked.score,
+        reasons: [...ranked.reasons, 'crude-only'],
+        source: event.source,
+        migrated: Boolean(event.migrated),
+        liquidityUsd: event.liquidityUsd,
+        marketCapUsd: event.marketCapUsd,
+        volumeUsd: event.volumeUsd,
+        volumeH1Usd: event.volumeH1Usd,
+        volumeM5Usd: event.volumeM5Usd,
+        volumeH6Usd: event.volumeH6Usd,
+        priceChangeH1Pct: event.priceChangeH1Pct,
+        priceChangePct: event.priceChangePct,
+        holderCount: event.holderCount,
+        isPumpFun: event.isPumpFun,
+        organicScore: event.organicScore,
+        jupiterCategory:
+          event.source === 'jupiter' ? cfg.jupiterCategory : undefined,
+        nearMigration: false,
+        curveProgressPct: null,
+        nearKeyFib: ranked.nearKeyFib,
+        nearSupport: ranked.nearSupport,
+        nearResistance: ranked.nearResistance,
+        srConfluenceScore: ranked.srConfluenceScore,
+        supportTfHits: ranked.supportTfHits,
+        resistanceTfHits: ranked.resistanceTfHits,
+        nearMultiTfSupport: ranked.nearMultiTfSupport,
+        nearMultiTfResistance: ranked.nearMultiTfResistance,
+        supportPriceSol: ranked.supportPriceSol ?? null,
+        resistancePriceSol: ranked.resistancePriceSol ?? null,
+        lastPriceSol: ranked.lastPriceSol ?? null,
+        fib05PriceSol: ranked.fib05PriceSol ?? null,
+        fib618PriceSol: ranked.fib618PriceSol ?? null,
+        chartPatternIds: ranked.chartPatternIds,
+        indicatorSummary: ranked.indicatorSummary,
+        candleSource: ranked.candleSource,
+        playbook: ranked.playbook,
+        confluence: ranked.confluence,
+        mtfAligned: ranked.mtfAligned,
+        veto: ranked.veto,
+        launch: event,
+      });
+    }
+    crude.sort((a, b) => b.rankScore - a.rankScore);
+    const out = crude.slice(0, maxOut);
+    console.log(
+      `[marketScanner] crude-only ${prefiltered.length}/${events.length} → ${out.length}`
+    );
+    return out;
+  }
+
   const enriched = await mapPool(prefiltered, 2, async (raw) => {
     // Re-check queue mid-enrich so wallet path stays priority under real backlog
     if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return null;
@@ -1499,8 +1569,6 @@ export async function runScannerPollOnce(): Promise<number> {
   if (defer.defer) {
     logBackgroundDeferred('Market Scanner', defer.reason || 'Critical busy');
     lastSkipReason = `delayed — ${defer.reason}`;
-    // Still stamp lastPollAt so the UI does not look "frozen" while deferred.
-    lastPollAt = Date.now();
     lastPollMs = 0;
     return 0;
   }
@@ -1508,7 +1576,6 @@ export async function runScannerPollOnce(): Promise<number> {
   if (adapt.skip) {
     logBackgroundDeferred('Market Scanner', adapt.reason || 'adaptive');
     lastSkipReason = `delayed — ${adapt.reason}`;
-    lastPollAt = Date.now();
     lastPollMs = 0;
     return 0;
   }
@@ -1528,7 +1595,8 @@ export async function runScannerPollOnce(): Promise<number> {
   try {
     lastError = null;
     const universe = await collectScannerUniverse();
-    const picked = await selectScannerCandidates(universe);
+    const crudeOnly = shouldDegradeScannerEnrich();
+    const picked = await selectScannerCandidates(universe, { crudeOnly });
     let handed = 0;
     // Non-blocking hand-off: fire handlers without serial await so the
     // scanner poll lock releases quickly; mint locks still serialize buys.

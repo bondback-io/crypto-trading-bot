@@ -26211,20 +26211,34 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       window._refreshInFlight = true;
       const positionsGenAtStart = window._openPositionsGen || 0;
       try {
-      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
-        fetchJSON('/api/status'),
-        fetchJSON('/api/positions'),
-        fetchJSON('/api/logs?limit=50'),
-        fetchJSON('/api/activity'),
-        fetchJSON('/api/config'),
-        fetchJSON('/wallets'),
-        fetchJSON('/api/migrations'),
-        fetchJSON('/paper-status'),
+      const lastSnap = window._lastRefreshSnap || {};
+      const [statusRes, positions, logs, activity, cfgRes, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
+        fetchJSON('/api/status').then(function (d) { return { ok: true, d: d }; }).catch(function (e) { return { ok: false, e: e, d: lastSnap.status || null }; }),
+        fetchJSON('/api/positions').catch(function () { return lastSnap.positions || { open: [], closed: [] }; }),
+        fetchJSON('/api/logs?limit=50').catch(function () { return lastSnap.logs || []; }),
+        fetchJSON('/api/activity').catch(function () { return lastSnap.activity || []; }),
+        fetchJSON('/api/config').catch(function () { return lastSnap.cfg || null; }),
+        fetchJSON('/wallets').catch(function () { return lastSnap.walletsRaw || []; }),
+        fetchJSON('/api/migrations').catch(function () { return lastSnap.migrations || {}; }),
+        fetchJSON('/paper-status').catch(function () { return lastSnap.paper || {}; }),
         fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
         fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
         fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
         fetchJSON('/api/zion').catch(() => null),
       ]);
+      const statusFailed = !statusRes || statusRes.ok === false;
+      const status = (statusRes && statusRes.d) || lastSnap.status || {};
+      const cfg = cfgRes || lastSnap.cfg || _lastConfig || {};
+      window._lastRefreshSnap = {
+        status: status,
+        positions: positions,
+        logs: logs,
+        activity: activity,
+        cfg: cfg,
+        walletsRaw: walletsRaw,
+        migrations: migrations,
+        paper: paper
+      };
       try { if (zionData) handleZionRefresh(zionData); } catch (_) {}
       try { refreshDashboardNotifications(); } catch (_) {}
       try {
@@ -26235,8 +26249,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           applyDipBuyerRecoveryHints(status.dipBuyerRecovery);
         }
       } catch (_) {}
-      _lastConfig = cfg;
-      applyStrategyConfigValues(cfg);
+      if (cfg && typeof cfg === 'object') {
+        _lastConfig = cfg;
+        try { applyStrategyConfigValues(cfg); } catch (_) {}
+      }
       try {
         if (typeof updateLearningModeUi === 'function') {
           updateLearningModeUi(cfg.learningMode || null);
@@ -27057,7 +27073,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       }
 
-      if (!window._cfgLoaded) {
+      if (!window._cfgLoaded && cfg && cfg.trade) {
         window._cfgLoaded = true;
         Object.entries(cfg.trade).forEach(([k,v]) => {
           const el = document.getElementById(k);
@@ -27850,6 +27866,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         (microBotsPanel && !microBotsPanel.classList.contains('hidden'))
       ) {
         loadLaneDecisions().catch(function () {});
+      }
+      if (statusFailed) {
+        const warnEl = document.getElementById('stat-detail');
+        if (warnEl) {
+          warnEl.textContent = 'Refresh warning: status timed out — showing last good';
+        }
       }
       } catch (err) {
         console.error('[dashboard] refresh failed:', err);

@@ -187,6 +187,11 @@ export function adaptiveScannerIntervalMs(baseMs: number): number {
   return Math.round(Math.max(baseMs, baseMs * f));
 }
 
+/** True when scanners should skip heavy enrich/curve and use crude rank. */
+export function shouldDegradeScannerEnrich(): boolean {
+  return getRpcLoadControlSnapshot().scannerSlowFactor >= 3;
+}
+
 /** True if this scanner tick should skip under adaptive load. */
 export function shouldSkipScannerTick(subsystem: string): {
   skip: boolean;
@@ -194,18 +199,14 @@ export function shouldSkipScannerTick(subsystem: string): {
 } {
   const snap = getRpcLoadControlSnapshot();
   const id = String(subsystem || '').toLowerCase();
-  // Market / Alpha / Zion must keep ticking when Utility is only on weak public.
+  // Market / Alpha / Zion must keep ticking — degrade enrich at ×3, never drop.
   // Slow Favourites via utilitySlowFactor — do not zero signal intake.
   const intakeCritical =
     id.includes('market') || id.includes('zion') || id.includes('alpha');
-  const utilityOnly =
-    snap.reasons.length > 0 &&
-    snap.reasons.every((r) => /utility|favourites|weak public/i.test(r));
-  if (intakeCritical && (utilityOnly || !snap.shedBackground)) {
+  if (intakeCritical) {
     return { skip: false, reason: null };
   }
-  // ×3+ means Secondary is already shedding — always skip the tick so we
-  // do not keep acquiring (and re-noting skips) every 22s.
+  // Non-intake scanners: ×3+ still skips.
   if (snap.scannerSlowFactor >= 3) {
     return {
       skip: true,

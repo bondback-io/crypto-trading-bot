@@ -370,13 +370,15 @@ export async function fetchTokenMetrics(
   const job = (async () => {
     const base = emptyMetrics(mint);
     try {
-      const [dex, onchain] = await Promise.all([
+      const stale = getCachedTokenMetrics(mint, { allowStale: true });
+      const cachedJup = lookupCachedJupiterToken(mint);
+      const [dex, jup] = await Promise.all([
         fetchDexMetrics(mint),
-        fetchOnChainHolderMetrics(mint),
+        cachedJup
+          ? Promise.resolve(cachedJup)
+          : fetchJupiterTokenByMint(mint).catch(() => null),
       ]);
 
-      // Dex 429 / empty: keep last good metrics rather than wiping MC/liq
-      const stale = getCachedTokenMetrics(mint, { allowStale: true });
       const dexEmpty =
         dex.marketCapUsd == null &&
         dex.liquidityUsd == null &&
@@ -384,12 +386,10 @@ export async function fetchTokenMetrics(
 
       const merged: TokenMetrics = {
         ...base,
-        ...onchain,
-        symbol: dex.symbol ?? onchain.symbol ?? stale?.symbol,
-        name: dex.name ?? onchain.name ?? stale?.name,
+        symbol: dex.symbol ?? stale?.symbol,
+        name: dex.name ?? stale?.name,
         liquidityUsd:
           dex.liquidityUsd ??
-          onchain.liquidityUsd ??
           (dexEmpty ? stale?.liquidityUsd ?? null : null),
         marketCapUsd:
           dex.marketCapUsd ??
@@ -397,8 +397,7 @@ export async function fetchTokenMetrics(
             ? stale.marketCapUsd
             : null),
         volume24hUsd:
-          dex.volume24hUsd ??
-          (dexEmpty ? stale?.volume24hUsd ?? null : null),
+          dex.volume24hUsd ?? (dexEmpty ? stale?.volume24hUsd ?? null : null),
         volumeH1Usd:
           dex.volumeH1Usd ?? (dexEmpty ? stale?.volumeH1Usd ?? null : null),
         volumeM5Usd:
@@ -415,16 +414,16 @@ export async function fetchTokenMetrics(
         priceChange24hPct:
           dex.priceChange24hPct ??
           (dexEmpty ? stale?.priceChange24hPct ?? null : null),
-        priceUsd:
-          dex.priceUsd ?? (dexEmpty ? stale?.priceUsd ?? null : null),
+        priceUsd: dex.priceUsd ?? (dexEmpty ? stale?.priceUsd ?? null : null),
         pairCreatedAtMs:
           dex.pairCreatedAtMs ??
           (dexEmpty ? stale?.pairCreatedAtMs ?? null : null),
+        top10HoldPct: stale?.top10HoldPct ?? null,
+        holderCountEstimate: stale?.holderCountEstimate ?? null,
         source: dexEmpty && stale ? 'cache' : 'dexscreener+rpc',
         fetchedAt: Date.now(),
       };
 
-      // Optional GMGN enrichment
       if (config.gmgn?.apiKey || process.env.GMGN_API_KEY) {
         const gmgn = await fetchGmgnTokenHints(mint).catch(() => null);
         if (gmgn) {
@@ -437,18 +436,45 @@ export async function fetchTokenMetrics(
         }
       }
 
-      // Prefer Jupiter Terminal Top-10 / mcap / holderCount when Dex/RPC omit
       try {
-        const jup =
-          lookupCachedJupiterToken(mint) ??
-          (await fetchJupiterTokenByMint(mint));
         applyJupiterEnrichment(merged, jup);
       } catch {
-        /* keep on-chain top10 */
+        /* keep Dex / stale top10 */
       }
 
-      // Dev recent activity
-      if (merged.devWallet) {
+      const haveTop10 =
+        merged.top10HoldPct != null && Number.isFinite(merged.top10HoldPct);
+      if (!haveTop10) {
+        try {
+          const onchain = await fetchOnChainHolderMetrics(mint);
+          if (onchain.top10HoldPct != null) {
+            merged.top10HoldPct = onchain.top10HoldPct;
+          }
+          if (onchain.topHolderPct != null) merged.topHolderPct = onchain.topHolderPct;
+          if (onchain.topHolders?.length) merged.topHolders = onchain.topHolders;
+          if (onchain.mintAuthority) merged.mintAuthority = onchain.mintAuthority;
+          if (onchain.freezeAuthority) {
+            merged.freezeAuthority = onchain.freezeAuthority;
+          }
+          if (onchain.devWallet) merged.devWallet = onchain.devWallet;
+          if (onchain.devHoldPct != null) merged.devHoldPct = onchain.devHoldPct;
+          if (onchain.supplyUi != null) merged.supplyUi = onchain.supplyUi;
+          if (
+            onchain.holderCountEstimate != null &&
+            merged.holderCountEstimate == null
+          ) {
+            merged.holderCountEstimate = onchain.holderCountEstimate;
+          }
+          if (onchain.source) merged.source = 'dexscreener+rpc';
+        } catch {
+          /* fail-open — Dex/Jupiter/stale already on merged */
+        }
+      }
+
+      if (
+        merged.devWallet &&
+        (options.force === true || isSecondaryLaneIdle())
+      ) {
         const activity = await fetchDevActivity(merged.devWallet);
         merged.devRecentTxCount = activity.count;
         merged.devActiveRecently = activity.active;
@@ -456,16 +482,27 @@ export async function fetchTokenMetrics(
 
       cache.set(mint, {
         data: merged,
-        // Longer TTL when we had to reuse stale Dex fields (429 soft path)
         expiresAt:
           Date.now() +
           (dexEmpty && stale ? Math.max(cacheTtlMs(), 180_000) : cacheTtlMs()),
       });
       return merged;
     } catch (err) {
+      const stale = getCachedTokenMetrics(mint, { allowStale: true });
+      if (stale && !stale.error) {
+        const reused: TokenMetrics = {
+          ...stale,
+          source: 'cache',
+          fetchedAt: Date.now(),
+        };
+        cache.set(mint, {
+          data: reused,
+          expiresAt: Date.now() + cacheTtlMs(),
+        });
+        return reused;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const fail = emptyMetrics(mint, message);
-      // Short negative cache
       cache.set(mint, {
         data: fail,
         expiresAt: Date.now() + Math.min(cacheTtlMs(), 30_000),
@@ -670,13 +707,32 @@ async function resolvePoolVaultExcludeOwners(
   return exclude;
 }
 
+function isSecondaryLaneIdle(): boolean {
+  try {
+    const { getRpcGateSnapshot } =
+      require('./rpcGate') as typeof import('./rpcGate');
+    const s = getRpcGateSnapshot().lanes.secondary;
+    return s.inFlight === 0 && s.queued === 0;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchOnChainHolderMetrics(
   mint: string
 ): Promise<Partial<TokenMetrics>> {
   // Share load: keep heavy holder RPCs off Utility (Favourites soft-watch).
   // Public utility was timing out ~15s on getTokenLargestAccounts.
-  const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
-  return runWithRpcRole(role, () => fetchOnChainHolderMetricsInner(mint), 'token_metrics');
+  try {
+    const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+    return await runWithRpcRole(
+      role,
+      () => fetchOnChainHolderMetricsInner(mint),
+      'token_metrics'
+    );
+  } catch {
+    return {};
+  }
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -761,43 +817,51 @@ async function fetchOnChainHolderMetricsInner(
         ? supplyUi
         : accounts.reduce((s, a) => s + Number(a.uiAmount ?? 0), 0) || 1;
 
-    // Resolve owners for top accounts (token account → owner). Pull up to 30 so
-    // we still have 10 retail wallets after excluding curve / LP vaults.
-    for (const acc of accounts.slice(0, 30)) {
-      const amountUi = Number(acc.uiAmount ?? 0);
-      const tokenAccount = acc.address.toBase58();
-      let owner = tokenAccount;
-      try {
-        const tok = await withTimeout(
-          conn.getParsedAccountInfo(acc.address),
-          2_500,
-          'getParsedAccountInfo(token)'
-        );
-        const info = (
-          tok.value?.data as {
-            parsed?: { info?: { owner?: string } };
-          } | undefined
-        )?.parsed?.info;
-        if (info?.owner) owner = info.owner;
-      } catch {
-        // keep token account address
+    // Cap + parallel owner resolve — 30 sequential 2.5s lookups starved Alchemy.
+    const OWNER_CAP = 8;
+    const OWNER_CONCURRENCY = 3;
+    const OWNER_TIMEOUT_MS = 1_200;
+    const slice = accounts.slice(0, OWNER_CAP);
+    for (let i = 0; i < slice.length && topHolders.length < 10; i += OWNER_CONCURRENCY) {
+      const batch = slice.slice(i, i + OWNER_CONCURRENCY);
+      const resolved = await Promise.all(
+        batch.map(async (acc) => {
+          const amountUi = Number(acc.uiAmount ?? 0);
+          const tokenAccount = acc.address.toBase58();
+          let owner = tokenAccount;
+          try {
+            const tok = await withTimeout(
+              conn.getParsedAccountInfo(acc.address),
+              OWNER_TIMEOUT_MS,
+              'getParsedAccountInfo(token)'
+            );
+            const info = (
+              tok.value?.data as {
+                parsed?: { info?: { owner?: string } };
+              } | undefined
+            )?.parsed?.info;
+            if (info?.owner) owner = info.owner;
+          } catch {
+            /* keep token account address */
+          }
+          return { amountUi, tokenAccount, owner };
+        })
+      );
+      for (const row of resolved) {
+        if (excludeOwners.has(row.owner) || excludeOwners.has(row.tokenAccount)) {
+          continue;
+        }
+        const pct = (row.amountUi / supply) * 100;
+        const isAuthority =
+          row.owner === mintAuthority || row.owner === freezeAuthority;
+        topHolders.push({
+          address: row.owner,
+          amountUi: row.amountUi,
+          pctOfSupply: Math.round(pct * 100) / 100,
+          isAuthority,
+        });
+        if (topHolders.length >= 10) break;
       }
-
-      // Skip bonding-curve / AMM pool vaults (Jupiter Top-10 H. excludes these)
-      if (excludeOwners.has(owner) || excludeOwners.has(tokenAccount)) {
-        continue;
-      }
-
-      const pct = (amountUi / supply) * 100;
-      const isAuthority =
-        owner === mintAuthority || owner === freezeAuthority;
-      topHolders.push({
-        address: owner,
-        amountUi,
-        pctOfSupply: Math.round(pct * 100) / 100,
-        isAuthority,
-      });
-      if (topHolders.length >= 10) break;
     }
 
     if (topHolders.length > 0) {

@@ -365,22 +365,13 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
 } {
   const snap = getRpcGateSnapshot();
   const p = snap.lanes.primary;
-  const s = snap.lanes.secondary;
   const u = snap.lanes.utility;
 
   try {
     const { getRpcLoadControlSnapshot } =
       require('./rpcLoadControl') as typeof import('./rpcLoadControl');
     const load = getRpcLoadControlSnapshot();
-    // Only full shed (Critical latency / queue) hard-skips. Mild scanner×2
-  // uses probabilistic skip in shouldSkipScannerTick — do not hard-block here
-  // or scanners go quiet for the whole process once factor hits 3 once.
-  if (load.shedBackground && kind === 'scanner' && load.scannerSlowFactor >= 3) {
-    return {
-      defer: true,
-      reason: load.reasons[0] || 'adaptive shed for Critical',
-    };
-  }
+    // ×3 shed degrades enrich (crude rank) — do not hard-drop Market/Alpha/Zion.
   if (kind === 'utility' && load.utilitySlowFactor >= 3) {
     return {
       defer: true,
@@ -397,17 +388,7 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
       reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
     };
   }
-  // Use in-flight/queue only — lane.skipped is a lifetime counter and must NOT
-  // permanently disable scanners after a few early gate skips.
-  if (
-    kind === 'scanner' &&
-    (s.queued >= 2 || s.inFlight >= s.maxConcurrent)
-  ) {
-    return {
-      defer: true,
-      reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
-    };
-  }
+  // Secondary saturation degrades enrich (crude rank) — do not drop collect.
   if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
     return {
       defer: true,

@@ -688,7 +688,7 @@ async function enrichSignalForLaneFight(signal: TradeSignal): Promise<void> {
     try {
       const raw =
         getCachedTokenMetrics(signal.mint) ??
-        (await fetchTokenMetrics(signal.mint));
+        (await fetchTokenMetrics(signal.mint, { light: true }));
       const summary = summarizeTokenMetrics(raw);
       if (!signal.metrics) {
         signal.metrics = summary;

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.363',
+    title: 'Unstick dashboard refresh and signal intake',
+    sections: ['overview', 'scanners', 'tradecraft'],
+    items: [
+      'Token metrics use Dex/Jupiter first and skip the on-chain holder walk when top-10 is already known; remaining walks are capped and fail-open on 503.',
+      'Lane-fight enrich uses the light metrics path. At scanner×3, Market still collects and crude-ranks instead of hard-skipping; skip/defer no longer stamp lastPollAt.',
+      'Dashboard refresh fail-softs timed-out GETs and keeps last-good data — STATUS only warns if /api/status itself fails.',
+    ],
+  },
+  {
     version: '1.2.362',
     title: 'Unblock Steady + late-chase signal flow',
     sections: ['tradecraft', 'microbots', 'scanners'],
