@@ -123,7 +123,7 @@ function recompute(external?: {
   const uLat = external?.utilityLatencyMs;
   if (external?.utilityWeakPublic) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    reasons.push('Utility on weak public RPC → cut Favourites/activity');
+    reasons.push('Utility on weak public RPC → slow Favourites only');
   }
   if (external?.utilityFailover) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
@@ -193,6 +193,17 @@ export function shouldSkipScannerTick(subsystem: string): {
   reason: string | null;
 } {
   const snap = getRpcLoadControlSnapshot();
+  const id = String(subsystem || '').toLowerCase();
+  // Market / Alpha / Zion must keep ticking when Utility is only on weak public.
+  // Slow Favourites via utilitySlowFactor — do not zero signal intake.
+  const intakeCritical =
+    id.includes('market') || id.includes('zion') || id.includes('alpha');
+  const utilityOnly =
+    snap.reasons.length > 0 &&
+    snap.reasons.every((r) => /utility|favourites|weak public/i.test(r));
+  if (intakeCritical && (utilityOnly || !snap.shedBackground)) {
+    return { skip: false, reason: null };
+  }
   // ×3+ means Secondary is already shedding — always skip the tick so we
   // do not keep acquiring (and re-noting skips) every 22s.
   if (snap.scannerSlowFactor >= 3) {

@@ -26,6 +26,7 @@ import {
   isSmartBotProfilesEnabled,
   resolveTradeProfileDefinition,
 } from './tradeProfiles';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 
 export type GradWatchStatus =
   | 'watching'
@@ -80,6 +81,15 @@ let lastMcRefreshAt = new Map<string, number>();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
+const GRAD_SIDECAR_CAP = 500;
+
+function capGradWatchSidecars(): Record<string, number> {
+  trimMapToCap(unwatchCooldownUntil, GRAD_SIDECAR_CAP);
+  trimMapToCap(lastMcRefreshAt, GRAD_SIDECAR_CAP);
+  trimMapToCap(peakProgress, GRAD_SIDECAR_CAP);
+  return { gradUnwatchCooldown: unwatchCooldownUntil.size };
+}
+registerCacheSweep(capGradWatchSidecars);
 
 /** Live MS funnel tallies (process lifetime) — watch → arm → trigger → blockers */
 export interface MigrationSniperFunnel {
@@ -279,13 +289,8 @@ function qualitySoftOk(input: {
   if (vol != null && vol >= (m.minVolumeH1Usd ?? 1500)) return true;
   const holders = input.holderCount;
   if (holders != null && holders >= (m.minHolders ?? 20)) return true;
-  // Soft-pass when metrics unknown (latency path) — arm only with curve + pump mint
-  return (
-    growth == null &&
-    press == null &&
-    (vol == null || vol <= 0) &&
-    (holders == null || holders <= 0)
-  );
+  // No unknown-metrics soft-pass — stay watching until a real quality metric arrives.
+  return false;
 }
 
 /**
@@ -494,6 +499,17 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
  * until complete, then post-grad handoff. Returns number of triggered handoffs.
  */
 export async function tickMigrationGradWatches(): Promise<number> {
+  try {
+    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
+      shouldIdleIsolate?: () => boolean;
+    };
+    if (shouldIdleIsolate?.()) {
+      stopFastPoll();
+      return 0;
+    }
+  } catch {
+    /* */
+  }
   if (!isMigProfileEnabled()) return 0;
   pruneTerminal();
   const now = Date.now();
@@ -726,18 +742,29 @@ export async function tickMigrationGradWatches(): Promise<number> {
   return handed;
 }
 
-function ensureFastPoll(): void {
-  if (pollTimer) return;
-  pollTimer = setInterval(() => {
-    void tickMigrationGradWatches().catch(() => undefined);
-  }, FAST_POLL_MS);
-}
-
-function stopFastPoll(): void {
+export function stopFastPoll(): void {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+}
+
+function ensureFastPoll(): void {
+  try {
+    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
+      shouldIdleIsolate?: () => boolean;
+    };
+    if (shouldIdleIsolate?.()) {
+      stopFastPoll();
+      return;
+    }
+  } catch {
+    /* */
+  }
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    void tickMigrationGradWatches().catch(() => undefined);
+  }, FAST_POLL_MS);
 }
 
 /**

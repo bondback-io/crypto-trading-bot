@@ -144,6 +144,7 @@ export interface PersistedBotSettings {
   /** Episode learning sources (Live Mode inclusion) */
   learning?: {
     includeLiveModeEpisodes?: boolean;
+    includeDashboardResetEpisodes?: boolean;
   };
   /** Soft MARL coordinator */
   marl?: {

@@ -2502,7 +2502,8 @@ export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
 
 /**
  * Migration Sniper eligibility — primary: pre-grad curve fire (≥ minCurve, still
- * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 180s).
+ * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 180s)
+ * only when this mint already has armed Grad-watch continuity (not a cold chase).
  *
  * Near-curve below fire band stays on the graduation watchlist (not a buy).
  * Mature PumpSwap / stale migrations are rejected.
@@ -2576,8 +2577,18 @@ export function evaluateFreshMigrationEligibility(
     }
   }
 
-  // Fallback: ultra-fresh post-grad
+  // Fallback: ultra-fresh post-grad — armed Grad-watch continuity only
   if (ctx.isMigration === true && ctx.migrationFresh === true) {
+    const fam = String(ctx.setupWatchFamily || '').toLowerCase();
+    const armedGrad =
+      ctx.armedWatch === true && (fam === 'grad' || fam === 'mig');
+    if (!armedGrad) {
+      return {
+        ok: false,
+        reason:
+          'post-grad fallback denied — no armed grad-watch continuity',
+      };
+    }
     const ageMs =
       ctx.migrationAgeMs != null && Number.isFinite(ctx.migrationAgeMs)
         ? Number(ctx.migrationAgeMs)
@@ -2596,7 +2607,7 @@ export function evaluateFreshMigrationEligibility(
     }
     return {
       ok: true,
-      reason: `ultra-fresh post-grad ${Math.round(ageMs / 1000)}s`,
+      reason: `ultra-fresh post-grad ${Math.round(ageMs / 1000)}s (armed grad continuity)`,
     };
   }
 
@@ -4473,6 +4484,8 @@ function scoreProfile(
     }
 
     // Social / KOL specialty may hold quieter tape; discretionary needs live volume.
+    // Collapsed (and decaying without uptick) must soft-skip for discretionary even
+    // when specialtyQuietOk — only armed Trend watches may ride quiet collapsed tape.
     const specialtyQuietOk =
       ctx.specialtyFeed === 'kolscan' ||
       ctx.specialtyFeed === 'jupiter' ||
@@ -4503,19 +4516,20 @@ function scoreProfile(
         /* optional */
       }
     }
+    const discTrend = ctx.armedWatch !== true;
+    if (discTrend && decay === 'collapsed' && !volUptick) {
+      return {
+        score: 0,
+        reason: 'trend_rider: volume collapsed (stale tape)',
+      };
+    }
+    if (discTrend && decay === 'decaying' && !volUptick) {
+      return {
+        score: 0,
+        reason: 'trend_rider: volume decaying (soft-skip stale tape)',
+      };
+    }
     if (!specialtyQuietOk) {
-      if (decay === 'collapsed' && !volUptick) {
-        return {
-          score: 0,
-          reason: 'trend_rider: volume collapsed (stale tape)',
-        };
-      }
-      if (decay === 'decaying' && !volUptick) {
-        return {
-          score: 0,
-          reason: 'trend_rider: volume decaying (soft-skip stale tape)',
-        };
-      }
       // Soft continuation / momentum: flat extension without pattern affinity
       const patterns = ctx.chartPatternIds || [];
       const hasContinuation = patterns.some((id) =>
@@ -4530,11 +4544,12 @@ function scoreProfile(
           reason: 'trend_rider: flat momentum without continuation pattern',
         };
       }
-    } else if (decay === 'collapsed' || decay === 'decaying') {
+    } else if (
+      ctx.armedWatch === true &&
+      (decay === 'collapsed' || decay === 'decaying')
+    ) {
       bits.push(
-        specialtyQuietOk
-          ? `quiet tape ok (${ctx.specialtyFeed || `${kolN} KOLs`})`
-          : 'quiet tape'
+        `quiet tape ok (${ctx.specialtyFeed || `${kolN} KOLs`})`
       );
     }
 

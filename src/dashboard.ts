@@ -3657,6 +3657,67 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       display: none !important;
     }
     /* Stats (botperf) main-nav sub-panels */
+    .stats-export-lead {
+      width: 100%;
+      max-width: 100%;
+      margin: 0 0 0.75rem;
+      line-height: 1.45;
+      color: #94a3b8;
+      font-size: 0.75rem;
+    }
+    .stats-export-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: flex-end;
+      width: 100%;
+      margin-bottom: 0.65rem;
+    }
+    .botperf-subtabs-wrap {
+      display: flex;
+      align-items: stretch;
+      gap: 0.35rem;
+      margin-bottom: 0.75rem;
+      min-width: 0;
+    }
+    .botperf-subtabs-wrap .botperf-subtabs {
+      flex: 1 1 auto;
+      min-width: 0;
+      margin-bottom: 0;
+    }
+    .botperf-tab-arrow {
+      flex: 0 0 auto;
+      width: 2.1rem;
+      min-height: 2.25rem;
+      border-radius: 0.45rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.85);
+      color: #e2e8f0;
+      font-size: 1.15rem;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .botperf-tab-arrow:hover,
+    .botperf-tab-arrow:focus-visible {
+      border-color: rgba(52, 211, 153, 0.45);
+      color: #6ee7b7;
+      outline: none;
+    }
+    .botperf-tab-arrow:disabled {
+      opacity: 0.35;
+      cursor: default;
+      border-color: rgba(71, 85, 105, 0.4);
+      color: #64748b;
+    }
+    @media (min-width: 900px) {
+      .botperf-tab-arrow {
+        display: none;
+      }
+    }
     .botperf-subtabs {
       display: flex;
       flex-wrap: nowrap;
@@ -5307,6 +5368,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       color: #94a3b8;
       font-style: italic;
     }
+    .setup-watch-chips {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.2rem;
+      margin-left: 0.35rem;
+      vertical-align: middle;
+    }
+    .setup-watch-chip {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      padding: 0.08rem 0.35rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      background: rgba(30, 41, 59, 0.7);
+      text-transform: lowercase;
+    }
+    .setup-watch-chip.is-armed { color: #fbbf24; border-color: #a16207; }
+    .setup-watch-chip.is-near { color: #a5b4fc; border-color: #6366f1; }
+    .setup-watch-chip.is-level { color: #86efac; border-color: #16a34a; }
+    .setup-watch-chip.is-nolevel { color: #fca5a5; border-color: #b91c1c; }
+    .setup-watch-chip.is-lowmov { color: #fdba74; border-color: #c2410c; }
+    .setup-watch-chip.is-rotating { color: #e2e8f0; border-color: #64748b; }
     .setup-watch-row.is-terminal {
       opacity: 0.72;
     }
@@ -8424,7 +8510,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer · Steady Compounder</span>
               <span class="setup-watch-title">Dip/Steady setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $20–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤25 · majors ≤25. No-levels rotate ~80m (4×20m; skip MC≥$500M). Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $20–200M + Majors ≥$200M prefer Steady. Pump.fun prioritized on Medium/Majors (~55% seats); non-pump secondary. Caps: minors ≤16 · medium ≤80 · majors ≤50. Vol/movement filters + dead-tape / no-levels rotate. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
               <div class="setup-watch-tabs" role="tablist" aria-label="Dip/Steady watch source">
                 <button type="button" role="tab" class="closed-filter-btn is-active" id="dip-watch-tab-minors" data-dip-watch-tab="minors" aria-selected="true" title="Memecoin / scanner dip watches">Minors <span class="setup-watch-tab-count" id="dip-watch-tab-minors-count">0</span></button>
@@ -10234,14 +10320,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <p class="text-xs text-slate-400 mb-0">Tune bots on <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button>. Recovery stages live under Micro Bots → Learning.</p>
           </div>
         </div>
-        <div class="botperf-subtabs closed-filter" role="tablist" aria-label="Stats sections">
-          <button type="button" role="tab" class="closed-filter-btn is-active" id="botperf-tab-performance" data-botperf-tab="performance" aria-selected="true" aria-controls="botperf-panel-performance" onclick="setBotPerfTab('performance')">Performance</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-expectancy" data-botperf-tab="expectancy" aria-selected="false" aria-controls="botperf-panel-expectancy" onclick="setBotPerfTab('expectancy')">Expectancy Lift</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-tradecraft" data-botperf-tab="tradecraft" aria-selected="false" aria-controls="botperf-panel-tradecraft" onclick="setBotPerfTab('tradecraft')">Trade Craft</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-exportdata" data-botperf-tab="exportdata" aria-selected="false" aria-controls="botperf-panel-exportdata" onclick="setBotPerfTab('exportdata')">Export Data</button>
+        <div class="botperf-subtabs-wrap">
+          <button type="button" class="botperf-tab-arrow" id="botperf-tab-arrow-left" aria-label="Scroll Stats tabs to start" title="Jump to start of tabs" onclick="scrollBotPerfTabs('start')">‹</button>
+          <div class="botperf-subtabs closed-filter" id="botperf-subtabs" role="tablist" aria-label="Stats sections">
+            <button type="button" role="tab" class="closed-filter-btn is-active" id="botperf-tab-performance" data-botperf-tab="performance" aria-selected="true" aria-controls="botperf-panel-performance" onclick="setBotPerfTab('performance')">Performance</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-expectancy" data-botperf-tab="expectancy" aria-selected="false" aria-controls="botperf-panel-expectancy" onclick="setBotPerfTab('expectancy')">Expectancy Lift</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-tradecraft" data-botperf-tab="tradecraft" aria-selected="false" aria-controls="botperf-panel-tradecraft" onclick="setBotPerfTab('tradecraft')">Trade Craft</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learningmetrics" data-botperf-tab="learningmetrics" aria-selected="false" aria-controls="botperf-panel-learningmetrics" onclick="setBotPerfTab('learningmetrics')">Learning Metrics</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-exportdata" data-botperf-tab="exportdata" aria-selected="false" aria-controls="botperf-panel-exportdata" onclick="setBotPerfTab('exportdata')">Export Data</button>
+          </div>
+          <button type="button" class="botperf-tab-arrow" id="botperf-tab-arrow-right" aria-label="Scroll Stats tabs to end" title="Jump to end of tabs" onclick="scrollBotPerfTabs('end')">›</button>
         </div>
       </div>
 
@@ -10637,6 +10727,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="mint text-xs mb-2" id="export-data-stamp">Snapshot: —</p>
           <pre id="export-data-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate report to build a snapshot…</pre>
         </div>
+
+        <div class="card" id="learning-report-card">
+          <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+            <div style="min-width:0;flex:1">
+              <div class="section-title">Learning Report <span class="tip" tabindex="0" data-tip="Read-only last 50/100 closed-trade evaluation package for Cursor. Summary, per-profile table, trade sample, quality diagnostics, and learning-relevant config. Does not change trading."></span></div>
+              <p class="text-xs text-slate-400 mb-0">Generate a clean trade-learning package to paste into Cursor. Separate from the full system diagnostics export above.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-end">
+              <label class="ctl ctl-fit">
+                <span>Window</span>
+                <select id="learning-report-window">
+                  <option value="50" selected>Last 50</option>
+                  <option value="100">Last 100</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-primary btn-sm" id="learning-report-generate" onclick="generateLearningReport()">Generate Learning Report</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReport()">Copy report</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copyLearningReportCursorPackage()" title="Fixed evaluation instructions + report">Copy Cursor package</button>
+              <button type="button" class="btn btn-sm" onclick="downloadLearningReport('md')">Download .md</button>
+              <button type="button" class="btn btn-sm" onclick="downloadLearningReport('json')">Download .json</button>
+            </div>
+          </div>
+          <p class="mint text-xs mb-2" id="learning-report-stamp">Learning report: —</p>
+          <pre id="learning-report-viewer" class="mint text-xs" style="max-height:min(70vh,32rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate Learning Report to build a package…</pre>
+        </div>
       </div>
     </section>
 
@@ -10739,7 +10854,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Micro Bots Self-Learning Data <span class="tip" tabindex="0" data-tip="Durable knobs, episode files, and the learning save journal for Trade Profiles."></span></div>
         <div id="learning-durability-banner" class="hidden text-xs rounded-md px-3 py-2 mb-2 border border-red-600/70 bg-red-950/50 text-red-100" role="alert"></div>
-        <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
+        <p class="mint text-xs mb-2">Learning knobs, episodes, and the save journal live under the bot data directory (same place as settings).</p>
         <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
         <div class="filters-row mb-2" id="learning-saves-filters">
           <label class="ctl ctl-date" title="Filter by calendar day">
@@ -11558,19 +11673,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     /**
      * Diff open/closed position ids across refreshes and play lifecycle chimes.
      * First poll hydrates silently (no chime storm on dashboard load).
+     * Never treat empty closed from ?fast=1 as authoritative; never chime on
+     * vanished opens alone (that re-fired buy/sell spam during RPC lag).
      */
-    function maybePlayTradeLifecycleSounds(openList, closedList) {
+    function maybePlayTradeLifecycleSounds(openList, closedList, opts) {
       try {
         if (!window.__tradeSoundState) {
           window.__tradeSoundState = {
             openIds: new Set(),
             closedIds: new Set(),
+            soundedOpenIds: new Set(),
             hydrated: false,
+            lastOpenChimeAt: 0,
+            lastCloseChimeAt: 0,
           };
         }
         const st = window.__tradeSoundState;
+        if (!st.soundedOpenIds) st.soundedOpenIds = new Set();
         const opens = Array.isArray(openList) ? openList : [];
-        const closeds = Array.isArray(closedList) ? closedList : [];
+        let closeds = Array.isArray(closedList) ? closedList : [];
+        // Fast payloads omit closed — use cache so we never take the empty path.
+        if (!closeds.length && Array.isArray(window._lastClosedPositions)) {
+          closeds = window._lastClosedPositions;
+        }
         const curOpen = new Set();
         for (let i = 0; i < opens.length; i++) {
           const id = opens[i] && opens[i].id;
@@ -11585,22 +11710,47 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const c = closeds[i];
             if (c && c.id && !/^partial:/i.test(String(c.reason || ''))) {
               st.closedIds.add(String(c.id));
+              st.soundedOpenIds.add(String(c.id));
             }
           }
+          for (const id of curOpen) st.soundedOpenIds.add(id);
           st.hydrated = true;
           return;
         }
+        // Stress: empty open list while we still had opens — skip sound + state wipe
+        // unless closedTotal proves a real wipe (0).
+        const closedTotal =
+          opts && typeof opts.closedTotal === 'number'
+            ? opts.closedTotal
+            : window._lastClosedTotal;
+        if (
+          curOpen.size === 0 &&
+          st.openIds.size > 0 &&
+          closedTotal !== 0
+        ) {
+          return;
+        }
         const prefs = window.__notifyPrefs || {};
+        const now = Date.now();
+        const OPEN_COOLDOWN_MS = 2500;
+        const CLOSE_COOLDOWN_MS = 2000;
+        let openChimes = 0;
         for (const id of curOpen) {
-          if (!st.openIds.has(id)) playTradeOpenChime();
-        }
-        // When fast poll omits closed rows, still chime on vanished opens
-        if (!closeds.length) {
-          for (const id of st.openIds) {
-            if (!curOpen.has(id)) playTradeCloseSound();
+          if (st.openIds.has(id)) continue;
+          if (st.soundedOpenIds.has(id)) continue;
+          if (openChimes >= 2) break;
+          if (now - (st.lastOpenChimeAt || 0) < OPEN_COOLDOWN_MS && openChimes === 0) {
+            st.soundedOpenIds.add(id);
+            continue;
           }
+          if (prefs.tradeOpenSound !== false) {
+            playTradeOpenChime();
+            st.lastOpenChimeAt = Date.now();
+            openChimes += 1;
+          }
+          st.soundedOpenIds.add(id);
         }
-        // Newest closed first — play at most a few per poll (burst protection)
+        // Close / profit only from closed-list rows (never vanish-open undeduped spam).
         let closeChimes = 0;
         const sortedClosed = closeds.slice().sort(function (a, b) {
           return (Number(b.closedAt) || 0) - (Number(a.closedAt) || 0);
@@ -11612,7 +11762,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const cid = String(c.id);
           if (st.closedIds.has(cid)) continue;
           st.closedIds.add(cid);
+          if (now - (st.lastCloseChimeAt || 0) < CLOSE_COOLDOWN_MS && closeChimes === 0) {
+            continue;
+          }
           closeChimes += 1;
+          st.lastCloseChimeAt = Date.now();
           const pnl = Number(c.pnlSol);
           const isProfit = Number.isFinite(pnl) && pnl > 0;
           if (isProfit && prefs.profitCloseSound !== false) {
@@ -11623,21 +11777,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               window.__profitCloseSoundedIds.add(cid);
               playProfitCashSound();
             }
-          } else {
+          } else if (prefs.tradeCloseSound !== false) {
             playTradeCloseSound();
           }
         }
         st.openIds = curOpen;
         if (st.closedIds.size > 400) {
-          const keep = sortedClosed
-            .filter(function (c) {
-              return c && c.id && !/^partial:/i.test(String(c.reason || ''));
-            })
-            .slice(0, 200)
-            .map(function (c) {
-              return String(c.id);
-            });
-          st.closedIds = new Set(keep);
+          const pruneSrc =
+            sortedClosed.length > 0
+              ? sortedClosed
+              : Array.isArray(window._lastClosedPositions)
+                ? window._lastClosedPositions
+                : [];
+          if (pruneSrc.length > 0) {
+            const keep = pruneSrc
+              .filter(function (c) {
+                return c && c.id && !/^partial:/i.test(String(c.reason || ''));
+              })
+              .slice(0, 200)
+              .map(function (c) {
+                return String(c.id);
+              });
+            st.closedIds = new Set(keep);
+          }
+        }
+        if (st.soundedOpenIds.size > 400) {
+          st.soundedOpenIds = new Set(Array.from(st.soundedOpenIds).slice(-200));
         }
         if (window.__profitCloseSoundedIds && window.__profitCloseSoundedIds.size > 200) {
           window.__profitCloseSoundedIds = new Set(
@@ -11654,7 +11819,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           window.__tradeSoundState = {
             openIds: new Set(),
             closedIds: new Set(),
+            soundedOpenIds: new Set(),
             hydrated: false,
+            lastOpenChimeAt: 0,
+            lastCloseChimeAt: 0,
           };
         }
         const st = window.__tradeSoundState;
@@ -13554,6 +13722,72 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               escHtml(String(e.lastReason).slice(0, 48)) +
               '</span>'
             : '';
+        // Medium/majors quality chips: armed / near / has-level / no-level / low-mov / rotating
+        let qualityChips = '';
+        if (
+          kind === 'dip' &&
+          (String(e.source || '') === 'medium' ||
+            String(e.source || '') === 'majors')
+        ) {
+          const chipBits = [];
+          const hasLvl =
+            (e.fib05PriceSol != null && Number(e.fib05PriceSol) > 0) ||
+            (e.fib618PriceSol != null && Number(e.fib618PriceSol) > 0) ||
+            (e.supportPriceSol != null && Number(e.supportPriceSol) > 0) ||
+            e.nearKeyFib === true ||
+            e.nearSupport === true ||
+            (Number(e.multiTfSupportHits) || 0) > 0;
+          if (status === 'armed') {
+            chipBits.push(
+              '<span class="setup-watch-chip is-armed">armed</span>'
+            );
+          }
+          if (e.nearKeyFib === true || e.nearSupport === true) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-near">near trigger</span>'
+            );
+          }
+          if (hasLvl) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-level">has level</span>'
+            );
+          } else if (
+            e.qualityChip === 'no_level' ||
+            status === 'watching' ||
+            status === 'armed'
+          ) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-nolevel">no level</span>'
+            );
+          }
+          if (
+            e.movementActive === false ||
+            e.qualityChip === 'low_movement'
+          ) {
+            chipBits.push(
+              '<span class="setup-watch-chip is-lowmov">low movement</span>'
+            );
+          }
+          if (e.qualityChip === 'rotated_stale') {
+            chipBits.push(
+              '<span class="setup-watch-chip is-rotating">rotating out</span>'
+            );
+          }
+          const isPumpRow =
+            e.isPumpFun === true ||
+            String(e.mint || '')
+              .toLowerCase()
+              .endsWith('pump');
+          if (isPumpRow) {
+            chipBits.push(
+              '<span class="setup-watch-chip" title="Pump.fun token">pump</span>'
+            );
+          }
+          if (chipBits.length) {
+            qualityChips =
+              '<span class="setup-watch-chips">' + chipBits.join('') + '</span>';
+          }
+        }
         const actions =
           status === 'watching' || status === 'armed'
             ? '<div class="setup-watch-actions">' +
@@ -13597,6 +13831,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '">' +
           escHtml(status) +
           '</span>' +
+          qualityChips +
           (kind === 'dip' && String(e.source || '') === 'majors'
             ? '<span class="setup-watch-badge is-majors" title="High-MC majors feed (circulating MC)">' +
               (e.majorsBand
@@ -13667,24 +13902,50 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               return src !== 'majors' && src !== 'medium';
             })
             .sort(function (a, b) {
+              function hasLevel(e) {
+                return (
+                  (e.fib05PriceSol != null && Number(e.fib05PriceSol) > 0) ||
+                  (e.fib618PriceSol != null && Number(e.fib618PriceSol) > 0) ||
+                  (e.supportPriceSol != null && Number(e.supportPriceSol) > 0) ||
+                  e.nearKeyFib === true ||
+                  e.nearSupport === true ||
+                  (Number(e.multiTfSupportHits) || 0) > 0
+                );
+              }
               function rank(e) {
                 if (e.status === 'armed') return 0;
-                var near =
-                  e.nearKeyFib === true || e.nearSupport === true ? 1 : 2;
-                if (
+                var stagnant =
                   e.movementActive === false ||
                   e.qualityChip === 'low_movement' ||
-                  e.qualityChip === 'rotated_stale'
-                )
-                  return 4;
-                if (near === 1) return 1;
-                if (e.movementActive === true || e.qualityChip === 'active')
-                  return 2;
-                return 3;
+                  e.qualityChip === 'rotated_stale' ||
+                  e.qualityChip === 'no_level';
+                if (stagnant && !hasLevel(e)) return 5;
+                if (stagnant) return 4;
+                var near =
+                  e.nearKeyFib === true || e.nearSupport === true;
+                var mov =
+                  e.movementActive === true || e.qualityChip === 'active';
+                // has-level + movement before near-only / activity-only
+                if (hasLevel(e) && mov) return 1;
+                if (near) return 2;
+                if (mov) return 3;
+                if (hasLevel(e)) return 3;
+                return 4;
               }
               var ra = rank(a);
               var rb = rank(b);
               if (ra !== rb) return ra - rb;
+              // Medium/Majors: Pump.fun before non-pump at equal quality rank
+              if (tab === 'majors' || tab === 'medium') {
+                function isPumpRow(e) {
+                  if (e.isPumpFun === true) return true;
+                  var m = String(e.mint || '').toLowerCase();
+                  return m.endsWith('pump');
+                }
+                var pa = isPumpRow(a) ? 1 : 0;
+                var pb = isPumpRow(b) ? 1 : 0;
+                if (pb !== pa) return pb - pa;
+              }
               var va = Number(a.volumeH1Usd) || 0;
               var vb = Number(b.volumeH1Usd) || 0;
               if (vb !== va) return vb - va;
@@ -13842,6 +14103,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (dipF.medium_candidates_seen || 0) +
                     '/' +
                     (dipF.majors_candidates_seen || 0) +
+                    ' · watch ' +
+                    ((dipF.mediumWatchingNow || 0) +
+                      (dipF.mediumArmedNow || 0)) +
+                    '/' +
+                    ((dipF.majorsWatchingNow || 0) +
+                      (dipF.majorsArmedNow || 0)) +
                     ' · armNow ' +
                     (dipF.mediumArmedNow || 0) +
                     '/' +
@@ -13850,10 +14117,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (dipF.medium_triggered || 0) +
                     '/' +
                     (dipF.majors_triggered || 0) +
+                    ' · open ' +
+                    (dipF.medium_opened || 0) +
+                    '/' +
+                    (dipF.majors_opened || 0) +
                     ' · exp ' +
                     (dipF.medium_expired || 0) +
                     '/' +
-                    (dipF.majors_expired || 0)
+                    (dipF.majors_expired || 0) +
+                    (dipF.no_levels_rotate
+                      ? ' · nlRot×' + dipF.no_levels_rotate
+                      : '')
                   : '') +
                 (dipF.minors_candidates_seen != null ||
                 dipF.minorsArmedNow != null
@@ -18168,11 +18442,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const viewer = document.getElementById('export-data-viewer');
       const stamp = document.getElementById('export-data-stamp');
       try {
-        if (viewer) viewer.textContent = 'Generating report…';
+        if (viewer) viewer.textContent = 'Generating report… (can take up to ~90s on large histories)';
         const win = syncExpectancyLiftWindow('export-window');
         const data = await fetchJSON(
           '/api/system-diagnostics-export?window=' +
-            encodeURIComponent(String(win))
+            encodeURIComponent(String(win)),
+          { timeoutMs: 90000 }
         );
         __exportDataReportText =
           data && data.reportText ? String(data.reportText) : '';
@@ -18203,9 +18478,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       } catch (err) {
         __exportDataReportText = '';
+        let msg = err && err.message ? String(err.message) : String(err);
+        try {
+          msg = msg.split('\\r').join(' ').split('\\n').join(' ').trim();
+        } catch (_) {}
+        if (/timed out|AbortError/i.test(msg)) {
+          msg =
+            'Timed out building report — try Last 20, or retry when the bot is quieter';
+        } else if (/HTTP 503/i.test(msg)) {
+          msg =
+            'Service busy (HTTP 503) — retry in a few seconds; report build is heavy';
+        }
         if (viewer) {
-          viewer.textContent =
-            'Export failed: ' + (err.message || String(err));
+          viewer.textContent = 'Export failed: ' + msg;
         }
         if (stamp) stamp.textContent = 'Snapshot: error';
       }
@@ -18250,6 +18535,241 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.copySystemDiagnosticsExport = copySystemDiagnosticsExport;
+
+    let __learningReportText = '';
+    let __learningReportCursorText = '';
+    let __learningReportJson = null;
+    let __learningReportBusy = false;
+
+    function learningReportWindowValue() {
+      const el = document.getElementById('learning-report-window');
+      const n = el ? Number(el.value) : 50;
+      return n === 100 ? 100 : 50;
+    }
+
+    async function copyTextToClipboard(text) {
+      const copyText = String(text || '');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(copyText);
+        return;
+      }
+      const ta = document.createElement('textarea');
+      ta.value = copyText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+
+    function learningReportStampBase(data, win) {
+      const ts =
+        data && data.generatedAt
+          ? new Date(data.generatedAt).toLocaleString()
+          : new Date().toLocaleString();
+      const mode = (data && data.mode) || '—';
+      const trades =
+        data && data.meta && data.meta.tradeCount != null
+          ? data.meta.tradeCount
+          : '—';
+      return (
+        'Learning report: ' +
+        ts +
+        ' · mode ' +
+        mode +
+        ' · window ' +
+        ((data && data.window) || win) +
+        ' · trades ' +
+        trades +
+        ' (read-only)'
+      );
+    }
+
+    async function generateLearningReport() {
+      const viewer = document.getElementById('learning-report-viewer');
+      const stamp = document.getElementById('learning-report-stamp');
+      const btn = document.getElementById('learning-report-generate');
+      if (__learningReportBusy) return;
+      __learningReportBusy = true;
+      if (btn) btn.disabled = true;
+      const win = learningReportWindowValue();
+      try {
+        if (viewer) viewer.textContent = 'Generating learning report…';
+        if (stamp) stamp.textContent = 'Learning report: generating…';
+        const data = await fetchJSON(
+          '/api/learning-report?window=' + encodeURIComponent(String(win))
+        );
+        if (!data || data.ok === false) {
+          throw new Error(
+            (data && data.error) || 'Learning report failed'
+          );
+        }
+        __learningReportText =
+          data && data.reportText ? String(data.reportText) : '';
+        __learningReportCursorText =
+          data && data.cursorPackageText
+            ? String(data.cursorPackageText)
+            : __learningReportText;
+        __learningReportJson =
+          data && data.reportJson ? data.reportJson : null;
+        if (viewer) {
+          viewer.textContent =
+            __learningReportText || 'Empty learning report.';
+        }
+        if (stamp) stamp.textContent = learningReportStampBase(data, win);
+      } catch (err) {
+        __learningReportText = '';
+        __learningReportCursorText = '';
+        __learningReportJson = null;
+        const msg = (err && err.message) || String(err);
+        if (viewer) {
+          viewer.textContent = 'Learning report failed: ' + msg;
+        }
+        if (stamp) stamp.textContent = 'Learning report: error — ' + msg;
+        try {
+          if (typeof showToast === 'function') {
+            showToast('Learning report failed: ' + msg, 'error');
+          }
+        } catch (_) {}
+      } finally {
+        __learningReportBusy = false;
+        if (btn) btn.disabled = false;
+      }
+    }
+    window.generateLearningReport = generateLearningReport;
+
+    async function copyLearningReport() {
+      const stamp = document.getElementById('learning-report-stamp');
+      try {
+        if (
+          !__learningReportText ||
+          /Click Generate|Generating|failed/i.test(__learningReportText)
+        ) {
+          await generateLearningReport();
+        }
+        const text = __learningReportText || '';
+        if (!text || /failed/i.test(text)) {
+          throw new Error('No report to copy');
+        }
+        await copyTextToClipboard(text);
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent =
+            prev.replace(/ \(copied[^)]*\)/g, '') + ' (copied)';
+        }
+      } catch (err) {
+        if (stamp) {
+          stamp.textContent =
+            'Copy failed: ' + ((err && err.message) || String(err));
+        }
+      }
+    }
+    window.copyLearningReport = copyLearningReport;
+
+    async function copyLearningReportCursorPackage() {
+      const stamp = document.getElementById('learning-report-stamp');
+      try {
+        if (
+          !__learningReportCursorText ||
+          !__learningReportText ||
+          /Click Generate|Generating|failed/i.test(__learningReportText)
+        ) {
+          await generateLearningReport();
+        }
+        const text = __learningReportCursorText || __learningReportText || '';
+        if (!text || /failed/i.test(text)) {
+          throw new Error('No Cursor package to copy');
+        }
+        await copyTextToClipboard(text);
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent =
+            prev.replace(/ \(copied[^)]*\)/g, '') +
+            ' (copied Cursor package)';
+        }
+      } catch (err) {
+        if (stamp) {
+          stamp.textContent =
+            'Copy Cursor package failed: ' +
+            ((err && err.message) || String(err));
+        }
+      }
+    }
+    window.copyLearningReportCursorPackage = copyLearningReportCursorPackage;
+
+    function downloadLearningReport(fmt) {
+      const stamp = document.getElementById('learning-report-stamp');
+      const kind = fmt === 'json' ? 'json' : 'md';
+      try {
+        let body = '';
+        let mime = 'text/markdown;charset=utf-8';
+        let ext = 'md';
+        if (kind === 'json') {
+          if (!__learningReportJson) {
+            throw new Error('Generate a report first');
+          }
+          body = JSON.stringify(__learningReportJson, null, 2);
+          mime = 'application/json;charset=utf-8';
+          ext = 'json';
+        } else {
+          if (
+            !__learningReportText ||
+            /Click Generate|Generating|failed/i.test(__learningReportText)
+          ) {
+            throw new Error('Generate a report first');
+          }
+          body = __learningReportText;
+        }
+        const win = learningReportWindowValue();
+        const d = new Date();
+        const pad = function (n) {
+          return String(n).padStart(2, '0');
+        };
+        const stampName =
+          d.getFullYear() +
+          pad(d.getMonth() + 1) +
+          pad(d.getDate()) +
+          '-' +
+          pad(d.getHours()) +
+          pad(d.getMinutes());
+        const filename =
+          'learning-report-' + stampName + '-w' + win + '.' + ext;
+        const blob = new Blob([body], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (_) {}
+        }, 1500);
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent =
+            prev.replace(/ \(downloaded[^)]*\)/g, '') +
+            ' (downloaded .' +
+            ext +
+            ')';
+        }
+      } catch (err) {
+        if (stamp) {
+          stamp.textContent =
+            'Download failed: ' + ((err && err.message) || String(err));
+        }
+        try {
+          if (typeof showToast === 'function') {
+            showToast(
+              'Download failed: ' + ((err && err.message) || String(err)),
+              'error'
+            );
+          }
+        } catch (_) {}
+      }
+    }
+    window.downloadLearningReport = downloadLearningReport;
 
     function renderScalperTrendChart() {
       const canvas = document.getElementById('chart-scalper-trend');
@@ -19355,7 +19875,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const on = btn.getAttribute('data-botperf-tab') === next;
         btn.classList.toggle('is-active', on);
         btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        if (on) {
+          try {
+            btn.scrollIntoView({
+              behavior: 'smooth',
+              inline: 'nearest',
+              block: 'nearest',
+            });
+          } catch (_) {}
+        }
       });
+      try {
+        updateBotPerfTabArrows();
+      } catch (_) {}
       document.querySelectorAll('[data-botperf-panel]').forEach(function (panel) {
         const on = panel.getAttribute('data-botperf-panel') === next;
         panel.classList.toggle('is-active', on);
@@ -19377,7 +19909,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         } else if (next === 'decisions') {
           try { loadAgentDecisionLog(); } catch (_) {}
         } else if (next === 'exportdata') {
-          try { generateSystemDiagnosticsExport(); } catch (_) {}
+          /* Manual Generate only — auto-build was timing out on busy hosts. */
         }
       }
       // Charts in newly shown panels need a resize pass
@@ -19389,6 +19921,46 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (_) {}
     }
     window.setBotPerfTab = setBotPerfTab;
+
+    function updateBotPerfTabArrows() {
+      const scroller = document.getElementById('botperf-subtabs');
+      const left = document.getElementById('botperf-tab-arrow-left');
+      const right = document.getElementById('botperf-tab-arrow-right');
+      if (!scroller) return;
+      const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      const atStart = scroller.scrollLeft <= 2;
+      const atEnd = scroller.scrollLeft >= max - 2;
+      if (left) left.disabled = max <= 0 || atStart;
+      if (right) right.disabled = max <= 0 || atEnd;
+    }
+
+    function scrollBotPerfTabs(where) {
+      const scroller = document.getElementById('botperf-subtabs');
+      if (!scroller) return;
+      const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      const target =
+        where === 'end' ? max : where === 'start' ? 0 : scroller.scrollLeft;
+      try {
+        scroller.scrollTo({ left: target, behavior: 'smooth' });
+      } catch (_) {
+        scroller.scrollLeft = target;
+      }
+      setTimeout(updateBotPerfTabArrows, 280);
+    }
+    window.scrollBotPerfTabs = scrollBotPerfTabs;
+    window.updateBotPerfTabArrows = updateBotPerfTabArrows;
+
+    (function initBotPerfTabScroller() {
+      const scroller = document.getElementById('botperf-subtabs');
+      if (!scroller) return;
+      scroller.addEventListener('scroll', function () {
+        updateBotPerfTabArrows();
+      }, { passive: true });
+      window.addEventListener('resize', function () {
+        updateBotPerfTabArrows();
+      });
+      setTimeout(updateBotPerfTabArrows, 50);
+    })();
 
     function setWatchlistSetupTab(tab, opts) {
       const allowed = ['dip', 'modeb', 'trend', 'grad', 'mirror', 'skips'];
@@ -21904,14 +22476,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window._openPositionsGen = (window._openPositionsGen || 0) + 1;
       }
       const incoming = Array.isArray(list) ? list : [];
-      window._lastOpenPositions = mergeOpenPositionsPreserve(
-        window._lastOpenPositions,
-        incoming
-      );
+      const prev = window._lastOpenPositions || [];
+      const closedTotal =
+        opts && typeof opts.closedTotal === 'number'
+          ? opts.closedTotal
+          : window._lastClosedTotal;
+      // Under lag, fast/status can return open:[] transiently — do not wipe + re-chime.
+      if (
+        incoming.length === 0 &&
+        prev.length > 0 &&
+        closedTotal !== 0 &&
+        !fromFill
+      ) {
+        return;
+      }
+      window._lastOpenPositions = mergeOpenPositionsPreserve(prev, incoming);
       try {
         maybePlayTradeLifecycleSounds(
           window._lastOpenPositions || [],
-          (opts && opts.closed) || []
+          (opts && opts.closed) || window._lastClosedPositions || [],
+          { closedTotal: closedTotal }
         );
       } catch (_) {}
       const openN = (window._lastOpenPositions || []).length;
@@ -21928,6 +22512,70 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    function paintClosedFromCache(openList) {
+      window._closedTradeGroups = buildClosedTradeGroups(
+        window._lastClosedPositions || [],
+        openList || window._lastOpenPositions || []
+      );
+      // Keep full ring for Profitable/Losing + timeframe filters (no newest-40 cut).
+      paintClosedTradesTables();
+    }
+
+    /**
+     * Fast /api/positions?fast=1 returns closed:[] (payload size). Never wipe the
+     * Closed Trades table from that empty array — only replace when we have a
+     * real closed list, or closedTotal === 0 (genuinely none).
+     */
+    function ingestClosedPositionsPayload(positions) {
+      const closed = positions && Array.isArray(positions.closed) ? positions.closed : null;
+      const closedTotal =
+        positions && typeof positions.closedTotal === 'number' ? positions.closedTotal : null;
+
+      if (closed && closed.length > 0) {
+        window._lastClosedPositions = closed;
+        window._lastClosedTotal = closedTotal != null ? closedTotal : closed.length;
+        return { updated: true, needFull: false };
+      }
+
+      if (closedTotal === 0) {
+        window._lastClosedPositions = [];
+        window._lastClosedTotal = 0;
+        return { updated: true, needFull: false };
+      }
+
+      // Omitted / empty closed on fast (or stale) — keep cache; fetch full if empty or total drifted.
+      const cached = window._lastClosedPositions || [];
+      const cachedTotal = window._lastClosedTotal || 0;
+      const needFull =
+        !cached.length ||
+        (closedTotal != null && closedTotal !== cachedTotal);
+      return { updated: false, needFull };
+    }
+
+    async function refreshClosedPositions(opts) {
+      const force = opts && opts.force === true;
+      if (window._closedRefreshInFlight) return;
+      const now = Date.now();
+      if (!force && now - (window._closedRefreshAt || 0) < 12000) return;
+      window._closedRefreshInFlight = true;
+      try {
+        const posData = await fetchJSON('/api/positions');
+        window._closedRefreshAt = Date.now();
+        if (!posData || !Array.isArray(posData.closed)) return;
+        window._lastClosedPositions = posData.closed;
+        window._lastClosedTotal =
+          typeof posData.closedTotal === 'number'
+            ? posData.closedTotal
+            : posData.closed.length;
+        paintClosedFromCache(window._lastOpenPositions);
+      } catch (_) {
+        /* keep prior closed cache */
+      } finally {
+        window._closedRefreshInFlight = false;
+      }
+    }
+    window.refreshClosedPositions = refreshClosedPositions;
+
     async function refreshOpenPositionsFast(opts) {
       const fromFill = opts && opts.fromFill === true;
       const genAtStart = window._openPositionsGen || 0;
@@ -21936,13 +22584,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (!fromFill && (window._openPositionsGen || 0) !== genAtStart) {
           return; // a fill paint won while we were fetching
         }
+        const closedIngest = ingestClosedPositionsPayload(posData);
         applyOpenPositionsList((posData && posData.open) || [], {
           fromFill: fromFill,
-          // Fast endpoint omits closed — keep prior closed for sound hydration only
-          closed: (posData && posData.closed && posData.closed.length)
-            ? posData.closed
-            : [],
+          // Fast endpoint omits closed — use cached closed for sound hydration
+          closed: window._lastClosedPositions || [],
+          closedTotal:
+            posData && typeof posData.closedTotal === 'number'
+              ? posData.closedTotal
+              : window._lastClosedTotal,
         });
+        if (closedIngest.needFull) {
+          const total =
+            posData && typeof posData.closedTotal === 'number'
+              ? posData.closedTotal
+              : null;
+          void refreshClosedPositions({
+            force:
+              !(window._lastClosedPositions || []).length ||
+              (total != null && total !== (window._lastClosedTotal || 0)),
+          });
+        }
       } catch (_) {}
     }
     window.refreshOpenPositionsFast = refreshOpenPositionsFast;
@@ -25383,7 +26045,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         } else {
           setLastDashboardResetAt(Date.now());
         }
+        window._lastClosedPositions = [];
+        window._lastClosedTotal = 0;
         await refresh();
+        void refreshClosedPositions({ force: true });
         const bal = data.balance != null ? Number(data.balance).toFixed(4) : '—';
         alert('Dashboard reset · balance ' + bal + ' SOL');
       } catch (err) {
@@ -25401,6 +26066,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           body: '{}',
         });
         refresh();
+        void refreshClosedPositions({ force: true });
       } catch (err) {
         alert('Force sell failed: ' + (err.message || err));
       }
@@ -25433,6 +26099,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           alert('Some sells failed (' + errors.length + '/' + open.length + '):\\n' + errors.slice(0, 8).join('\\n'));
         }
         refresh();
+        void refreshClosedPositions({ force: true });
       } catch (err) {
         alert('Sell all failed: ' + (err.message || err));
       }
@@ -25579,6 +26246,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       } catch (_) {}
       const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
+      // Harden: /api/activity is an array; never call .map on objects/strings/null
+      const activityList = Array.isArray(activity)
+        ? activity
+        : Array.isArray(activity && activity.activity)
+          ? activity.activity
+          : [];
 
       updateCharts(paper && paper.charts);
       if (paper && paper.useLiveData != null) {
@@ -25590,39 +26263,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       const persistEl = document.getElementById('persist-banner');
       const persistDetail = document.getElementById('persist-status-detail');
-      if (persistEl || persistDetail) {
+      if (persistEl) {
+        // Disk / DATA_DIR deploy warnings no longer shown as a page-bottom banner.
+        persistEl.style.display = 'none';
+        persistEl.textContent = '';
+      }
+      if (persistDetail) {
         const p = status.persistence;
-        if (persistEl) {
-          if (p && p.warning) {
-            persistEl.style.display = 'block';
-            persistEl.innerHTML =
-              '<strong>Settings / wallets will reset on deploy</strong> — ' +
-              String(p.warning).replace(/</g, '&lt;') +
-              ' <span class="mint">(' + String(p.dataDir || '').replace(/</g, '&lt;') + ')</span>';
-          } else {
-            persistEl.style.display = 'none';
-            persistEl.textContent = '';
-          }
-        }
-        if (persistDetail && p) {
+        if (p) {
           const last =
             p.lastSettingsSavedAt != null
               ? new Date(p.lastSettingsSavedAt).toLocaleString()
               : '—';
           const durable = p.durableLikely
             ? '<span style="color:#4ade80">Durable — volume mounted; saves should survive deploys</span>'
-            : '<span style="color:#f87171">At risk — DATA_DIR is not a mounted disk; next deploy will wipe saves</span>';
+            : '<span style="color:#94a3b8">Ephemeral filesystem — use Back Up / GitHub Backup before deploys</span>';
           const vol =
             p.volumeMounted === true
               ? '<span style="color:#4ade80">yes</span>'
               : p.onRender
-                ? '<span style="color:#f87171">NO</span>'
+                ? '<span style="color:#94a3b8">no</span>'
                 : 'n/a (local)';
           const survived =
             p.survivedLastDeploy === 'yes'
               ? '<span style="color:#4ade80">yes</span>'
               : p.survivedLastDeploy === 'no'
-                ? '<span style="color:#f87171">no</span>'
+                ? '<span style="color:#94a3b8">no</span>'
                 : 'unknown';
           persistDetail.innerHTML =
             durable +
@@ -25632,9 +26298,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<br>config.json: ' + (p.settingsExists ? 'yes' : 'MISSING') +
             ' · trade-profiles-user.json: ' + (p.tradeProfilesUserExists ? 'yes' : 'none yet') +
             ' · learning episodes: ' + (p.profileLearningExists ? 'yes' : 'none') +
-            '<br>Last saved: ' + last +
-            '<br><span style="color:#64748b">Email, micro-bot knobs, and learning episodes all share this DATA_DIR. ' +
-            'On Render: Disks → mount path must equal DATA_DIR (prefer /var/data). Env alone does not create a volume.</span>';
+            '<br>Last saved: ' + last;
         }
       }
       try { refreshSiteBackupStatus(); } catch (_) {}
@@ -26771,15 +27435,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       window._trailArmAt = trailArmAt;
       // Skip stale positions if Place Trade / fast fill painted while this refresh was in-flight
       if ((window._openPositionsGen || 0) === positionsGenAtStart) {
-        window._lastOpenPositions = mergeOpenPositionsPreserve(
-          window._lastOpenPositions,
-          positions.open || []
-        );
+        const incomingOpen = Array.isArray(positions.open) ? positions.open : [];
+        const prevOpen = window._lastOpenPositions || [];
+        const ctHint =
+          typeof positions.closedTotal === 'number'
+            ? positions.closedTotal
+            : window._lastClosedTotal;
+        // Do not wipe opens on transient empty fast/status payloads during lag.
+        if (!(incomingOpen.length === 0 && prevOpen.length > 0 && ctHint !== 0)) {
+          window._lastOpenPositions = mergeOpenPositionsPreserve(
+            prevOpen,
+            incomingOpen
+          );
+        }
       }
       try {
         maybePlayTradeLifecycleSounds(
           window._lastOpenPositions || positions.open || [],
-          positions.closed || []
+          window._lastClosedPositions || [],
+          {
+            closedTotal:
+              typeof positions.closedTotal === 'number'
+                ? positions.closedTotal
+                : window._lastClosedTotal,
+          }
         );
       } catch (_) {}
       updateOpenTradesBadge(
@@ -26850,12 +27529,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       paintOpenPositionsTables();
       if (typeof renderZionOpenTrades === 'function') renderZionOpenTrades();
 
-      window._closedTradeGroups = buildClosedTradeGroups(
-        (positions && Array.isArray(positions.closed) ? positions.closed : []) || [],
+      const closedIngest = ingestClosedPositionsPayload(positions);
+      paintClosedFromCache(
         window._lastOpenPositions || (positions && positions.open) || []
       );
-      // Keep full ring for Profitable/Losing + timeframe filters (no newest-40 cut).
-      paintClosedTradesTables();
+      if (closedIngest.needFull) {
+        const total =
+          positions && typeof positions.closedTotal === 'number'
+            ? positions.closedTotal
+            : null;
+        void refreshClosedPositions({
+          force:
+            !(window._lastClosedPositions || []).length ||
+            (total != null && total !== (window._lastClosedTotal || 0)),
+        });
+      }
 
       const rb = positions.rebuy || {};
       const rbStatus = rb.status || status.monitor?.rebuy || {};
@@ -26906,9 +27594,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </tr>\`).join('');
       }
 
-      const activityHtml = activity.length === 0
+      const activityHtml = activityList.length === 0
         ? '<div style="color:var(--muted)">No recent buys detected</div>'
-        : activity.map(a => {
+        : activityList.map(a => {
             const m = a.metrics || {};
             const ar = a.antiRug || {};
             const riskColor = ar.riskLevel === 'critical' || ar.riskLevel === 'high'
@@ -27167,7 +27855,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         console.error('[dashboard] refresh failed:', err);
         const detail = document.getElementById('stat-detail');
         if (detail) {
-          detail.textContent = 'Refresh error: ' + ((err && err.message) || String(err));
+          let msg = '';
+          try {
+            msg = String((err && err.message) || '');
+            msg = msg.split('\\r').join(' ').split('\\n').join(' ').trim();
+          } catch (_) {
+            msg = '';
+          }
+          if (/map is not a function/i.test(msg)) {
+            msg = 'bad activity data';
+          } else if (!msg || msg.length > 120 || /function\s*\(|=>\s*\{/.test(msg)) {
+            msg = 'refresh failed';
+          } else {
+            msg = msg.slice(0, 120);
+          }
+          detail.textContent = 'Refresh error: ' + msg;
         }
       } finally {
         window._refreshInFlight = false;
@@ -33008,6 +33710,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionVoiceGen = 0;
     let _zionVoiceToggleLockUntil = 0;
     let _zionMicButtonsBound = false;
+    let _zionVoiceMediaStream = null;
+    let _zionVoiceLastPtrToggleAt = 0;
     const ZION_VOICE_SILENCE_MS = 3000;
     const ZION_VOICE_ACTIVE_FLOOR_MS = 5000;
     const ZION_VOICE_KEEPALIVE_MS = 10000;
@@ -33015,6 +33719,74 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const ZION_VOICE_MAX_FAILS = 3;
     const ZION_VOICE_RESTART_BASE_MS = 450;
     const ZION_VOICE_TOGGLE_DEBOUNCE_MS = 450;
+
+    function releaseZionVoiceMediaStream() {
+      const stream = _zionVoiceMediaStream;
+      _zionVoiceMediaStream = null;
+      if (!stream) return;
+      try {
+        const tracks = stream.getTracks ? stream.getTracks() : [];
+        for (let i = 0; i < tracks.length; i++) {
+          try { tracks[i].stop(); } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    /**
+     * iOS/Android: SpeechRecognition alone often never shows the OS mic indicator
+     * and silently fails after the first session. Hold a getUserMedia stream while
+     * the mic is armed so permission + green indicator stick and restarts work.
+     */
+    function primeZionVoiceMediaStreamFromGesture() {
+      if (_zionVoiceMediaStream) return;
+      const md = navigator.mediaDevices;
+      if (!md || typeof md.getUserMedia !== 'function') return;
+      try {
+        md.getUserMedia({ audio: true, video: false })
+          .then(function (stream) {
+            if (!_zionVoiceOn) {
+              try {
+                const tracks = stream.getTracks ? stream.getTracks() : [];
+                for (let i = 0; i < tracks.length; i++) {
+                  try { tracks[i].stop(); } catch (_) {}
+                }
+              } catch (_) {}
+              return;
+            }
+            if (_zionVoiceMediaStream && _zionVoiceMediaStream !== stream) {
+              releaseZionVoiceMediaStream();
+            }
+            _zionVoiceMediaStream = stream;
+            // Permission just granted — if SpeechRecognition never attached, start now.
+            if (
+              _zionVoiceOn &&
+              !_zionChatBusy &&
+              !_zionVoicePausedBusy &&
+              !_zionVoiceRec &&
+              !_zionVoiceStarting
+            ) {
+              try { startZionVoiceRecognition({ force: true }); } catch (_) {}
+            }
+            try { syncZionMicUi(); } catch (_) {}
+          })
+          .catch(function (err) {
+            const name = String((err && err.name) || '');
+            if (
+              name === 'NotAllowedError' ||
+              name === 'PermissionDeniedError' ||
+              name === 'SecurityError'
+            ) {
+              failZionVoiceSoft('Microphone permission denied');
+              return;
+            }
+            if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+              failZionVoiceSoft('No microphone available');
+              return;
+            }
+            // Some browsers still run Web Speech without an explicit stream.
+          });
+      } catch (_) {}
+    }
 
     function isZionVoiceMobileClient() {
       try {
@@ -33098,6 +33870,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceOn = false;
         _zionVoicePausedBusy = false;
         _zionVoiceRec = null;
+        try { releaseZionVoiceMediaStream(); } catch (__) {}
       }
       writeZionVoiceMicPref(false);
       paintZionVoiceError(text);
@@ -33365,6 +34138,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           btn.classList.remove('is-error');
           btn.setAttribute('aria-label', 'Voice input off — click to speak');
           btn.title = 'Voice input (off)';
+        } else if (
+          isZionVoiceMobileClient() &&
+          !_zionVoiceMediaStream &&
+          _zionVoiceFailCount > 0
+        ) {
+          btn.classList.remove('is-error');
+          btn.setAttribute('aria-label', 'Allow microphone permission');
+          btn.title = 'Allow microphone…';
         } else if (_zionVoiceMode === 'wake-idle') {
           btn.classList.remove('is-error');
           btn.setAttribute('aria-label', 'Wake idle — say Zion or tap mic');
@@ -33424,6 +34205,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceActiveSince = 0;
         _zionVoiceKeepAliveUntil = 0;
         _zionVoiceFailCount = 0;
+        releaseZionVoiceMediaStream();
         if (persistOff) writeZionVoiceMicPref(false);
       }
       syncZionMicUi();
@@ -33526,6 +34308,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function startZionVoiceRecognition(opts) {
       const force = !!(opts && opts.force);
       const fromUserGesture = !!(opts && opts.fromUserGesture);
+      const reuseIfRunning = !!(opts && opts.reuseIfRunning);
       if (_zionVoiceStarting && !force) return;
       const Ctor = getZionSpeechRecognitionCtor();
       if (!Ctor) {
@@ -33536,6 +34319,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         failZionVoiceSoft('Voice needs HTTPS (or localhost)');
         return;
       }
+
+      // iOS: abort()+start() in the same gesture often kills recognition.
+      // Mode changes (wake → active) should reuse the live session.
+      if (
+        _zionVoiceRec &&
+        (reuseIfRunning || (fromUserGesture && !force)) &&
+        !_zionVoiceStarting
+      ) {
+        clearZionVoiceStartWatchdog();
+        _zionVoiceStarting = false;
+        try { syncZionMicUi(); } catch (_) {}
+        return;
+      }
+
       _zionVoiceStarting = true;
       clearZionVoiceRestartTimer();
       clearZionVoiceStartWatchdog();
@@ -33574,6 +34371,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       _zionVoiceRec = rec;
       _zionVoiceStarting = true;
       // Mobile Web Speech is unreliable with continuous=true (starts then dies).
+      // Keep a live MediaStream (primeZionVoiceMediaStreamFromGesture) so one-shot
+      // sessions can restart after onend without a fresh tap.
       const mobile = isZionVoiceMobileClient();
       rec.continuous = !mobile;
       rec.interimResults = true;
@@ -33645,10 +34444,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return;
         }
         if (err === 'not-allowed' || err === 'service-not-allowed') {
+          // Mobile race: SR often fires not-allowed while the OS permission
+          // sheet / getUserMedia prime is still in flight. Keep green armed and
+          // soft-retry until the stream exists or we hit max fails.
+          const mobilePending =
+            mobile &&
+            _zionVoiceOn &&
+            !_zionVoiceMediaStream;
+          if (mobilePending) {
+            _zionVoiceFailCount += 1;
+            try {
+              const hintBtn =
+                document.getElementById('zion-agent-mic') ||
+                document.getElementById('zion-agent-widget-mic');
+              if (hintBtn) hintBtn.title = 'Allow microphone…';
+            } catch (_) {}
+            try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
+            if (_zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
+              failZionVoiceSoft('Microphone permission denied');
+              return;
+            }
+            if (!_zionChatBusy && !_zionVoicePausedBusy) {
+              scheduleZionVoiceRestart(
+                ZION_VOICE_RESTART_BASE_MS * _zionVoiceFailCount
+              );
+            }
+            try { syncZionMicUi(); } catch (_) {}
+            return;
+          }
           failZionVoiceSoft('Microphone permission denied');
           return;
         }
         if (err === 'audio-capture') {
+          // Often means OS mic session missing — re-prime then soft-retry.
+          if (mobile && _zionVoiceOn) {
+            try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
+            _zionVoiceFailCount += 1;
+            if (_zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
+              failZionVoiceSoft('No microphone available');
+              return;
+            }
+            if (!_zionChatBusy && !_zionVoicePausedBusy) {
+              scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS * _zionVoiceFailCount);
+            }
+            return;
+          }
           failZionVoiceSoft('No microphone available');
           return;
         }
@@ -33673,10 +34513,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         clearZionVoiceStartWatchdog();
         _zionVoiceStarting = false;
         if (_zionVoiceOn && !_zionChatBusy && !_zionVoicePausedBusy) {
-          // Mobile one-shot: restart promptly so tap-to-talk stays live
-          scheduleZionVoiceRestart(
-            mobile ? Math.max(180, ZION_VOICE_RESTART_BASE_MS / 2) : ZION_VOICE_RESTART_BASE_MS
-          );
+          // Mobile one-shot: restart promptly so wake-word / tap-to-talk stays live
+          const delay = mobile
+            ? (_zionVoiceMediaStream ? 120 : Math.max(180, ZION_VOICE_RESTART_BASE_MS / 2))
+            : ZION_VOICE_RESTART_BASE_MS;
+          scheduleZionVoiceRestart(delay);
         } else {
           try { syncZionMicUi(); } catch (_) {}
         }
@@ -33704,7 +34545,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         } catch (_) {}
         _zionVoiceStarting = false;
         scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS * 2);
-      }, ZION_VOICE_START_TIMEOUT_MS);
+      }, mobile && !_zionVoiceMediaStream
+        ? Math.max(ZION_VOICE_START_TIMEOUT_MS, 20000)
+        : ZION_VOICE_START_TIMEOUT_MS);
 
       try {
         // Must stay sync on the user-gesture stack (iOS / Android Chrome).
@@ -33738,6 +34581,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const now = Date.now();
       if (now < _zionVoiceToggleLockUntil) return;
       _zionVoiceToggleLockUntil = now + ZION_VOICE_TOGGLE_DEBOUNCE_MS;
+      const mobile = isZionVoiceMobileClient();
       try {
         if (!getZionSpeechRecognitionCtor()) {
           failZionVoiceSoft('Voice not supported in this browser');
@@ -33754,16 +34598,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             _zionVoiceLastError = '';
             _zionVoiceFailCount = 0;
             _zionVoiceStarting = false;
-            enterZionVoiceActive({ silent: true });
+            if (mobile) enterZionVoiceWakeIdle();
+            else enterZionVoiceActive({ silent: true });
+            try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
             startZionVoiceRecognition({ fromUserGesture: true, force: true });
             return;
           }
-          // Wake-idle (after keep-alive): tap re-arms active listen — don't force off
+          // Wake-idle (green): tap re-arms active listen — don't force off
           if (_zionVoiceMode === 'wake-idle') {
             _zionVoiceLastError = '';
             _zionVoiceFailCount = 0;
             enterZionVoiceActive({ silent: false });
-            startZionVoiceRecognition({ fromUserGesture: true, force: true });
+            // Reuse live session when possible — iOS dies on abort+start
+            startZionVoiceRecognition({
+              fromUserGesture: true,
+              reuseIfRunning: true,
+            });
             focusZionComposer(src);
             return;
           }
@@ -33777,7 +34627,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           // Switch source while on — jump to active listen for this composer
           _zionVoiceSource = src;
           enterZionVoiceActive({ silent: true });
-          startZionVoiceRecognition({ fromUserGesture: true, force: true });
+          startZionVoiceRecognition({
+            fromUserGesture: true,
+            reuseIfRunning: true,
+          });
           focusZionComposer(src);
           return;
         }
@@ -33792,8 +34645,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceLastError = '';
         _zionVoiceStarting = false;
         writeZionVoiceMicPref(true);
-        // Tap-to-talk: go straight to active listen (wake-word idle is for background only)
-        enterZionVoiceActive({ silent: false });
+        // Mobile: arm wake-idle (green) and listen for “Zion”.
+        // Desktop: tap-to-talk goes straight to active (existing UX).
+        if (mobile) {
+          enterZionVoiceWakeIdle();
+        } else {
+          enterZionVoiceActive({ silent: false });
+        }
+        try { syncZionMicUi(); } catch (_) {}
+        try { primeZionVoiceMediaStreamFromGesture(); } catch (_) {}
         startZionVoiceRecognition({ fromUserGesture: true, force: true });
       } catch (err) {
         failZionVoiceSoft('Voice input failed: ' + ((err && err.message) || 'unknown'));
@@ -33810,6 +34670,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         let ptrDownX = 0;
         let ptrDownY = 0;
         let ptrActive = false;
+
+        function fireMicToggle(ev) {
+          if (btn.disabled || btn.classList.contains('is-unsupported')) return;
+          const src = btn.getAttribute('data-zion-mic') || 'widget';
+          try {
+            if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+          } catch (_) {}
+          toggleZionVoice(src);
+        }
+
         btn.addEventListener(
           'pointerdown',
           function (ev) {
@@ -33836,9 +34706,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const dx = Math.abs((Number(ev.clientX) || 0) - ptrDownX);
             const dy = Math.abs((Number(ev.clientY) || 0) - ptrDownY);
             if (dx > 14 || dy > 14) return;
-            try { ev.preventDefault(); } catch (_) {}
-            const src = btn.getAttribute('data-zion-mic') || 'widget';
-            toggleZionVoice(src);
+            _zionVoiceLastPtrToggleAt = Date.now();
+            fireMicToggle(ev);
           },
           { passive: false }
         );
@@ -33849,6 +34718,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           },
           { passive: true }
         );
+        // Desktop: click fallback. Mobile: pointerup only — a delayed click
+        // after pointerup was toggling the mic OFF and wiping the green arm.
+        if (!isZionVoiceMobileClient()) {
+          btn.addEventListener(
+            'click',
+            function (ev) {
+              if (Date.now() - _zionVoiceLastPtrToggleAt < 500) {
+                try { ev.preventDefault(); } catch (_) {}
+                return;
+              }
+              fireMicToggle(ev);
+            },
+            { passive: false }
+          );
+        } else {
+          btn.addEventListener(
+            'click',
+            function (ev) {
+              // Swallow synthetic click after pointerup; never toggle again.
+              try { ev.preventDefault(); } catch (_) {}
+              try { ev.stopPropagation(); } catch (_) {}
+            },
+            { passive: false }
+          );
+        }
         // Keyboard / accessibility fallback
         btn.addEventListener('keydown', function (ev) {
           if (ev.key !== 'Enter' && ev.key !== ' ') return;
@@ -33871,6 +34765,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (_zionVoiceMode !== 'active' || Date.now() > _zionVoiceKeepAliveUntil) {
         enterZionVoiceWakeIdle();
       }
+      // Prefer wake-idle on restore so “Zion” works after reopen (esp. mobile).
+      if (isZionVoiceMobileClient() && _zionVoiceMode === 'active') {
+        enterZionVoiceWakeIdle();
+      }
+      try { syncZionMicUi(); } catch (_) {}
       if (!_zionVoiceRec && !_zionVoiceStarting) {
         try { startZionVoiceRecognition(); } catch (_) {}
       }
@@ -35331,17 +36230,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const statusEl = document.getElementById('learning-health-status');
       const banner = document.getElementById('learning-durability-banner');
       if (banner && data) {
-        const p = data.persistence || {};
-        const show =
-          data.health === 'at_risk' ||
-          data.episodesDroppedLikely ||
-          data.learningFilesMissing ||
-          (p.onRender && !p.durableLikely);
-        if (show) {
+        const showDrop =
+          data.episodesDroppedLikely || data.learningFilesMissing;
+        if (showDrop) {
           banner.classList.remove('hidden');
           banner.innerHTML =
-            '<strong style="color:#fecaca">Self-learning may not persist</strong> — ' +
-            escHtml(data.reason || p.warning || 'Mount DATA_DIR on a durable disk.') +
+            '<strong style="color:#fecaca">Learning files look incomplete</strong> — ' +
+            escHtml(data.reason || 'Episode files may be missing.') +
             ' <span style="color:#fca5a5">Episodes: ' +
             escHtml(String(data.totalEpisodes || 0)) +
             (data.episodesDroppedLikely
@@ -35363,9 +36258,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               escHtml(String(prev)) +
               ', now ' +
               escHtml(String(cur)) +
-              '. Learning files may have wiped — check Disk / DATA_DIR and restore a backup.';
+              '. Restore a backup if learning progress looks wiped.';
           }
         } catch (_) {}
+      } else if (banner && !data) {
+        banner.classList.add('hidden');
+        banner.textContent = '';
       }
       if (!statusEl || !data) return;
       const color = learningHealthColor(data.health);
@@ -35499,10 +36397,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const status = document.getElementById('learning-export-status');
       try {
         if (status) status.textContent = 'Exporting…';
-        const res = await fetch(
-          '/api/microbots/learning-export?format=' +
-            encodeURIComponent(format === 'csv' ? 'csv' : 'json')
-        );
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (_) {} }, 90000) : null;
+        let res;
+        try {
+          res = await fetch(
+            '/api/microbots/learning-export?format=' +
+              encodeURIComponent(format === 'csv' ? 'csv' : 'json'),
+            ctrl ? { signal: ctrl.signal } : {}
+          );
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
         if (!res.ok) {
           let msg = 'Export failed';
           try {
@@ -36256,6 +37162,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
     setInterval(refresh, 5000);
+    // Closed list is omitted from fast polls — refresh the full closed slice periodically.
+    void refreshClosedPositions({ force: true });
+    setInterval(function () {
+      try {
+        if (document.hidden) return;
+        void refreshClosedPositions({ force: false });
+      } catch (_) {}
+    }, 20000);
     // Lightweight open-positions poll so fight-log / wallet fills appear quickly
     // without waiting for the full 5s dashboard refresh.
     setInterval(function () {

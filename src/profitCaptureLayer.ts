@@ -60,14 +60,14 @@ export const PCL_PPP_BY_FAMILY: Record<
 > = {
   fast: {
     armOfTpPct: 52,
-    // Tighter giveback for low-capture fast/MS harvest (1.2.268)
-    givebackOfPeakPct: 28,
+    // Tighter giveback for low-capture fast/MS harvest (1.2.291)
+    givebackOfPeakPct: 24,
     minOpenSec: 25,
     minProfitFloorPct: 4,
   },
   dip_trend: {
     armOfTpPct: 50,
-    givebackOfPeakPct: 42,
+    givebackOfPeakPct: 32,
     minOpenSec: 60,
     minProfitFloorPct: 6,
   },
@@ -416,7 +416,7 @@ export function resolvePclPartialDefaults(
     if (armed) {
       // Migration armed: slightly earlier bank than generic fast 8%@0.45
       if (id === 'migration_sniper') {
-        base = { earlyPartialTpPct: 7, earlyPartialFraction: 0.5 };
+        base = { earlyPartialTpPct: 6, earlyPartialFraction: 0.5 };
       } else {
         base = { earlyPartialTpPct: 8, earlyPartialFraction: 0.45 };
       }

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.360',
+    title: 'Restore-era UX/Learning/Trading + signal intake unstick',
+    sections: ['overview', 'zion', 'learning', 'microbots', 'scanners', 'tradecraft'],
+    items: [
+      'Rebuilt on 1.2.269 classic RPC: Zion mobile mic, Closed Trades cache, trade-sound spam fix, Stats arrows + 90s export, Learning Report + dashboard-reset quarantine.',
+      'Trading: Steady medium hot lane, Pump.fun Medium/Majors parks, false flush-kill/MC spam guards, late-chase cap, Grad/Dip harvest, MS expectancy tighten.',
+      'Signal stall: hung pollInFlight unlock (Market/Favourites/Zion); Dex/Jupiter collect 8s cap keeps last universe; weak-public Utility slows Favourites only — does not skip Market/Alpha/Zion.',
+    ],
+  },
+  {
     version: '1.2.269',
     title: 'Unstick armed signal path (MC unknown + Entry Skill)',
     sections: ['overview', 'microbots', 'scanners', 'learning'],

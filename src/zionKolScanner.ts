@@ -93,6 +93,8 @@ let candidates: ZionKolCandidate[] = [];
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let pollInFlight = false;
+let pollInFlightSince = 0;
+const ZION_POLL_HANG_MS = 12_000;
 let lastPollAt = 0;
 let lastError: string | null = null;
 let lastUniverseMessage = '';
@@ -722,7 +724,17 @@ async function rebuildCandidates(): Promise<void> {
 }
 
 export async function runZionScannerPollOnce(): Promise<void> {
-  if (pollInFlight) return;
+  if (pollInFlight) {
+    if (pollInFlightSince > 0 && Date.now() - pollInFlightSince > ZION_POLL_HANG_MS) {
+      console.warn(
+        `[zion] pollInFlight hung ${Date.now() - pollInFlightSince}ms — force unlock`
+      );
+      pollInFlight = false;
+      pollInFlightSince = 0;
+    } else {
+      return;
+    }
+  }
   if (!zionCfg()?.enabled || zionCfg().scanner?.enabled === false) return;
   if (Date.now() < rpcCooldownUntil) {
     lastError = `RPC cooldown until ${new Date(rpcCooldownUntil).toISOString()}`;
@@ -741,6 +753,7 @@ export async function runZionScannerPollOnce(): Promise<void> {
     return;
   }
   pollInFlight = true;
+  pollInFlightSince = Date.now();
   try {
     if (!universe.length) loadUniverseCache();
     await refreshUniverse(false);
@@ -762,6 +775,7 @@ export async function runZionScannerPollOnce(): Promise<void> {
     }
   } finally {
     pollInFlight = false;
+    pollInFlightSince = 0;
   }
 }
 

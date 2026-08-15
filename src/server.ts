@@ -3348,6 +3348,8 @@ export function createServer(): express.Application {
       }
       config.learning = {
         includeLiveModeEpisodes: body.includeLiveModeEpisodes === true,
+        includeDashboardResetEpisodes:
+          config.learning?.includeDashboardResetEpisodes === true,
       };
       persistUserSettings();
       res.json({
@@ -3887,6 +3889,21 @@ export function createServer(): express.Application {
       const { buildSystemDiagnosticsExport } =
         require('./systemDiagnosticsExport') as typeof import('./systemDiagnosticsExport');
       const report = buildSystemDiagnosticsExport(req.query.window);
+      res.json(report);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /** Learning Report — last 50/100 closed trades evaluation package (read-only). */
+  app.get('/api/learning-report', (req: Request, res: Response) => {
+    try {
+      const { buildLearningReport } =
+        require('./learningReportExport') as typeof import('./learningReportExport');
+      const report = buildLearningReport(req.query.window);
       res.json(report);
     } catch (err) {
       res.status(500).json({

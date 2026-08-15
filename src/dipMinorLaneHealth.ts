@@ -396,11 +396,24 @@ export function getQualityParkLaneHealth(): {
   let hwrArmed = 0;
   let hwrWatch = 0;
   let mediumActive = 0;
+  let mediumWithLevels = 0;
+  let mediumSteadyArmed = 0;
   try {
-    const { getActiveDipWatchesSnapshot } =
-      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const {
+      getActiveDipWatchesSnapshot,
+      watchHasFibOrSupportLevels,
+    } = require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     const snap = getActiveDipWatchesSnapshot();
     mediumActive = (snap.medium || []).length;
+    for (const e of snap.medium || []) {
+      if (watchHasFibOrSupportLevels(e)) mediumWithLevels += 1;
+      if (
+        e.status === 'armed' &&
+        String(e.preferredProfileId || '') !== 'high_win_rate'
+      ) {
+        mediumSteadyArmed += 1;
+      }
+    }
     for (const e of snap.allActive || []) {
       const src = String(e.source || '');
       if (src !== 'medium' && src !== 'majors') continue;
@@ -459,6 +472,15 @@ export function getQualityParkLaneHealth(): {
   plain.push(
     `Steady medium now $20M–$200M, ${mediumActive} active watched`
   );
+  if (mediumActive > 0 && mediumWithLevels === 0) {
+    plain.push(
+      `Medium has ${mediumActive} watched but 0 with structure levels`
+    );
+  } else if (mediumActive > 0) {
+    plain.push(
+      `Medium has ${mediumWithLevels}/${mediumActive} with structure levels`
+    );
+  }
   if (exclProxyTotal > 0) {
     plain.push(
       `Excluded ${exclProxyTotal} stable/major-asset proxies from medium watch`
@@ -473,6 +495,12 @@ export function getQualityParkLaneHealth(): {
   if (univVol > 0) {
     plain.push(`Rejected ${univVol} low-volume medium/majors`);
   }
+  const nlRot = Number(dipF?.no_levels_rotate) || 0;
+  if (rotated > 0 || nlRot > 0) {
+    plain.push(
+      `Rotated ${rotated + nlRot} stagnant medium names`
+    );
+  }
 
   if (steadyArmed === 0 && (funnel.steady_compounder.low_movement || 0) > 0) {
     plain.push(
@@ -484,6 +512,10 @@ export function getQualityParkLaneHealth(): {
       deny
         ? `Steady has 0 medium arms: ${deny}`
         : `Steady has 0 medium arms`
+    );
+  } else if (mediumSteadyArmed > 0) {
+    plain.push(
+      `Steady armed ${mediumSteadyArmed} medium reclaim setups`
     );
   } else {
     plain.push(`Steady armed ${steadyArmed} active structure setups`);

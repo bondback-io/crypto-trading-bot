@@ -159,6 +159,10 @@ const seenThisSession = new Set<string>();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let pollInFlight = false;
+let pollInFlightSince = 0;
+const SCANNER_POLL_HANG_MS = 12_000;
+const COLLECT_BUDGET_MS = 8_000;
+let lastGoodUniverse: LaunchEvent[] = [];
 let lastPollAt: number | null = null;
 let lastPollMs: number | null = null;
 let lastError: string | null = null;
@@ -956,16 +960,42 @@ async function enrichCurve(event: LaunchEvent): Promise<{
   }
 }
 
+function withBudget<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let done = false;
+    const t = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve(fallback);
+    }, ms);
+    p.then((v) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      resolve(v);
+    }).catch(() => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      resolve(fallback);
+    });
+  });
+}
+
 export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
   const cfg = scannerCfg();
   const toMs = Date.now();
   const fromMs = toMs - Math.max(1, cfg.lookbackHours) * 3_600_000;
-  const { events } = await fetchRecentLaunches({
-    fromMs,
-    toMs,
-    maxResults: 80,
-    allowSynthetic: false,
-  });
+  const { events } = await withBudget(
+    fetchRecentLaunches({
+      fromMs,
+      toMs,
+      maxResults: 80,
+      allowSynthetic: false,
+    }),
+    COLLECT_BUDGET_MS,
+    { events: lastGoodUniverse.slice(), source: 'last-good' }
+  );
 
   const byMint = new Map<string, LaunchEvent>();
   for (const e of events) {
@@ -976,14 +1006,18 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
   if (cfg.jupiterTrendingEnabled !== false) {
     try {
       const solUsd = await fetchSolUsdPrice();
-      const jup = await fetchJupiterPumpTrending({
-        category: cfg.jupiterCategory ?? 'toptraded',
-        limit: cfg.jupiterLimit ?? 50,
-        pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
-        mergeIntervals: cfg.jupiterMergeIntervals !== false,
-        preferOrganicVolume: cfg.preferOrganicVolume !== false,
-        solUsd,
-      });
+      const jup = await withBudget(
+        fetchJupiterPumpTrending({
+          category: cfg.jupiterCategory ?? 'toptraded',
+          limit: cfg.jupiterLimit ?? 50,
+          pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
+          mergeIntervals: cfg.jupiterMergeIntervals !== false,
+          preferOrganicVolume: cfg.preferOrganicVolume !== false,
+          solUsd,
+        }),
+        COLLECT_BUDGET_MS,
+        []
+      );
       let added = 0;
       for (const e of jup) {
         if (!e?.mint) continue;
@@ -1026,7 +1060,9 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
     }
   }
 
-  return [...byMint.values()];
+  const out = [...byMint.values()];
+  if (out.length > 0) lastGoodUniverse = out;
+  return out.length > 0 ? out : lastGoodUniverse.slice();
 }
 
 /**
@@ -1442,7 +1478,17 @@ export function handOffScannerCandidate(
 
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
-  if (pollInFlight) return 0;
+  if (pollInFlight) {
+    if (pollInFlightSince > 0 && Date.now() - pollInFlightSince > SCANNER_POLL_HANG_MS) {
+      console.warn(
+        `[marketScanner] pollInFlight hung ${Date.now() - pollInFlightSince}ms — force unlock`
+      );
+      pollInFlight = false;
+      pollInFlightSince = 0;
+    } else {
+      return 0;
+    }
+  }
   const cfg = scannerCfg();
   const baseInterval = Math.max(22_000, Number(cfg.pollIntervalMs) || 22_000);
   const interval = adaptiveScannerIntervalMs(baseInterval);
@@ -1477,6 +1523,7 @@ export async function runScannerPollOnce(): Promise<number> {
     return 0;
   }
   pollInFlight = true;
+  pollInFlightSince = Date.now();
   const t0 = Date.now();
   try {
     lastError = null;
@@ -1720,6 +1767,7 @@ export async function runScannerPollOnce(): Promise<number> {
     return 0;
   } finally {
     pollInFlight = false;
+    pollInFlightSince = 0;
   }
 }
 
@@ -1782,6 +1830,7 @@ export function resetMarketScannerSession(): {
   lastPollAt = null;
   lastPollMs = null;
   pollInFlight = false;
+  pollInFlightSince = 0;
   if (running) {
     setTimeout(() => {
       void runScannerPollOnce();

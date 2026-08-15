@@ -9,6 +9,7 @@ import {
   handOffScannerCandidate,
   type ScannerCandidate,
 } from './marketScanner';
+import { trimMapToCap, registerCacheSweep } from './mapCap';
 import { isStrategyEnabledGlobal } from './strategies';
 import {
   isSmartBotProfilesEnabled,
@@ -16,6 +17,12 @@ import {
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
 import { analyzeSrConfluenceFromCandles } from './technicalLevels';
+import { noteWatcherPoll } from './watcherPollMetrics';
+
+/** Fail-open: rpcWorkloadControl is not on this tree. */
+function isRpcWorkloadEnabled(_id: string): boolean {
+  return true;
+}
 
 export type DipWatchStatus =
   | 'watching'
@@ -78,13 +85,15 @@ export interface DipWatchEntry {
   multiTfSupportHits?: number;
   /** Soft-movement arm (1.2.268) — size haircut + session cap */
   softMovement?: boolean;
+  /** Pump.fun preferred in Medium/Majors inventory / UI */
+  isPumpFun?: boolean;
 }
 
 /**
  * Separate caps so majors/medium (liberal admit + 10h TTL + frequent refresh)
  * cannot starve memecoin / scanner minors. Medium/Majors ≤80 (1.2.261).
  */
-const MAX_MAJORS_WATCHES = 80;
+const MAX_MAJORS_WATCHES = 50;
 const MAX_MEDIUM_WATCHES = 80;
 const MAX_MINORS_WATCHES = 16;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
@@ -102,14 +111,45 @@ const TRIGGER_RECLAIM_PCT = 0.9;
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
+/** Quality parks: snapshot less often — inventory is large and Dex/Gecko is HTTP-heavy */
+const QUALITY_MC_REFRESH_MIN_MS = 45_000;
+/** Full multi-TF OHLCV for quality parks at most this often (levels persist) */
+const QUALITY_OHLCV_REFRESH_MIN_MS = 3 * 60_000;
+/** Cap full market refreshes per tick to protect event loop / HTTP pools */
+const MAX_FULL_REFRESH_PER_TICK = 4;
+/** Ignore single-tick peak→price moves larger than this as feed glitches */
+const PEAK_GLITCH_DROP_PCT = 70;
+const PEAK_GLITCH_JUMP_MULT = 2.5;
+/** Soft H1 fill must stay within this band (Dex can print wild outliers) */
+const H1_SOFT_FILL_MAX_PCT = 55;
 const TERMINAL_UI_MS = 60_000;
 
 const watches = new Map<string, DipWatchEntry>();
 let lastMcRefreshAt = new Map<string, number>();
+/** mint → last multi-TF OHLCV refresh (quality parks) */
+const lastOhlcvRefreshAt = new Map<string, number>();
+/** Per-tick budget for expensive Dex/Gecko refreshes */
+let fullRefreshBudget = 0;
+/** Dedup no_levels funnel: last noted streak tick per mint */
+const noLevelsFunnelNotedAt = new Map<string, number>();
+const NO_LEVELS_FUNNEL_DEDUP_MS = 20 * 60_000;
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
 /** mint → last H1-vol rotation eviction/admit (debounce) */
 const lastRotationAt = new Map<string, number>();
+const WATCH_SIDECAR_CAP = 500;
+
+function capDipWatchSidecars(): Record<string, number> {
+  trimMapToCap(lastOhlcvRefreshAt, WATCH_SIDECAR_CAP);
+  trimMapToCap(unwatchCooldownUntil, WATCH_SIDECAR_CAP);
+  trimMapToCap(lastRotationAt, WATCH_SIDECAR_CAP);
+  trimMapToCap(noLevelsFunnelNotedAt, WATCH_SIDECAR_CAP);
+  return {
+    dipOhlcvRefresh: lastOhlcvRefreshAt.size,
+    dipUnwatchCooldown: unwatchCooldownUntil.size,
+  };
+}
+registerCacheSweep(capDipWatchSidecars);
 
 /** Rolling Dip admit / fire funnel (session counters). */
 const dipFunnel = {
@@ -357,6 +397,9 @@ function deleteDipWatch(mint: string): void {
   releaseQualitySoftArm(mint);
   watches.delete(mint);
   lastMcRefreshAt.delete(mint);
+  noLevelsFunnelNotedAt.delete(mint);
+  lastOhlcvRefreshAt.delete(mint);
+  lastRotationAt.delete(mint);
 }
 
 function activeWatches(bucket: DipWatchBucket): DipWatchEntry[] {
@@ -400,8 +443,17 @@ function qualityWatchScore(w: DipWatchEntry): number {
       ? -50_000
       : Math.abs(Number(w.priceChangeH1Pct) || 0) * 80 +
         Math.abs(Number(w.priceChange24hPct) || 0) * 40;
-  // Primary: armed/near → H1 vol + movement; soft age + MC proxy; dead tape last
-  return armedBoost + nearBoost + vol + ageDays * 50 + liqProxy * 20 + movBoost;
+  const pumpBoost = w.isPumpFun === true ? 8_000 : 0;
+  // Primary: armed/near → H1 vol + movement; pump preferred; soft age + MC; dead tape last
+  return (
+    armedBoost +
+    nearBoost +
+    vol +
+    ageDays * 50 +
+    liqProxy * 20 +
+    movBoost +
+    pumpBoost
+  );
 }
 
 /**
@@ -713,13 +765,14 @@ function pruneTerminal(): void {
   enforceBucketCap('minors', MAX_MINORS_WATCHES);
 }
 
-function watchHasFibOrSupportLevels(w: DipWatchEntry): boolean {
+export function watchHasFibOrSupportLevels(w: DipWatchEntry): boolean {
   return (
     (w.fib05PriceSol != null && w.fib05PriceSol > 0) ||
     (w.fib618PriceSol != null && w.fib618PriceSol > 0) ||
     (w.supportPriceSol != null && w.supportPriceSol > 0) ||
     w.nearKeyFib === true ||
-    w.nearSupport === true
+    w.nearSupport === true ||
+    (w.multiTfSupportHits != null && w.multiTfSupportHits > 0)
   );
 }
 
@@ -936,6 +989,7 @@ function maybeArmQualityPark(
 
 /** Eager Fib/S seed after parking so near-arm (minors) / quality playbook arm can happen ASAP. */
 function scheduleEagerLevelSeed(w: DipWatchEntry): void {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return;
   void (async () => {
     try {
       await refreshWatchMarket(w, Date.now(), { force: true });
@@ -971,14 +1025,32 @@ function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): voi
   const px = w.lastPriceSol;
   if (px != null && Number.isFinite(px) && px > 0) {
     const prevPeak = w.peakPriceSol;
-    if (prevPeak == null || !Number.isFinite(prevPeak) || px > prevPeak) {
+    if (prevPeak == null || !Number.isFinite(prevPeak) || prevPeak <= 0) {
       w.peakPriceSol = px;
-    }
-    const peak = w.peakPriceSol;
-    if (peak != null && peak > 0 && px < peak) {
+    } else if (px > prevPeak * PEAK_GLITCH_JUMP_MULT) {
+      // Feed unit glitch / pair switch — reset peak, do not invent a dump
+      w.peakPriceSol = px;
+      w.dropFromPeakPct = null;
+    } else if (px > prevPeak) {
+      w.peakPriceSol = px;
+    } else {
+      const peak = w.peakPriceSol!;
       const fromPeak = ((peak - px) / peak) * 100;
       if (Number.isFinite(fromPeak) && fromPeak > 0) {
-        w.dropFromPeakPct = fromPeak;
+        // One-tick cliff without confirming H1 → treat as bad mark, rebase peak
+        const h1Abs =
+          h1ChangePct != null && Number.isFinite(h1ChangePct)
+            ? Math.abs(Number(h1ChangePct))
+            : null;
+        if (
+          fromPeak >= PEAK_GLITCH_DROP_PCT &&
+          (h1Abs == null || h1Abs < fromPeak * 0.5)
+        ) {
+          w.peakPriceSol = px;
+          w.dropFromPeakPct = h1Abs != null && h1Abs > 1 ? h1Abs : null;
+        } else {
+          w.dropFromPeakPct = fromPeak;
+        }
       }
     }
   }
@@ -989,6 +1061,10 @@ function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): voi
     h1ChangePct < -1
   ) {
     const fromH1 = Math.abs(h1ChangePct);
+    if (fromH1 > H1_SOFT_FILL_MAX_PCT) {
+      // Ignore extreme H1 prints for invalidate math
+      return;
+    }
     if (w.dropFromPeakPct == null || fromH1 > w.dropFromPeakPct) {
       w.dropFromPeakPct = fromH1;
     }
@@ -998,10 +1074,21 @@ function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): voi
 async function refreshWatchMarket(
   w: DipWatchEntry,
   now: number,
-  opts?: { force?: boolean }
+  opts?: { force?: boolean; allowOhlcv?: boolean }
 ): Promise<void> {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return;
+  const isQuality = isQualityBandSource(w.source);
+  const minGap = isQuality ? QUALITY_MC_REFRESH_MIN_MS : MC_REFRESH_MIN_MS;
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
-  if (!opts?.force && now - last < MC_REFRESH_MIN_MS) return;
+  if (!opts?.force && now - last < minGap) return;
+
+  // Budget expensive HTTP (Dex snapshot + Gecko OHLCV) across large inventories
+  if (!opts?.force) {
+    if (fullRefreshBudget <= 0) return;
+    fullRefreshBudget -= 1;
+  }
+  noteWatcherPoll('dip');
+
   lastMcRefreshAt.set(w.mint, now);
   let h1Change: number | null = null;
   try {
@@ -1054,33 +1141,71 @@ async function refreshWatchMarket(
     /* keep last */
   }
 
-  // Multi-TF S/R confluence (Mode B parity) — fail soft
-  try {
-    const multi = await fetchMultiTfOhlcv(w.mint, { solUsd: undefined });
-    if (Object.keys(multi.byTf).length > 0) {
-      const conf = analyzeSrConfluenceFromCandles(w.mint, multi.byTf, {
-        priceSol: w.lastPriceSol,
+  const hasLevelsAlready = watchHasFibOrSupportLevels(w);
+  const lastOhlcv = lastOhlcvRefreshAt.get(w.mint) ?? 0;
+  const wantOhlcv =
+    opts?.allowOhlcv !== false &&
+    (opts?.force === true ||
+      !isQuality ||
+      !hasLevelsAlready ||
+      now - lastOhlcv >= QUALITY_OHLCV_REFRESH_MIN_MS);
+
+  // Multi-TF S/R confluence (Mode B parity) — fail soft; skip when throttled
+  let multiByTf: Awaited<ReturnType<typeof fetchMultiTfOhlcv>>['byTf'] | null =
+    null;
+  if (wantOhlcv) {
+    try {
+      const multi = await fetchMultiTfOhlcv(w.mint, {
+        solUsd: undefined,
+        // Quality parks only need 1h/15m for Fib/S — skip full TF fan-out
+        tfs: isQuality ? ['5m', '15m', '1h'] : undefined,
       });
-      if (conf.primarySupport != null && conf.primarySupport > 0) {
-        w.supportPriceSol = conf.primarySupport;
+      lastOhlcvRefreshAt.set(w.mint, now);
+      if (Object.keys(multi.byTf).length > 0) {
+        multiByTf = multi.byTf;
+        const conf = analyzeSrConfluenceFromCandles(w.mint, multi.byTf, {
+          priceSol: w.lastPriceSol,
+        });
+        if (conf.primarySupport != null && conf.primarySupport > 0) {
+          w.supportPriceSol = conf.primarySupport;
+        }
+        const hits = conf.supportTfHits?.length ?? 0;
+        w.multiTfSupportHits = hits;
+        if (conf.nearMultiTfSupport || hits > 0) {
+          w.nearSupport = true;
+        }
       }
-      const hits = conf.supportTfHits?.length ?? 0;
-      w.multiTfSupportHits = hits;
-      if (conf.nearMultiTfSupport || hits > 0) {
-        w.nearSupport = true;
-      }
+    } catch {
+      /* keep last levels */
     }
-  } catch {
-    /* keep last levels */
   }
 
-  // Technical Fib / support refresh when candles available — fail soft
+  // Technical Fib / support refresh — seed candles for quality parks so Steady can arm
   try {
     const { getTechnicalLevelsForStrategy } =
       require('./technicalLevels') as typeof import('./technicalLevels');
+    // Prefer 1h candles, then 15m/5m — quality parks need Fib/S to arm
+    const candlePick =
+      (multiByTf &&
+        (multiByTf['1h'] ||
+          multiByTf['15m'] ||
+          multiByTf['5m'] ||
+          multiByTf['4h'] ||
+          multiByTf['30m'])) ||
+      null;
     const tech = getTechnicalLevelsForStrategy({
       mint: w.mint,
       priceSol: w.lastPriceSol ?? undefined,
+      candles:
+        isQualityBandSource(w.source) &&
+        candlePick &&
+        candlePick.length >= 8
+          ? candlePick.map((c) => ({
+              time: c.time,
+              priceSol: c.priceSol,
+              volume: c.volume,
+            }))
+          : undefined,
     });
     if (tech) {
       if (tech.nearFibZone) w.nearKeyFib = true;
@@ -1127,7 +1252,16 @@ async function refreshWatchMarket(
   recomputeProximityFromLevels(w);
 
   const hasLevels = watchHasFibOrSupportLevels(w);
-  if (!hasLevels) noteDipFunnel('no_levels');
+  // Count once per mint per ~20m streak tick — avoid noLvl×1497 inflation
+  if (!hasLevels) {
+    const lastNoted = noLevelsFunnelNotedAt.get(w.mint) ?? 0;
+    if (now - lastNoted >= NO_LEVELS_FUNNEL_DEDUP_MS) {
+      noteDipFunnel('no_levels');
+      noLevelsFunnelNotedAt.set(w.mint, now);
+    }
+  } else {
+    noLevelsFunnelNotedAt.delete(w.mint);
+  }
 
   // Medium/Majors: name/class + MC-band rotate, then dead-tape / no-levels
   if (isQualityBandSource(w.source)) {
@@ -1159,7 +1293,9 @@ async function refreshWatchMarket(
       w.movementActive = mov.active;
       if (!mov.active) {
         w.qualityChip = 'low_movement';
-        const { rotate } = noteDeadTapeObservation(w.mint, true, now);
+        const { rotate } = noteDeadTapeObservation(w.mint, true, now, {
+          watchBand: isMajorsSource(w.source) ? 'majors' : 'medium',
+        });
         if (rotate && w.status !== 'armed') {
           const pid =
             w.preferredProfileId === 'high_win_rate'
@@ -1194,6 +1330,11 @@ async function refreshWatchMarket(
         if (w.qualityChip === 'low_movement' || w.qualityChip === 'rotated_stale') {
           w.qualityChip = 'active';
         }
+        if (!hasLevels && w.qualityChip !== 'rotated_stale') {
+          w.qualityChip = 'no_level';
+        } else if (hasLevels && w.qualityChip === 'no_level') {
+          w.qualityChip = 'active';
+        }
       }
     } catch {
       /* optional */
@@ -1203,26 +1344,39 @@ async function refreshWatchMarket(
         noteMajorsLevelsPresence,
         clearMajorsNoLevelsStreak,
       } = require('./majorsUniverse') as typeof import('./majorsUniverse');
-      if (hasLevels) {
-        clearMajorsNoLevelsStreak(w.mint);
-      } else if (
-        w.preferredProfileId === 'steady_compounder' ||
-        w.preferredProfileId === 'high_win_rate'
-      ) {
+      // Armed or structure present → clear streak. Watching without levels rotates
+      // (Steady/HWR no longer exempt — that pinned statues for 10h).
+      if (hasLevels || w.status === 'armed') {
         clearMajorsNoLevelsStreak(w.mint);
       } else {
         const { rotate, streak } = noteMajorsLevelsPresence(
           w.mint,
           false,
-          w.marketCapUsd
+          w.marketCapUsd,
+          { watchBand: isMajorsSource(w.source) ? 'majors' : 'medium' }
         );
         if (rotate) {
           noteDipFunnel('no_levels_rotate');
           noteQualityBandFunnel(w.source, 'expired');
+          const pid =
+            w.preferredProfileId === 'high_win_rate'
+              ? 'high_win_rate'
+              : 'steady_compounder';
+          try {
+            const { noteQualityParkFunnel } =
+              require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+            noteQualityParkFunnel(pid, 'rotated_stale');
+          } catch {
+            /* optional */
+          }
+          noteDipFunnel(
+            pid === 'high_win_rate' ? 'hwr_rotated_stale' : 'steady_rotated_stale'
+          );
           releaseQualitySoftArm(w.mint);
           w.status = 'expired';
           w.updatedAt = now;
           w.lastReason = `no levels ×${streak} (~20m) — rotate`;
+          w.qualityChip = 'rotated_stale';
           console.log(
             `[dip-watch] ROTATE ${w.symbol} [${w.source}] — no Fib/S after ${streak}×20m ticks`
           );
@@ -1234,6 +1388,7 @@ async function refreshWatchMarket(
             /* optional */
           }
           clearMajorsNoLevelsStreak(w.mint);
+          noLevelsFunnelNotedAt.delete(w.mint);
         }
       }
     } catch {
@@ -1265,6 +1420,7 @@ export function considerDipWatchSetup(input: {
   preferredProfileId?: string;
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
+  isPumpFun?: boolean;
 }): DipWatchEntry | null {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
@@ -1314,14 +1470,18 @@ export function considerDipWatchSetup(input: {
     noteMinorsFunnel('candidates_seen');
   }
 
-  // Scalper / Mode B: always mutual-exclude (protect mid-band spam).
+  // Scalper / Mode B: mutual-exclude only while a Mode B arm is live.
+  // Stale watching-only Mode B parks must not starve Dip minors.
   try {
-    const { isMintOnActiveScalperWatch } =
+    const { isMintOnActiveScalperWatch, getModeBFunnelCounters } =
       require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
     if (isMintOnActiveScalperWatch(input.mint)) {
-      noteDipFunnel('mutual_exclude');
-      noteDipFunnel('mx_scalper');
-      return null;
+      const armedNow = Number(getModeBFunnelCounters().armedNow || 0);
+      if (armedNow > 0) {
+        noteDipFunnel('mutual_exclude');
+        noteDipFunnel('mx_scalper');
+        return null;
+      }
     }
   } catch {
     /* optional */
@@ -1521,6 +1681,18 @@ export function considerDipWatchSetup(input: {
           input.pairCreatedAtMs > 0
         ? Math.max(0, (now - Number(input.pairCreatedAtMs)) / 3_600_000)
         : undefined;
+  let isPumpFun = input.isPumpFun === true;
+  if (!isPumpFun) {
+    try {
+      const { isPumpFunMintSuffix } =
+        require('./deadTokenFilters') as typeof import('./deadTokenFilters');
+      isPumpFun = isPumpFunMintSuffix(input.mint);
+    } catch {
+      isPumpFun = String(input.mint || '')
+        .toLowerCase()
+        .endsWith('pump');
+    }
+  }
   const entry: DipWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
@@ -1556,6 +1728,7 @@ export function considerDipWatchSetup(input: {
         ? Number(input.pairCreatedAtMs)
         : undefined,
     tokenAgeHours: ageHours,
+    isPumpFun: isQuality ? isPumpFun : undefined,
     lastReason: armed
       ? dropStarted
         ? 'near Fib/S + dip'
@@ -1765,6 +1938,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
 export async function tickDipSetupWatches(opts?: {
   priceByMint?: Map<string, number>;
 }): Promise<number> {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return 0;
   if (!isDipProfileEnabled()) return 0;
   pruneTerminal();
   const m = dipMatch();
@@ -1772,6 +1946,7 @@ export async function tickDipSetupWatches(opts?: {
   const maxDrop = m.maxDropFromPeakPct ?? 45;
   const now = Date.now();
   let handed = 0;
+  fullRefreshBudget = MAX_FULL_REFRESH_PER_TICK;
 
   for (const w of watches.values()) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
@@ -1827,8 +2002,14 @@ export async function tickDipSetupWatches(opts?: {
     if (px != null) w.lastPriceSol = px;
     w.targetDipEntries = buildTargetDipEntries(w);
 
-    // Invalidate: flush past max dip
-    if (w.dropFromPeakPct != null && w.dropFromPeakPct > maxDrop) {
+    // Invalidate: flush past max dip — minors only.
+    // Medium/Majors use dead-tape / name-exclude / MC-band rotate (flush % is
+    // often a Dex/peak unit glitch and was mass-invalidating quality parks).
+    if (
+      !isQualityBandSource(w.source) &&
+      w.dropFromPeakPct != null &&
+      w.dropFromPeakPct > maxDrop
+    ) {
       releaseQualitySoftArm(w.mint);
       w.status = 'invalidated';
       w.updatedAt = now;
@@ -2234,7 +2415,9 @@ export function offerDipWatchFromCandidate(c: {
   majorsBand?: string;
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
+  isPumpFun?: boolean;
 }): void {
+  if (!isRpcWorkloadEnabled('dip_setup_watch')) return;
   if (
     c.preferredProfileId &&
     c.preferredProfileId !== 'dip_buyer' &&
@@ -2277,6 +2460,7 @@ export function offerDipWatchFromCandidate(c: {
     preferredProfileId: c.preferredProfileId,
     pairCreatedAtMs: c.pairCreatedAtMs,
     tokenAgeHours: c.tokenAgeHours,
+    isPumpFun: c.isPumpFun,
   });
   if (entry && (src === 'medium' || src === 'majors')) {
     if (c.priceChangeH1Pct != null) entry.priceChangeH1Pct = c.priceChangeH1Pct;
@@ -2284,5 +2468,6 @@ export function offerDipWatchFromCandidate(c: {
     if (c.priceChange24hPct != null) {
       entry.priceChange24hPct = c.priceChange24hPct;
     }
+    if (c.isPumpFun === true) entry.isPumpFun = true;
   }
 }

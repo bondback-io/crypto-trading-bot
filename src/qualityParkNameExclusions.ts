@@ -116,6 +116,8 @@ const STOCK_NAME_SYMBOLS = new Set(
     'QQQ',
     'IWM',
     'DIA',
+    'CRCL',
+    'SPCX',
   ].map((s) => s.toUpperCase())
 );
 
@@ -205,6 +207,13 @@ export function classifyQualityParkNameExclusion(
 
   if (sym && STOCK_NAME_SYMBOLS.has(sym)) {
     return 'excluded_stock_name_token';
+  }
+  // Synthetic equity wrappers often append x (AAPLx, SPYx, NVDAx, COINx)
+  if (sym && /^[A-Z]{2,5}X$/.test(sym)) {
+    const base = sym.slice(0, -1);
+    if (STOCK_NAME_SYMBOLS.has(base)) {
+      return 'excluded_stock_name_token';
+    }
   }
 
   if (sym && STABLE_CASH_SYMBOLS.has(sym)) {

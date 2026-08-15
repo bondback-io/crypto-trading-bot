@@ -737,6 +737,14 @@ function maybeRecordLearningEpisode(
       return;
     }
   }
+  let quarantineReset = false;
+  try {
+    const { isResetLearningQuarantineReason } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    quarantineReset = isResetLearningQuarantineReason(position.reason);
+  } catch {
+    quarantineReset = /dashboard_reset/i.test(String(position.reason || ''));
+  }
   try {
     const {
       appendProfileLearningEpisode,
@@ -1171,7 +1179,17 @@ function maybeRecordLearningEpisode(
           return undefined;
         }
       })(),
+      learningQuarantined: quarantineReset || undefined,
     });
+    if (quarantineReset) {
+      console.log(
+        `dashboard_reset_excluded_from_learning ` +
+          `${position.symbol || position.mint.slice(0, 8)} ` +
+          `profile=${profileId} pnl=${pnlPct.toFixed(1)}% ` +
+          `reason=${String(position.reason || 'dashboard_reset')}`
+      );
+      return;
+    }
     if (episodeRow) {
       try {
         const { recordInfluencerMirrorOutcome } =
@@ -3233,21 +3251,32 @@ export class PaperTrader {
     }
     this.noteLifetimeFinalClose(totalPnl);
 
-    maybeRecordScannerOutcome(position, totalPct);
-    maybeRecordLaneOutcome(position, totalPnl, totalPct);
-    maybeRecordLearningEpisode(position, totalPnl, totalPct);
+    let skipLearningAdjacent = false;
     try {
-      const { notifyMarlTradeClosed } =
-        require('./marlCoordinator') as typeof import('./marlCoordinator');
-      notifyMarlTradeClosed({
-        profileId: position.tradeProfileId,
-        pnlSol: totalPnl,
-        costSol: closedCostSol,
-        mint: position.mint,
-        symbol: position.symbol,
-      });
+      const { isResetLearningQuarantineReason } =
+        require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+      skipLearningAdjacent = isResetLearningQuarantineReason(reason);
     } catch {
-      /* */
+      skipLearningAdjacent = /dashboard_reset/i.test(String(reason || ''));
+    }
+    // Always stamp quarantined audit episode for reset closes; skip training notifies.
+    maybeRecordLearningEpisode(position, totalPnl, totalPct);
+    if (!skipLearningAdjacent) {
+      maybeRecordScannerOutcome(position, totalPct);
+      maybeRecordLaneOutcome(position, totalPnl, totalPct);
+      try {
+        const { notifyMarlTradeClosed } =
+          require('./marlCoordinator') as typeof import('./marlCoordinator');
+        notifyMarlTradeClosed({
+          profileId: position.tradeProfileId,
+          pnlSol: totalPnl,
+          costSol: closedCostSol,
+          mint: position.mint,
+          symbol: position.symbol,
+        });
+      } catch {
+        /* */
+      }
     }
 
     const perf = this.getStats();
@@ -3409,7 +3438,7 @@ export class PaperTrader {
    * Reset paper balance to config.paper.startingBalanceSol and clear open positions.
    * Closed trade history is kept unless clearHistory is true.
    * Before clearing, mark-to-market force-closes opens as `dashboard_reset`
-   * so learning episodes are salvaged (session still resets).
+   * (quarantined audit episodes — excluded from training by default).
    */
   reset(options?: { clearHistory?: boolean }): {
     balanceSol: number;
@@ -3430,7 +3459,7 @@ export class PaperTrader {
             : 0);
         if (!(mark > 0)) continue;
         if (position.tradeMode === 'live') {
-          // No on-chain sell on Overview Reset — stamp MTM close for learning only
+          // No on-chain sell on Overview Reset — stamp MTM close (quarantined)
           const entry = Number(position.entryPriceSol) || mark;
           const pnlPct = entry > 0 ? ((mark - entry) / entry) * 100 : 0;
           const cost = Number(position.costSol) || 0;
@@ -3443,8 +3472,7 @@ export class PaperTrader {
           position.pnlSol = pnlSol;
           this.positions.delete(position.id);
           maybeRecordLearningEpisode(position, pnlSol, pnlPct);
-          maybeRecordLaneOutcome(position, pnlSol, pnlPct);
-          maybeRecordScannerOutcome(position, pnlPct);
+          // Skip lane/scanner learning notifies for reset closes
         } else {
           this.simulateSell(position.id, mark, 'dashboard_reset');
         }
@@ -3845,6 +3873,7 @@ export class PaperTrader {
           spikePct: params.spikePct,
           volumeMult: params.volumeMult,
           maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
+          highWaterMarkSol: position.highWaterMarkSol,
         });
       } else {
         scalpAction = evaluateShortTermExit({
@@ -4939,6 +4968,7 @@ export class PaperTrader {
             spikePct: params.spikePct,
             volumeMult: params.volumeMult,
             maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
+            highWaterMarkSol: position.highWaterMarkSol,
           });
         } else {
           scalpAction = evaluateShortTermExit({

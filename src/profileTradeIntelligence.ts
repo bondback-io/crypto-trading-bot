@@ -114,8 +114,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     heikinAshiExitEnabled: false,
   },
   dip_buyer: {
-    earlyPartialTpPct: 15,
-    earlyPartialFraction: 0.3,
+    earlyPartialTpPct: 12,
+    earlyPartialFraction: 0.35,
     trailTightenFactor: 0.85,
     momentumFadeDropPct: 8,
     aggressiveDeadMarket: false,
@@ -124,7 +124,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitGivebackPts: 22,
     profitFloorPct: 8,
     peakProtectArmOfTpPct: 50,
-    peakProtectGivebackOfPeakPct: 42,
+    peakProtectGivebackOfPeakPct: 36,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: false,
@@ -260,10 +260,18 @@ export function resolveExitPolicy(
     /* fail soft */
   }
   const ep = rules?.exitPolicy;
+  const clampMsPartial = (pol: ProfileExitPolicy): ProfileExitPolicy => {
+    if (String(profileId || '') !== 'migration_sniper') return pol;
+    const cap = opts?.armedWatch === true ? 6 : 10;
+    return {
+      ...pol,
+      earlyPartialTpPct: Math.min(Number(pol.earlyPartialTpPct) || cap, cap),
+    };
+  };
   if (!ep || typeof ep !== 'object') {
-    return { ...base, earlyPartialTpPct, earlyPartialFraction };
+    return clampMsPartial({ ...base, earlyPartialTpPct, earlyPartialFraction });
   }
-  return {
+  return clampMsPartial({
     earlyPartialTpPct:
       ep.earlyPartialTpPct != null && Number.isFinite(Number(ep.earlyPartialTpPct))
         ? Math.max(0, Number(ep.earlyPartialTpPct))
@@ -326,7 +334,7 @@ export function resolveExitPolicy(
       typeof ep.heikinAshiExitEnabled === 'boolean'
         ? ep.heikinAshiExitEnabled
         : base.heikinAshiExitEnabled,
-  };
+  });
 }
 
 export interface ProfileScoreboardRow {
@@ -956,7 +964,9 @@ export function evaluateAdaptiveProfileExit(input: {
     Math.abs(pnl) <= 2.5
   ) {
     const holdMs = Math.max(0, now - (Number(input.openedAt) || now));
-    const TREND_FLAT_COLLAPSED_DWELL_MS = 25 * 60_000;
+    // Armed holds get 25m; discretionary DOA cut sooner (learning: dead-tape disc bleed).
+    const TREND_FLAT_COLLAPSED_DWELL_MS =
+      input.armedWatch === true ? 25 * 60_000 : 15 * 60_000;
     if (holdMs >= TREND_FLAT_COLLAPSED_DWELL_MS) {
       return {
         type: 'full',
