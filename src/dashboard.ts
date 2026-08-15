@@ -18510,7 +18510,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         const lateOk =
           mix.lateChaseShare != null &&
-          mix.lateChaseShare <= (targets.lateChaseShareMax || 0.08);
+          mix.lateChaseShare <= (targets.lateChaseShareMax || 0.05);
         const lateWarn =
           mix.lateChaseShare != null && mix.lateChaseShare <= 0.1;
         if (lateEl) {

@@ -2502,7 +2502,8 @@ export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
 
 /**
  * Migration Sniper eligibility — primary: pre-grad curve fire (≥ minCurve, still
- * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 180s).
+ * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 180s)
+ * only when this mint already has armed Grad-watch continuity (not a cold chase).
  *
  * Near-curve below fire band stays on the graduation watchlist (not a buy).
  * Mature PumpSwap / stale migrations are rejected.
@@ -2576,8 +2577,18 @@ export function evaluateFreshMigrationEligibility(
     }
   }
 
-  // Fallback: ultra-fresh post-grad
+  // Fallback: ultra-fresh post-grad — armed Grad-watch continuity only
   if (ctx.isMigration === true && ctx.migrationFresh === true) {
+    const fam = String(ctx.setupWatchFamily || '').toLowerCase();
+    const armedGrad =
+      ctx.armedWatch === true && (fam === 'grad' || fam === 'mig');
+    if (!armedGrad) {
+      return {
+        ok: false,
+        reason:
+          'post-grad fallback denied — no armed grad-watch continuity',
+      };
+    }
     const ageMs =
       ctx.migrationAgeMs != null && Number.isFinite(ctx.migrationAgeMs)
         ? Number(ctx.migrationAgeMs)
@@ -2596,7 +2607,7 @@ export function evaluateFreshMigrationEligibility(
     }
     return {
       ok: true,
-      reason: `ultra-fresh post-grad ${Math.round(ageMs / 1000)}s`,
+      reason: `ultra-fresh post-grad ${Math.round(ageMs / 1000)}s (armed grad continuity)`,
     };
   }
 

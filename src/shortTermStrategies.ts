@@ -693,6 +693,8 @@ export interface MigrationEventExitView {
   spikePct?: number;
   volumeMult?: number;
   maxHoldAfterMigrateMs?: number;
+  /** Peak mark since open — used for post-mig no-pop cut */
+  highWaterMarkSol?: number;
 }
 
 /**
@@ -710,7 +712,10 @@ export function evaluateMigrationEventExit(
     ((view.currentPriceSol - view.entryPriceSol) / view.entryPriceSol) * 100;
   const ageMs = Math.max(0, view.nowMs - view.openedAt);
   const SL_GRACE_MS = 15_000;
-  const SL_GRACE_RUG_PCT = -35;
+  const SL_GRACE_RUG_PCT = -18;
+  const NO_POP_AFTER_MIG_MS = 75_000;
+  const NO_POP_PEAK_PCT = 2;
+  const FLAT_VOL_RUNNER_PCT = 12;
   const slPct = view.slPct > 0 ? -Math.abs(view.slPct) : view.slPct;
   const spikePct =
     view.spikePct != null && view.spikePct > 0 ? view.spikePct : 8;
@@ -772,12 +777,29 @@ export function evaluateMigrationEventExit(
   const volumeOk = !volKnown || vol! >= base! * volumeMult;
   // If volume unknown for >20s post-mig, allow price-only spike
   const volumeBypass = !volKnown && sinceMig >= 20_000;
+  const flatVolRunner = pnlPct >= FLAT_VOL_RUNNER_PCT;
 
-  if (priceSpike && (volumeOk || volumeBypass)) {
+  if (priceSpike && (volumeOk || volumeBypass || flatVolRunner)) {
     return {
       type: 'full',
       exitKind: 'mig_first_spike',
       reason: `${label} first spike +${pnlPct.toFixed(1)}%${volKnown ? ` · vol $${Math.round(vol!)}` : ''}`,
+    };
+  }
+
+  const peakPnlPct =
+    view.highWaterMarkSol != null &&
+    view.highWaterMarkSol > 0 &&
+    view.entryPriceSol > 0
+      ? ((view.highWaterMarkSol - view.entryPriceSol) / view.entryPriceSol) *
+        100
+      : pnlPct;
+  if (sinceMig >= NO_POP_AFTER_MIG_MS && peakPnlPct < NO_POP_PEAK_PCT) {
+    const heldSec = Math.max(0, Math.round(sinceMig / 1000));
+    return {
+      type: 'full',
+      exitKind: 'scalp_timer',
+      reason: `${label} no-pop ${heldSec}s (mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
     };
   }
 

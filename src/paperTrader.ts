@@ -3890,6 +3890,7 @@ export class PaperTrader {
           spikePct: params.spikePct,
           volumeMult: params.volumeMult,
           maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
+          highWaterMarkSol: position.highWaterMarkSol,
         });
       } else {
         scalpAction = evaluateShortTermExit({
@@ -4984,6 +4985,7 @@ export class PaperTrader {
             spikePct: params.spikePct,
             volumeMult: params.volumeMult,
             maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
+            highWaterMarkSol: position.highWaterMarkSol,
           });
         } else {
           scalpAction = evaluateShortTermExit({

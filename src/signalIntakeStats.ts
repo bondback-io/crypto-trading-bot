@@ -74,3 +74,79 @@ export function getSignalIntakeStats(now = Date.now()): {
     windowMs: WINDOW_MS,
   };
 }
+
+/**
+ * Generation-token lock so a hung await cannot pin pollInFlight forever.
+ * Force-unlock increments the epoch so a late `finally` cannot clear a new poll.
+ */
+export function createPollInFlightLock(name: string, hangMs: number): {
+  isInFlight: () => boolean;
+  hungForMs: () => number;
+  begin: () => number;
+  end: (token: number) => void;
+  reset: () => void;
+  forceUnlockIfHung: () => boolean;
+} {
+  let inFlight = false;
+  let startedAt = 0;
+  let epoch = 0;
+  return {
+    isInFlight: () => inFlight,
+    hungForMs: () => (inFlight && startedAt > 0 ? Date.now() - startedAt : 0),
+    begin(): number {
+      inFlight = true;
+      startedAt = Date.now();
+      epoch += 1;
+      return epoch;
+    },
+    end(token: number): void {
+      if (token === epoch) {
+        inFlight = false;
+        startedAt = 0;
+      }
+    },
+    reset(): void {
+      epoch += 1;
+      inFlight = false;
+      startedAt = 0;
+    },
+    forceUnlockIfHung(): boolean {
+      if (!inFlight || startedAt <= 0) return false;
+      const hungFor = Date.now() - startedAt;
+      if (hungFor <= hangMs) return false;
+      epoch += 1;
+      inFlight = false;
+      startedAt = 0;
+      console.warn(
+        `[${name}] pollInFlight hung ${hungFor}ms — forcing unlock so intake can resume`
+      );
+      try {
+        noteSignalBlockedByGate(`${name}_poll_hung_unlock`);
+      } catch {
+        /* */
+      }
+      return true;
+    },
+  };
+}
+
+export async function withTimeout<T>(
+  work: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timeout ${ms}ms`)),
+          ms
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}

@@ -61,8 +61,13 @@ export type FamilyGovernorState =
   | 'restricted';
 
 const MIN_SAMPLES = 18;
-/** Hard portfolio late-chase share ceiling (8% of last-50). */
-const LATE_CHASE_MAX_SHARE = 0.08;
+/** Hard portfolio late-chase share ceiling (5% of last-50). */
+const LATE_CHASE_MAX_SHARE = 0.05;
+
+/** Exposed for smokes / diagnostics — do not use to loosen the ceiling. */
+export function getLateChaseMaxShare(): number {
+  return LATE_CHASE_MAX_SHARE;
+}
 /** One-shot disable window after 1.2.257 ship. */
 const LATE_CHASE_DISABLE_CLOSES = 125;
 /** Late-chase permission floor after −18 penalty (quality gate). */
@@ -1652,6 +1657,67 @@ function profileMatchesFamilyNative(
   return false;
 }
 
+function isDipExpectancyNegative(): boolean {
+  if (isAdmissionBaselineV235()) return false;
+  const { expectancyPct, tradeCount } = getRecentCombinedExpectancy();
+  if (
+    tradeCount >= E_ADAPT_MIN_SAMPLES &&
+    expectancyPct != null &&
+    expectancyPct < 0
+  ) {
+    return true;
+  }
+  try {
+    const trades = collectExpectancyTrades()
+      .filter(
+        (t) =>
+          t.family === 'support_dip_reclaim' || t.profileId === 'dip_buyer'
+      )
+      .slice(-40);
+    const m = computeExpectancyMetrics(trades);
+    if (m.expectancyPct != null && m.expectancyPct < 0) return true;
+  } catch {
+    /* soft */
+  }
+  return false;
+}
+
+/**
+ * Unarmed / discretionary Dip while support_dip_reclaim is restricted and E < 0.
+ * Pass restricted / expectancyNegative to unit-test without live governor state.
+ */
+export function shouldBlockUnarmedDipDisc(input: {
+  profileId?: string | null;
+  armedWatch?: boolean;
+  entryPath?: string | null;
+  setupWatchFamily?: string | null;
+  restricted?: boolean;
+  expectancyNegative?: boolean;
+}): { skip: boolean; reason?: string; reasonCode?: string } {
+  const pid = String(input.profileId || '');
+  if (pid !== 'dip_buyer') return { skip: false };
+  const armed =
+    input.armedWatch === true ||
+    String(input.entryPath || '').toLowerCase() === 'armed_trigger';
+  if (armed) return { skip: false };
+  const restricted =
+    input.restricted != null
+      ? input.restricted === true
+      : getFamilyGovernorState('support_dip_reclaim') === 'restricted';
+  if (!restricted) return { skip: false };
+  const eNeg =
+    input.expectancyNegative != null
+      ? input.expectancyNegative === true
+      : isDipExpectancyNegative();
+  if (!eNeg) return { skip: false };
+  return {
+    skip: true,
+    reason:
+      'Dip: restricted support_dip_reclaim requires armed reclaim (disc blocked)',
+    reasonCode: 'gov_dip_disc_blocked',
+  };
+}
+
 /** Soft-skip when family is restricted (late_chase always hard-skips when restricted). */
 export function shouldSkipFamilyGovernor(input: {
   family?: string | null;
@@ -1702,6 +1768,23 @@ export function shouldSkipFamilyGovernor(input: {
   // Latent late (flag / secondary / ext) must not soft-pass as remapped reclaim.
   const latentLate =
     input.lateChase === true || secondaryLate || extLate;
+
+  // Unarmed Dip while support_dip_reclaim is restricted + E negative.
+  const dipDisc = shouldBlockUnarmedDipDisc({
+    profileId: pid,
+    armedWatch: armed,
+    entryPath: input.entryPath,
+    setupWatchFamily: input.setupWatchFamily,
+  });
+  if (dipDisc.skip) {
+    return {
+      skip: true,
+      reason: dipDisc.reason,
+      state: getFamilyGovernorState('support_dip_reclaim'),
+      family: 'support_dip_reclaim',
+      reasonCode: dipDisc.reasonCode,
+    };
+  }
 
   // MS disc harden: when migration_hold_reclaim is down_ranked/restricted,
   // only Grad/armed MS soft-passes — unarmed disc hard-skips.
@@ -1901,9 +1984,9 @@ function evaluateDipComparativeSoftAllow(): {
 }
 
 /** Armed reclaim near level — not true late chase for ceiling / hard-skip.
- * Deny relief when detector fired, secondary is late_chase, or extension ≥ late-chase lim.
- * True near-level reclaim (ext in [−2, +4]) may still relief. */
-function isArmedReclaimRelief(input: {
+ * Detector / style / secondary late_chase never reliefs, even when ext is in [−2, +4].
+ * Near-level relief is only for non-late armed reclaim. */
+export function isArmedReclaimRelief(input: {
   armedWatch?: boolean;
   entryStyle?: string | null;
   entryStyleSecondary?: string | null;
@@ -1924,10 +2007,8 @@ function isArmedReclaimRelief(input: {
   const styleLate = /late.?chase/i.test(style);
   const extLate =
     ext != null && ext >= LATE_CHASE_EXT_PCT_LIM;
-  // Remapped Grad/MS reclaim with true late extension must not bypass bans
+  // Remapped Grad/MS reclaim with true late stamp must not bypass bans
   if (detectorLate || secondaryLate || styleLate || extLate) {
-    // Only true near-level reclaim may still relief
-    if (ext != null && ext >= -2 && ext <= 4) return true;
     return false;
   }
   // Strongly negative E: only true near-level reclaim (ext ≤4%) may relief
@@ -1979,7 +2060,7 @@ export function getRecentMixShares(
   };
 }
 
-/** Hard late_chase share ceiling (8% last-50). Require ≥20 closes. */
+/** Hard late_chase share ceiling (5% last-50). Require ≥20 closes. */
 export function shouldLimitLateChaseShare(input: {
   lateChase?: boolean;
   family?: string | null;
@@ -2007,7 +2088,7 @@ export function shouldLimitLateChaseShare(input: {
     profileId: input.profileId,
   });
 
-  // Portfolio 8% ceiling always binds for late candidates — even under armed
+  // Portfolio 5% ceiling always binds for late candidates — even under armed
   // reclaim relief (measured late was bypassing LC_SHARE_CAP via relief-first).
   if (isLate) {
     const mix = getRecentMixShares(50, { lateChaseCeilingWindow: true });
@@ -2050,6 +2131,23 @@ export function shouldLimitLateChaseShare(input: {
     };
   }
   return { limit: false };
+}
+
+/** MS remapped reclaim must not buy when lateChaseAtEntry flipped after admit. */
+export function shouldAbortMsLateChaseBuy(input: {
+  profileId?: string | null;
+  lateChaseAtEntry?: boolean;
+}): { abort: boolean; reason?: string } {
+  if (
+    String(input.profileId || '') === 'migration_sniper' &&
+    input.lateChaseAtEntry === true
+  ) {
+    return {
+      abort: true,
+      reason: 'MS late-chase buy re-gate (remapped reclaim blocked)',
+    };
+  }
+  return { abort: false };
 }
 
 function countLiveArmedWatches(): number {

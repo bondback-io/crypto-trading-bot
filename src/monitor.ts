@@ -11,6 +11,11 @@ import {
 } from '@solana/web3.js';
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { normalizeSkipReason } from './soakMetrics';
+import {
+  createPollInFlightLock,
+  noteSignalBlockedByGate,
+  withTimeout,
+} from './signalIntakeStats';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   getConnection,
@@ -580,6 +585,7 @@ function lateChaseBuyReGateReason(
       shouldLimitLateChaseShare,
       shouldSkipFamilyGovernor,
       isAdmissionBaselineV235,
+      shouldAbortMsLateChaseBuy,
     } = require('./expectancyLift') as typeof import('./expectancyLift');
     if (isAdmissionBaselineV235()) return null;
     const entryStyle = String(
@@ -599,6 +605,13 @@ function lateChaseBuyReGateReason(
         signal.candidateTradeProfileId ||
         ''
     );
+    const msAbort = shouldAbortMsLateChaseBuy({
+      profileId,
+      lateChaseAtEntry: true,
+    });
+    if (msAbort.abort) {
+      return msAbort.reason || 'MS late-chase buy re-gate';
+    }
     const lim = shouldLimitLateChaseShare({
       lateChase: true,
       family: 'late_chase',
@@ -628,6 +641,39 @@ function lateChaseBuyReGateReason(
     }
   } catch {
     /* fail soft — do not block on re-gate errors */
+  }
+  return null;
+}
+
+/** Wallet-copy / re-entry: Entry Skill may not have run — block unarmed Dip while restricted. */
+function unarmedDipDiscBuyReGateReason(
+  buyOpts: NonNullable<Parameters<typeof executeBuy>[2]>,
+  signal: TradeSignal
+): string | null {
+  try {
+    const { shouldBlockUnarmedDipDisc, isAdmissionBaselineV235 } =
+      require('./expectancyLift') as typeof import('./expectancyLift');
+    if (isAdmissionBaselineV235()) return null;
+    const profileId = String(
+      (buyOpts as { tradeProfileId?: string }).tradeProfileId ||
+        signal.candidateTradeProfileId ||
+        ''
+    );
+    const blocked = shouldBlockUnarmedDipDisc({
+      profileId,
+      armedWatch:
+        (buyOpts as { armedWatch?: boolean }).armedWatch === true ||
+        signal.armedWatch === true,
+      entryPath: (buyOpts as { entryPath?: string }).entryPath,
+      setupWatchFamily:
+        (buyOpts as { setupWatchFamily?: string }).setupWatchFamily ||
+        signal.setupWatchFamily,
+    });
+    if (blocked.skip) {
+      return blocked.reason || 'Dip disc blocked (restricted)';
+    }
+  } catch {
+    /* fail soft */
   }
   return null;
 }
@@ -1574,7 +1620,9 @@ let activityTimer: ReturnType<typeof setInterval> | null = null;
 let softWatchBootTimer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let paused = false;
-let pollInFlight = false;
+const WALLET_POLL_HANG_MS = 25_000;
+const REBUY_EVAL_BUDGET_MS = 8_000;
+const walletPollLock = createPollInFlightLock('favourites', WALLET_POLL_HANG_MS);
 /** Rotates which wallets are polled first so a mid-cycle 429 cannot starve the same tail forever. */
 let pollRotationOffset = 0;
 /**
@@ -1909,7 +1957,7 @@ export function resetMonitorSession(): {
   clearRecentTradeTimes();
   // Unstick wallet-poll gates that a deploy would also clear.
   pollRateLimitedUntil = 0;
-  pollInFlight = false;
+  walletPollLock.reset();
   const scanner = resetMarketScannerSession();
   return {
     clearedActivity,
@@ -2140,9 +2188,13 @@ export function isMonitorPaused(): boolean {
 async function pollAllWallets(): Promise<void> {
   if (paused) return;
   if (Date.now() < pollRateLimitedUntil) return;
-  if (pollInFlight) {
-    console.log('[monitor] Skipping poll — previous cycle still running');
-    return;
+  if (walletPollLock.isInFlight()) {
+    if (walletPollLock.forceUnlockIfHung()) {
+      console.warn('[monitor] Previous poll hung — unlocked; retrying');
+    } else {
+      console.log('[monitor] Skipping poll — previous cycle still running');
+      return;
+    }
   }
   try {
     const { isRpcWorkloadEnabled } =
@@ -2150,7 +2202,10 @@ async function pollAllWallets(): Promise<void> {
     if (!isRpcWorkloadEnabled('wallet_poll')) return;
     const { shouldIdleIsolate } =
       require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
-    if (shouldIdleIsolate()) return;
+    if (shouldIdleIsolate()) {
+      noteSignalBlockedByGate('favourites_idle_isolate');
+      return;
+    }
   } catch {
     /* */
   }
@@ -2198,7 +2253,7 @@ async function pollAllWallets(): Promise<void> {
     /* load control optional */
   }
 
-  pollInFlight = true;
+  const pollToken = walletPollLock.begin();
   const cycleStarted = Date.now();
   try {
     // Soft-yield if buy queue already deep — don't block the whole cycle on enrich
@@ -2263,9 +2318,25 @@ async function pollAllWallets(): Promise<void> {
         break;
       }
       const batch = ordered.slice(i, i + batchSize);
-      const results = await Promise.allSettled(
-        batch.map((wallet) => pollWallet(wallet, throttle))
+      const batchBudgetMs = Math.max(
+        1_500,
+        cycleBudgetMs - (Date.now() - cycleStarted)
       );
+      let results: PromiseSettledResult<void>[];
+      try {
+        results = await withTimeout(
+          Promise.allSettled(batch.map((wallet) => pollWallet(wallet, throttle))),
+          batchBudgetMs,
+          'wallet_poll_batch'
+        );
+      } catch (err) {
+        console.warn(
+          '[monitor] Wallet batch timed out — rotating remainder to next tick',
+          err instanceof Error ? err.message : err
+        );
+        noteSignalBlockedByGate('favourites_poll_batch_timeout');
+        break;
+      }
       advanced += batch.length;
       let batchHad429 = false;
       for (const r of results) {
@@ -2331,7 +2402,19 @@ async function pollAllWallets(): Promise<void> {
       paperTrader.checkPositions();
     }
 
-    await evaluateReBuyOpportunities();
+    try {
+      await withTimeout(
+        evaluateReBuyOpportunities(),
+        REBUY_EVAL_BUDGET_MS,
+        'evaluateReBuyOpportunities'
+      );
+    } catch (err) {
+      console.warn(
+        '[monitor] Re-buy eval timed out or failed:',
+        err instanceof Error ? err.message : err
+      );
+      noteSignalBlockedByGate('rebuy_eval_timeout');
+    }
 
     pruneOldBuys();
 
@@ -2345,7 +2428,7 @@ async function pollAllWallets(): Promise<void> {
       );
     }
   } finally {
-    pollInFlight = false;
+    walletPollLock.end(pollToken);
   }
 }
 
@@ -4453,6 +4536,22 @@ async function executeSignalBuy(
       console.log(`[monitor] late-chase buy re-gate skip: ${lcAbort}`);
       return;
     }
+    const dipAbort = unarmedDipDiscBuyReGateReason(buyOpts, signal);
+    if (dipAbort) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, dipAbort);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: dipAbort,
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: dipAbort,
+      });
+      markScannerCooldown(signal.mint, false);
+      console.log(`[monitor] dip disc buy re-gate skip: ${dipAbort}`);
+      return;
+    }
   }
   const erScan = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, erScan);
@@ -5980,6 +6079,17 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       console.log(`[monitor] late-chase buy re-gate skip: ${lcAbort}`);
       return;
     }
+    const dipAbort = unarmedDipDiscBuyReGateReason(buyOpts, signal);
+    if (dipAbort) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, dipAbort);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: dipAbort,
+      });
+      console.log(`[monitor] dip disc buy re-gate skip: ${dipAbort}`);
+      return;
+    }
   }
   const er = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, er);
@@ -6420,6 +6530,15 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
             `[monitor] late-chase buy re-gate skip (reentry): ${lcAbort}`
           );
           markReEntryAttempt(mint, lcAbort);
+          finishBuy(mint, false);
+          return false;
+        }
+        const dipAbort = unarmedDipDiscBuyReGateReason(buyOpts, signal);
+        if (dipAbort) {
+          console.log(
+            `[monitor] dip disc buy re-gate skip (reentry): ${dipAbort}`
+          );
+          markReEntryAttempt(mint, dipAbort);
           finishBuy(mint, false);
           return false;
         }

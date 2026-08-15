@@ -967,8 +967,11 @@ export function buildExitLearningCandidates(
 
       if (missedTp / losers.length >= 0.32) {
         const nextGive = clamp((currentPolicy.profitGivebackPts || 25) - 6, 6, 40);
-        const nextPartial = clamp(
-          Math.round((currentPolicy.earlyPartialTpPct || 15) - 4), 6, 35
+        const nextPartial = clampLearnedEarlyPartial(
+          profileId,
+          clamp(
+            Math.round((currentPolicy.earlyPartialTpPct || 15) - 4), 6, 35
+          )
         );
         out.push({
           summary: `Missed-TP pattern (${missedTp}/${losers.length} losses) — tighten giveback→${nextGive}, partial→${nextPartial}%`,
@@ -1072,10 +1075,13 @@ export function buildExitLearningCandidates(
 
   // Earlier partial when avg peak high but exit mediocre
   if (avgPeak >= 30 && avgGive >= 12) {
-    const partial = clamp(
-      Math.round((currentPolicy.earlyPartialTpPct || 15) - 3),
-      8,
-      40
+    const partial = clampLearnedEarlyPartial(
+      profileId,
+      clamp(
+        Math.round((currentPolicy.earlyPartialTpPct || 15) - 3),
+        8,
+        40
+      )
     );
     out.push({
       summary: `Earlier partial @ ${partial}% (avg peak ${avgPeak.toFixed(0)}%)`,
@@ -1194,10 +1200,13 @@ export function buildExitLearningCandidates(
       8,
       45
     );
-    const nextPartial = clamp(
-      Math.round((currentPolicy.earlyPartialTpPct || 15) - (leftShare >= 0.22 ? 3 : 2)),
-      6,
-      40
+    const nextPartial = clampLearnedEarlyPartial(
+      profileId,
+      clamp(
+        Math.round((currentPolicy.earlyPartialTpPct || 15) - (leftShare >= 0.22 ? 3 : 2)),
+        6,
+        40
+      )
     );
     const nextArm = clamp(
       Math.round((currentPolicy.profitLockArmPct || 40) * (leftShare >= 0.22 ? 0.9 : 0.92)),
@@ -1605,10 +1614,13 @@ export function buildTimingLearningCandidates(
         Math.max(1, episodes.filter((e) => e.pclPartialTaken === true).length) >=
         0.35)
   ) {
-    const nextPartial = clamp(
-      Math.round((avgPartialAt != null ? avgPartialAt : 15) * 1.08),
-      8,
-      60
+    const nextPartial = clampLearnedEarlyPartial(
+      dominantFamily === 'fast' ? 'migration_sniper' : '',
+      clamp(
+        Math.round((avgPartialAt != null ? avgPartialAt : 15) * 1.08),
+        8,
+        60
+      )
     );
     out.push({
       summary: `Timing: delay early partial → ${nextPartial}% (skip/weak post-partial MFE)`,
@@ -1631,10 +1643,13 @@ export function buildTimingLearningCandidates(
     leftOnTable >= 0.2 &&
     episodes.filter((e) => (e.maxRunupPct || 0) >= 20).length / n >= 0.25
   ) {
-    const nextPartial = clamp(
-      Math.round((avgPartialAt != null ? avgPartialAt : 18) * 0.92),
-      8,
-      50
+    const nextPartial = clampLearnedEarlyPartial(
+      dominantFamily === 'fast' ? 'migration_sniper' : '',
+      clamp(
+        Math.round((avgPartialAt != null ? avgPartialAt : 18) * 0.92),
+        8,
+        50
+      )
     );
     out.push({
       summary: `Timing: earlier early partial → ${nextPartial}% (low partial rate + leave-on-table)`,
@@ -1832,6 +1847,28 @@ export function buildEntryLearningCandidates(
   return out.slice(0, 3);
 }
 
+const FAST_LEARN_EARLY_PARTIAL_MAX = 10;
+
+function isFastFamilyProfileId(profileId: string | null | undefined): boolean {
+  const id = String(profileId || '');
+  return (
+    id === 'migration_sniper' ||
+    id === 'scalper' ||
+    id === 'reversal_scalper' ||
+    id === 'momentum_burst'
+  );
+}
+
+function clampLearnedEarlyPartial(
+  profileId: string | null | undefined,
+  next: number
+): number {
+  if (isFastFamilyProfileId(profileId)) {
+    return Math.min(next, FAST_LEARN_EARLY_PARTIAL_MAX);
+  }
+  return next;
+}
+
 /** Clamp a numeric patch to catalog ±5% (with absolute safety band). */
 function clampDeltaPct(
   proposed: number,
@@ -1923,11 +1960,14 @@ export function clampLearningPatch(
       );
     }
     if (ep.earlyPartialTpPct != null) {
-      ep.earlyPartialTpPct = clampDeltaPct(
-        Number(ep.earlyPartialTpPct),
-        Number(catPol.earlyPartialTpPct) || 15,
-        0,
-        80
+      ep.earlyPartialTpPct = clampLearnedEarlyPartial(
+        profileId,
+        clampDeltaPct(
+          Number(ep.earlyPartialTpPct),
+          Number(catPol.earlyPartialTpPct) || 15,
+          0,
+          80
+        )
       );
     }
     if (ep.earlyPartialFraction != null) {
@@ -2044,11 +2084,13 @@ export function clampLearningPatch(
         );
       }
       if (pclFamilyOverride.earlyPartialTpPct != null) {
-        next.earlyPartialTpPct = clamp(
+        const raw = clamp(
           Math.round(Number(pclFamilyOverride.earlyPartialTpPct)),
           8,
           60
         );
+        next.earlyPartialTpPct =
+          fam === 'fast' ? Math.min(raw, FAST_LEARN_EARLY_PARTIAL_MAX) : raw;
       }
       pclFamilyOverride =
         next.permissionSec != null || next.earlyPartialTpPct != null

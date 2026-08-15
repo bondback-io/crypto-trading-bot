@@ -38,6 +38,11 @@ import {
   pumpFunMintSkipReason,
 } from './deadTokenFilters';
 import { lookupCachedJupiterToken } from './jupiterTokens';
+import {
+  createPollInFlightLock,
+  noteSignalBlockedByGate,
+  withTimeout,
+} from './signalIntakeStats';
 
 export type ZionKolCandidateStatus = 'seen' | 'offered' | 'skipped';
 
@@ -99,7 +104,9 @@ let candidates: ZionKolCandidate[] = [];
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let firstPollTimer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
-let pollInFlight = false;
+const ZION_POLL_HANG_MS = 60_000;
+const ZION_POLL_BUDGET_MS = 55_000;
+const zionPollLock = createPollInFlightLock('zion', ZION_POLL_HANG_MS);
 let lastPollAt = 0;
 let lastError: string | null = null;
 let lastUniverseMessage = '';
@@ -764,7 +771,9 @@ async function rebuildCandidates(): Promise<void> {
 }
 
 export async function runZionScannerPollOnce(): Promise<void> {
-  if (pollInFlight) return;
+  if (zionPollLock.isInFlight()) {
+    if (!zionPollLock.forceUnlockIfHung()) return;
+  }
   if (!zionCfg()?.enabled || zionCfg().scanner?.enabled === false) return;
   try {
     const { isRpcWorkloadEnabled } =
@@ -805,50 +814,47 @@ export async function runZionScannerPollOnce(): Promise<void> {
   if (defer.defer) {
     logBackgroundDeferred('Zion KOL Scanner', defer.reason || 'Scanners busy');
     lastError = `delayed — ${defer.reason}`;
-    try {
-      const { noteSignalBlockedByGate } =
-        require('./signalIntakeStats') as typeof import('./signalIntakeStats');
-      noteSignalBlockedByGate(`zion_defer: ${defer.reason || 'Scanners busy'}`);
-    } catch {
-      /* */
-    }
+    noteSignalBlockedByGate(`zion_defer: ${defer.reason || 'Scanners busy'}`);
     return;
   }
   const adapt = shouldSkipScannerTick('zion');
   if (adapt.skip) {
     logBackgroundDeferred('Zion KOL Scanner', adapt.reason || 'adaptive');
     lastError = `delayed — ${adapt.reason}`;
-    try {
-      const { noteSignalBlockedByGate } =
-        require('./signalIntakeStats') as typeof import('./signalIntakeStats');
-      noteSignalBlockedByGate(`zion_adaptive: ${adapt.reason || 'scanner×'}`);
-    } catch {
-      /* */
-    }
+    noteSignalBlockedByGate(`zion_adaptive: ${adapt.reason || 'scanner×'}`);
     return;
   }
-  pollInFlight = true;
+  const pollToken = zionPollLock.begin();
   try {
     if (!universe.length) loadUniverseCache();
-    await refreshUniverse(false);
-    // Bail if cooldown was set mid-refresh (unlikely) or before batch
-    if (Date.now() < rpcCooldownUntil) return;
-    await pollUniverseBatch();
-    if (Date.now() >= rpcCooldownUntil) {
-      await rebuildCandidates();
-      lastPollAt = Date.now();
-      lastError = null;
-      clearRpcCooldownOnSuccess();
-    }
+    await withTimeout(
+      (async () => {
+        await refreshUniverse(false);
+        // Bail if cooldown was set mid-refresh (unlikely) or before batch
+        if (Date.now() < rpcCooldownUntil) return;
+        await pollUniverseBatch();
+        if (Date.now() >= rpcCooldownUntil) {
+          await rebuildCandidates();
+          lastPollAt = Date.now();
+          lastError = null;
+          clearRpcCooldownOnSuccess();
+        }
+      })(),
+      ZION_POLL_BUDGET_MS,
+      'zionScannerPoll'
+    );
   } catch (err) {
     if (isRpcRateLimitError(err)) {
       noteRpcRateLimit(err);
     } else {
       lastError = err instanceof Error ? err.message : String(err);
+      if (/timeout/i.test(lastError)) {
+        noteSignalBlockedByGate('zion_poll_timeout');
+      }
       logger.warn('ZionScanner', 'Poll failed', errorToMeta(err));
     }
   } finally {
-    pollInFlight = false;
+    zionPollLock.end(pollToken);
   }
 }
 
@@ -939,6 +945,7 @@ export function startZionKolScanner(): void {
 
 export function stopZionKolScanner(): void {
   running = false;
+  zionPollLock.reset();
   if (firstPollTimer) {
     clearTimeout(firstPollTimer);
     firstPollTimer = null;

@@ -43,6 +43,25 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.356',
+    title: 'Unstick hung signal polls',
+    sections: ['scanners', 'copy', 'overview'],
+    items: [
+      'Market Scanner, Favourites, and Zion no longer freeze intake when a DexScreener/Jupiter/RPC await hangs — pollInFlight force-unlocks and Overview records *_poll_hung_unlock.',
+      'Scanner universe/select, wallet batches, re-buy eval, and Zion polls time out so a stuck HTTP call cannot pin the next tick (0 admits + 0 gate blocks + healthy RPC).',
+    ],
+  },
+  {
+    version: '1.2.355',
+    title: 'Tighten MS expectancy and Dip disc',
+    sections: ['tradecraft', 'risk', 'scanners', 'learning'],
+    items: [
+      'Migration Sniper post-grad entries require an armed grad/mig watch; late-chase share cap is 5% and remapped MS late-chase buys abort.',
+      'MS event stop-loss grace floor is −18% (Swing/Scalper stay −35%); no-pop exit at 75s if peak never reaches +2%.',
+      'Unarmed Dip discretionary entries are blocked while the family is restricted; MS partial TP is clamped to armed ≤6% / disc ≤10%.',
+    ],
+  },
+  {
     version: '1.2.354',
     title: 'Unblock signal intake — polls no longer wait on heavy jobs',
     sections: ['scanners', 'copy', 'overview'],

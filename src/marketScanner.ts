@@ -19,7 +19,11 @@ import {
   adaptiveScannerIntervalMs,
   isSignalsRpcHealthy,
 } from './rpcLoadControl';
-import { noteSignalBlockedByGate } from './signalIntakeStats';
+import {
+  createPollInFlightLock,
+  noteSignalBlockedByGate,
+  withTimeout,
+} from './signalIntakeStats';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
@@ -166,7 +170,9 @@ const SCANNER_MINT_CACHE_CAP = 3_000;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let firstPollTimer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
-let pollInFlight = false;
+const SCANNER_POLL_HANG_MS = 45_000;
+const SCANNER_POLL_BUDGET_MS = 40_000;
+const scannerPollLock = createPollInFlightLock('marketScanner', SCANNER_POLL_HANG_MS);
 let lastPollAt: number | null = null;
 /** Short backoff after defer/adaptive skip — do not burn full poll interval. */
 let lastDeferAt = 0;
@@ -1483,7 +1489,13 @@ export function handOffScannerCandidate(
 
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
-  if (pollInFlight) return 0;
+  if (scannerPollLock.isInFlight()) {
+    if (scannerPollLock.forceUnlockIfHung()) {
+      lastSkipReason = 'poll hung — unlocked; retrying';
+    } else {
+      return 0;
+    }
+  }
   try {
     const { isBootFeatureAllowed } =
       require('./bootPhase') as typeof import('./bootPhase');
@@ -1568,7 +1580,7 @@ export async function runScannerPollOnce(): Promise<number> {
       `[marketScanner] Buy queue ${qDepth} — continuing poll (signals_rpc_healthy); mid-enrich still yields`
     );
   }
-  pollInFlight = true;
+  const pollToken = scannerPollLock.begin();
   const t0 = Date.now();
   try {
     const { noteBootTimeline } =
@@ -1579,8 +1591,20 @@ export async function runScannerPollOnce(): Promise<number> {
   }
   try {
     lastError = null;
-    const universe = await collectScannerUniverse();
-    const picked = await selectScannerCandidates(universe);
+    const universe = await withTimeout(
+      collectScannerUniverse(),
+      SCANNER_POLL_BUDGET_MS,
+      'collectScannerUniverse'
+    );
+    const selectBudget = Math.max(
+      8_000,
+      SCANNER_POLL_BUDGET_MS - (Date.now() - t0)
+    );
+    const picked = await withTimeout(
+      selectScannerCandidates(universe),
+      selectBudget,
+      'selectScannerCandidates'
+    );
     let handed = 0;
     // Non-blocking hand-off: fire handlers without serial await so the
     // scanner poll lock releases quickly; mint locks still serialize buys.
@@ -1828,10 +1852,14 @@ export async function runScannerPollOnce(): Promise<number> {
     return handed;
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
+    if (/timeout/i.test(lastError)) {
+      lastSkipReason = lastError;
+      noteSignalBlockedByGate('scanner_poll_timeout');
+    }
     logger.warn('MarketScanner', 'Poll failed', errorToMeta(err));
     return 0;
   } finally {
-    pollInFlight = false;
+    scannerPollLock.end(pollToken);
     try {
       const { noteBootTimeline } =
         require('./rpcBootTimeline') as typeof import('./rpcBootTimeline');
@@ -1919,7 +1947,7 @@ export function resetMarketScannerSession(): {
   lastPollAt = null;
   lastDeferAt = 0;
   lastPollMs = null;
-  pollInFlight = false;
+  scannerPollLock.reset();
   if (running) {
     setTimeout(() => {
       void runScannerPollOnce();

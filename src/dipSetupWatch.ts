@@ -1466,14 +1466,18 @@ export function considerDipWatchSetup(input: {
     noteMinorsFunnel('candidates_seen');
   }
 
-  // Scalper / Mode B: always mutual-exclude (protect mid-band spam).
+  // Scalper / Mode B: mutual-exclude only while a Mode B arm is live.
+  // Stale watching-only Mode B parks must not starve Dip minors.
   try {
-    const { isMintOnActiveScalperWatch } =
+    const { isMintOnActiveScalperWatch, getModeBFunnelCounters } =
       require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
     if (isMintOnActiveScalperWatch(input.mint)) {
-      noteDipFunnel('mutual_exclude');
-      noteDipFunnel('mx_scalper');
-      return null;
+      const armedNow = Number(getModeBFunnelCounters().armedNow || 0);
+      if (armedNow > 0) {
+        noteDipFunnel('mutual_exclude');
+        noteDipFunnel('mx_scalper');
+        return null;
+      }
     }
   } catch {
     /* optional */

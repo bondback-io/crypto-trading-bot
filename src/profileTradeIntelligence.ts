@@ -260,10 +260,18 @@ export function resolveExitPolicy(
     /* fail soft */
   }
   const ep = rules?.exitPolicy;
+  const clampMsPartial = (pol: ProfileExitPolicy): ProfileExitPolicy => {
+    if (String(profileId || '') !== 'migration_sniper') return pol;
+    const cap = opts?.armedWatch === true ? 6 : 10;
+    return {
+      ...pol,
+      earlyPartialTpPct: Math.min(Number(pol.earlyPartialTpPct) || cap, cap),
+    };
+  };
   if (!ep || typeof ep !== 'object') {
-    return { ...base, earlyPartialTpPct, earlyPartialFraction };
+    return clampMsPartial({ ...base, earlyPartialTpPct, earlyPartialFraction });
   }
-  return {
+  return clampMsPartial({
     earlyPartialTpPct:
       ep.earlyPartialTpPct != null && Number.isFinite(Number(ep.earlyPartialTpPct))
         ? Math.max(0, Number(ep.earlyPartialTpPct))
@@ -326,7 +334,7 @@ export function resolveExitPolicy(
       typeof ep.heikinAshiExitEnabled === 'boolean'
         ? ep.heikinAshiExitEnabled
         : base.heikinAshiExitEnabled,
-  };
+  });
 }
 
 export interface ProfileScoreboardRow {
