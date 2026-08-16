@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.397',
+    title: 'Discovery Feeds: hide fake STALE, stop repeat drops',
+    sections: ['scanners', 'knobs'],
+    items: [
+      'Discovery Feeds only lists real ingest sources. Watch stamps like scanner / unknown / partial / lane-fight-ms-watch no longer show as STALE; untagged parks roll into a derived other row. Dip/Scalper/Trend watches keep the launch feed when known.',
+      'Scanner no longer re-counts the same pump_stream / onchain_helius mint every poll. Cooldown mints skip IN; hard-floor misses get a 3-minute skip and drop as below_min_mc / liq / vol. PumpPortal marketCapSol is converted with SOL/USD, not stored as dollars. $8k floors unchanged.',
+    ],
+  },
+  {
     version: '1.2.396',
     title: 'Stop insufficient-credits retry storms',
     sections: ['execution', 'scanners', 'copy'],

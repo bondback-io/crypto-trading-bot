@@ -4,6 +4,7 @@
  */
 
 import type { LaunchEvent } from './marketData';
+import { getCachedSolUsdPrice } from './marketData';
 
 const WS_URL = 'wss://pumpportal.fun/api/data';
 const MAX_QUEUE = 200;
@@ -20,6 +21,7 @@ interface PumpStreamEvent {
   category: PumpStreamCategory;
   at: number;
   marketCapUsd?: number;
+  marketCapSol?: number;
   lastPriceSol?: number;
 }
 
@@ -89,7 +91,10 @@ function parseMsg(raw: unknown): PumpStreamEvent | null {
   }
   const symbol = coercePumpLabel(row.symbol || row.ticker, mint.slice(0, 6)).slice(0, 24);
   const name = coercePumpLabel(row.name || row.symbol, 'Pump').slice(0, 64);
-  const mc = Number(row.marketCapSol ?? row.usd_market_cap ?? row.marketCap);
+  const usdMc = Number(
+    row.usd_market_cap ?? row.marketCapUsd ?? row.usdMarketCap
+  );
+  const solMc = Number(row.marketCapSol);
   const px = Number(row.vSolInBondingCurve ?? row.priceSol ?? row.lastPrice);
   return {
     mint,
@@ -97,7 +102,8 @@ function parseMsg(raw: unknown): PumpStreamEvent | null {
     name,
     category,
     at: Date.now(),
-    marketCapUsd: Number.isFinite(mc) && mc > 0 ? mc : undefined,
+    marketCapUsd: Number.isFinite(usdMc) && usdMc > 0 ? usdMc : undefined,
+    marketCapSol: Number.isFinite(solMc) && solMc > 0 ? solMc : undefined,
     lastPriceSol: Number.isFinite(px) && px > 0 ? px : undefined,
   };
 }
@@ -184,6 +190,15 @@ export function getPumpStreamLaunchEvents(limit = 40): LaunchEvent[] {
   const slice = queue.slice(-Math.max(1, limit));
   return slice.map((ev) => {
     const px = ev.lastPriceSol && ev.lastPriceSol > 0 ? ev.lastPriceSol : 0;
+    let mcUsd = ev.marketCapUsd;
+    if (
+      (mcUsd == null || !(mcUsd > 0)) &&
+      ev.marketCapSol != null &&
+      ev.marketCapSol > 0
+    ) {
+      const solUsd = getCachedSolUsdPrice();
+      if (solUsd > 0) mcUsd = ev.marketCapSol * solUsd;
+    }
     return {
       mint: ev.mint,
       symbol: ev.symbol,
@@ -193,7 +208,7 @@ export function getPumpStreamLaunchEvents(limit = 40): LaunchEvent[] {
       entryPriceSol: px,
       lastPriceSol: px,
       priceChangePct: 0,
-      marketCapUsd: ev.marketCapUsd,
+      marketCapUsd: mcUsd,
       isPumpFun: true,
       candles: [],
       source: 'pump_stream',

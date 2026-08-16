@@ -1195,6 +1195,8 @@ export function offerTrendWatchFromCandidate(c: {
   specialtyFeed?: string;
   chartPatternIds?: string[];
   volumeDecayState?: string | null;
+  scannerSources?: string[];
+  source?: string;
 }): boolean {
   try {
     const { noteWatchInsertAttempt } =
@@ -1218,6 +1220,8 @@ export function offerTrendWatchFromCandidate(c: {
       /* optional */
     }
   }
+  const { watchSourceFromCandidate } =
+    require('./watchPipeline') as typeof import('./watchPipeline');
   const row = considerTrendWatchSetup({
     mint: c.mint,
     symbol: c.symbol,
@@ -1236,7 +1240,11 @@ export function offerTrendWatchFromCandidate(c: {
     supportPriceSol: c.supportPriceSol ?? null,
     kolCount: c.kolCount,
     specialtyFeed: c.specialtyFeed,
-    source: c.specialtyFeed || 'scanner',
+    source: watchSourceFromCandidate({
+      specialtyFeed: c.specialtyFeed,
+      scannerSources: c.scannerSources,
+      source: c.source,
+    }),
     chartPatternIds: c.chartPatternIds,
     volumeDecayState: decay,
   });

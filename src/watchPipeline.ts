@@ -25,7 +25,7 @@ export const CANONICAL_SCANNER_SOURCES = [
 
 export type CanonicalScannerSource = (typeof CANONICAL_SCANNER_SOURCES)[number];
 
-export type SourceFunnelStatus = 'ok' | 'zero' | 'stale' | 'off';
+export type SourceFunnelStatus = 'ok' | 'zero' | 'stale' | 'off' | 'derived';
 
 export interface SourceFunnelRow {
   source: string;
@@ -239,8 +239,33 @@ function emptySourceState(): SourceFunnelState {
   };
 }
 
+const CANONICAL_SOURCE_SET = new Set<string>(CANONICAL_SCANNER_SOURCES);
+
+/** Map watch/monitor stamps onto Discovery Feeds keys. Never invent STALE fake feeds. */
+export function canonicalizeScannerSource(raw?: string | null): string {
+  const k = String(raw || '').trim().toLowerCase();
+  if (!k) return 'other';
+  if (CANONICAL_SOURCE_SET.has(k)) return k;
+  if (
+    k === 'lane-fight-ms-watch' ||
+    k === 'curve-first' ||
+    k === 'grad-watch' ||
+    k === 'graduating'
+  ) {
+    return 'graduating_feed';
+  }
+  if (k === 'onchain' || k === 'helius' || k === 'new_pool') return 'onchain_helius';
+  if (k === 'pump' || k === 'pumpportal' || k === 'pump_fun') return 'pump_stream';
+  if (k === 'dex' || k === 'trending') return 'dexscreener';
+  return 'other';
+}
+
+export function isCanonicalScannerSource(source: string): boolean {
+  return CANONICAL_SOURCE_SET.has(source);
+}
+
 function funnelState(source: string): SourceFunnelState {
-  const key = String(source || '').trim() || 'unknown';
+  const key = canonicalizeScannerSource(source);
   let row = sourceFunnel.get(key);
   if (!row) {
     row = emptySourceState();
@@ -258,7 +283,7 @@ export function listScannerSources(input?: {
   const seen = new Set<string>();
   const out: string[] = [];
   const add = (raw?: string | null) => {
-    const k = String(raw || '').trim();
+    const k = canonicalizeScannerSource(raw);
     if (!k || seen.has(k)) return;
     seen.add(k);
     out.push(k);
@@ -266,7 +291,17 @@ export function listScannerSources(input?: {
   for (const s of input?.scannerSources || []) add(s);
   add(input?.source);
   add(input?.specialtyFeed);
-  return out.length > 0 ? out : ['unknown'];
+  return out.length > 0 ? out : ['other'];
+}
+
+/** Prefer a real feed key when parking a watch (avoid source=scanner). */
+export function watchSourceFromCandidate(input?: {
+  specialtyFeed?: string | null;
+  scannerSources?: string[] | null;
+  source?: string | null;
+}): string {
+  const list = listScannerSources(input);
+  return list.find((s) => s !== 'other') || 'other';
 }
 
 export function isSourceEnabled(source: string): boolean {
@@ -293,6 +328,8 @@ export function isSourceEnabled(source: string): boolean {
       case 'majors':
       case 'medium':
         return scannerOn;
+      case 'other':
+        return true;
       default:
         return scannerOn;
     }
@@ -413,7 +450,17 @@ export function noteFastArmOpen(path?: string | null): void {
 function buildSourceFunnelRows(): SourceFunnelRow[] {
   const now = Date.now();
   const keys = new Set<string>(CANONICAL_SCANNER_SOURCES);
-  for (const k of sourceFunnel.keys()) keys.add(k);
+  const other = sourceFunnel.get('other');
+  if (
+    other &&
+    (other.candidates_in > 0 ||
+      other.watch_inserted > 0 ||
+      other.armed > 0 ||
+      other.opened > 0 ||
+      other.passed_gatekeeper > 0)
+  ) {
+    keys.add('other');
+  }
   const rows: SourceFunnelRow[] = [];
   for (const source of keys) {
     const st = sourceFunnel.get(source) || emptySourceState();
@@ -421,8 +468,12 @@ function buildSourceFunnelRows(): SourceFunnelRow[] {
     const lastAt = st.last_nonzero_at;
     const silentFor =
       lastAt != null ? now - lastAt : now - sessionStartedAt;
+    const hasDownstream =
+      st.watch_inserted > 0 || st.armed > 0 || st.opened > 0;
     let status: SourceFunnelStatus = 'ok';
-    if (!enabled) status = 'off';
+    if (source === 'other') status = 'derived';
+    else if (!enabled) status = 'off';
+    else if (st.candidates_in <= 0 && hasDownstream) status = 'derived';
     else if (st.candidates_in <= 0 && silentFor >= STALE_MS) status = 'stale';
     else if (st.candidates_in <= 0) status = 'zero';
     rows.push({

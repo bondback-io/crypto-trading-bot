@@ -269,6 +269,8 @@ let pendingBuyQueueDepth: () => number = () => 0;
 const SCANNER_YIELD_QUEUE_DEPTH = 12;
 /** Mid-enrich: abort individual enrich when drain is moderately busy. */
 const SCANNER_MID_ENRICH_YIELD_DEPTH = 4;
+/** Hard-floor / prefilter misses: short skip so pump/onchain are not re-dropped every poll. */
+const PREFILTER_REPEAT_MS = 3 * 60_000;
 let skippedForBuyQueue = 0;
 let lastSkipReason: string | null = null;
 
@@ -415,9 +417,9 @@ function pushFeed(row: ScannerCandidate): void {
   if (feed.length > MAX_FEED) feed.length = MAX_FEED;
 }
 
-function hardFloorsOk(event: LaunchEvent): boolean {
+function hardFloorRejectReason(event: LaunchEvent): string | null {
   // Risk OFF: scanner candidates are not volume/liq gated here
-  if (config.riskLevel === 'off') return true;
+  if (config.riskLevel === 'off') return null;
 
   const cfg = scannerCfg();
   const minLiqGlobal = config.filters.minLiquidity ?? 0;
@@ -429,8 +431,8 @@ function hardFloorsOk(event: LaunchEvent): boolean {
   const minMc = config.filters.minMarketCapUsd ?? 0;
   const liq = event.liquidityUsd ?? 0;
   const mc = event.marketCapUsd ?? 0;
-  if (minLiq > 0 && liq > 0 && liq < minLiq) return false;
-  if (minMc > 0 && mc > 0 && mc < minMc) return false;
+  if (minLiq > 0 && liq > 0 && liq < minLiq) return 'below_min_liq';
+  if (minMc > 0 && mc > 0 && mc < minMc) return 'below_min_mc';
 
   const volM5 = event.volumeM5Usd ?? 0;
   const volH1 = event.volumeH1Usd ?? 0;
@@ -441,14 +443,11 @@ function hardFloorsOk(event: LaunchEvent): boolean {
   const floorH1 = cfg.minVolumeH1Usd ?? 0;
   const floorH6 = cfg.minVolumeH6Usd ?? 0;
   const floorH24 = cfg.minVolumeH24Usd ?? 0;
-  // Only enforce a window floor when we have a reading for that window
-  // (or a 24h proxy). Missing data does not hard-fail Dex-only launches.
-  if (floorM5 > 0 && volM5 > 0 && volM5 < floorM5) return false;
-  if (floorH1 > 0 && volH1 > 0 && volH1 < floorH1) return false;
-  if (floorH6 > 0 && volH6 > 0 && volH6 < floorH6) return false;
-  if (floorH24 > 0 && volH24 > 0 && volH24 < floorH24) return false;
+  if (floorM5 > 0 && volM5 > 0 && volM5 < floorM5) return 'below_min_vol';
+  if (floorH1 > 0 && volH1 > 0 && volH1 < floorH1) return 'below_min_vol';
+  if (floorH6 > 0 && volH6 > 0 && volH6 < floorH6) return 'below_min_vol';
+  if (floorH24 > 0 && volH24 > 0 && volH24 < floorH24) return 'below_min_vol';
 
-  // Jupiter-sourced tokens with known organicScore must clear the floor
   const minOrg = cfg.minOrganicScore ?? 0;
   if (
     minOrg > 0 &&
@@ -456,10 +455,14 @@ function hardFloorsOk(event: LaunchEvent): boolean {
     Number.isFinite(event.organicScore) &&
     event.organicScore < minOrg
   ) {
-    return false;
+    return 'below_min_organic';
   }
 
-  return true;
+  return null;
+}
+
+function hardFloorsOk(event: LaunchEvent): boolean {
+  return hardFloorRejectReason(event) == null;
 }
 
 const GRAD_WATCH_CATS = new Set([
@@ -1158,6 +1161,7 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
     category?: string
   ): void => {
     if (!e?.mint) return;
+    const cooled = isScannerMintOnCooldown(e.mint);
     const existing = byMint.get(e.mint);
     if (existing) {
       mergeDeduped += 1;
@@ -1189,6 +1193,7 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
       if (e.nearMigration === true) existing.nearMigration = true;
       if (e.migrated === true) existing.migrated = true;
       if (e.isPumpFun === true) existing.isPumpFun = true;
+      if (cooled) return;
       bump(bySource, source);
       if (category) bump(byCategory, category);
       try {
@@ -1201,6 +1206,7 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
       }
       return;
     }
+    if (cooled) return;
     e.scannerSources = [
       ...new Set([...(e.scannerSources || []), source, e.source]),
     ];
@@ -1333,6 +1339,7 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
       ).length;
       for (const m of recent) {
         if (!m.mint) continue;
+        if (isScannerMintOnCooldown(m.mint)) continue;
         attach(
           {
             mint: m.mint,
@@ -1434,8 +1441,10 @@ export async function selectScannerCandidates(
         noteEventDrop(raw, 'cooldown');
         return false;
       }
-      if (!hardFloorsOk(raw)) {
-        noteEventDrop(raw, 'hard_floor');
+      const floorWhy = hardFloorRejectReason(raw);
+      if (floorWhy) {
+        noteEventDrop(raw, floorWhy);
+        markScannerCooldown(raw.mint, false, { ms: PREFILTER_REPEAT_MS });
         return false;
       }
       return true;

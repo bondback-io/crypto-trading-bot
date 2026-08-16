@@ -2937,6 +2937,8 @@ export function offerDipWatchFromCandidate(c: {
   tokenAgeHours?: number;
   isPumpFun?: boolean;
   scannerReasons?: string[] | string | null;
+  scannerSources?: string[];
+  source?: string;
 }): boolean {
   try {
     const { noteWatchInsertAttempt, noteWatchInsertReject } =
@@ -2971,12 +2973,13 @@ export function offerDipWatchFromCandidate(c: {
       : c.priceChangeH1Pct != null && c.priceChangeH1Pct < -1
         ? Math.abs(c.priceChangeH1Pct)
         : null;
-  const src =
-    c.specialtyFeed === 'majors'
-      ? 'majors'
-      : c.specialtyFeed === 'medium'
-        ? 'medium'
-        : c.specialtyFeed || 'scanner';
+  const { watchSourceFromCandidate } =
+    require('./watchPipeline') as typeof import('./watchPipeline');
+  const src = watchSourceFromCandidate({
+    specialtyFeed: c.specialtyFeed,
+    scannerSources: c.scannerSources,
+    source: c.source,
+  });
   const entry = considerDipWatchSetup({
     mint: c.mint,
     symbol: c.symbol,

@@ -5367,6 +5367,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .src-chip-ok { color: #5eead4; background: rgba(45, 212, 191, 0.12); }
     .src-chip-zero { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
     .src-chip-stale { color: #f87171; background: rgba(248, 113, 113, 0.14); }
+    .src-chip-derived { color: #94a3b8; background: rgba(148, 163, 184, 0.16); }
     .src-chip-off { color: #64748b; background: rgba(100, 116, 139, 0.18); }
     .setup-watch-tabs {
       display: inline-flex;
@@ -32199,7 +32200,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               if (!r || typeof r !== 'object') return '';
               const zero = (r.candidates_in || 0) === 0;
               const tone =
-                zero && r.status !== 'off' ? 'color:#fbbf24' : '';
+                zero && r.status !== 'off' && r.status !== 'derived'
+                  ? 'color:#fbbf24'
+                  : '';
               return (
                 '<tr>' +
                 '<td>' +

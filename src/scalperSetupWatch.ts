@@ -1544,6 +1544,8 @@ export function offerScalperWatchFromCandidate(c: {
   chartPatternIds?: string[];
   preferredProfileId?: string;
   specialtyFeed?: string;
+  scannerSources?: string[];
+  source?: string;
 }): boolean {
   try {
     const { noteWatchInsertAttempt } =
@@ -1552,6 +1554,8 @@ export function offerScalperWatchFromCandidate(c: {
   } catch {
     /* optional */
   }
+  const { watchSourceFromCandidate } =
+    require('./watchPipeline') as typeof import('./watchPipeline');
   const row = considerScalperWatchSetup({
     mint: c.mint,
     symbol: c.symbol,
@@ -1574,7 +1578,11 @@ export function offerScalperWatchFromCandidate(c: {
     playbook: c.playbook,
     chartPatternIds: c.chartPatternIds,
     preferredProfileId: c.preferredProfileId,
-    source: c.specialtyFeed || 'scanner',
+    source: watchSourceFromCandidate({
+      specialtyFeed: c.specialtyFeed,
+      scannerSources: c.scannerSources,
+      source: c.source,
+    }),
     nearKeyFib: c.nearKeyFib,
   });
   if (!row) {
