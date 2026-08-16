@@ -20,12 +20,15 @@ import { isDeniedCopyMint } from './deniedMints';
 import {
   getConnection,
   getRpcUrl,
+  lanesShareEndpoint,
   noteActiveRpcFailure,
   runWithRpcRole,
   shouldDeferHeavyRpc,
 } from './connection';
 import { isPublicRpcUrl, isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
+import { isRpcGateSkipError } from './rpcGate';
+import { alchemyCooldownRemainingMs } from './rpcProviderPace';
 import {
   getLogsSubscribeDisableReason,
   isLogsSubscribeDisabled,
@@ -108,17 +111,58 @@ const seededPollPrograms = new Set<string>();
 let rateLimitedUntil = 0;
 let lastRateLimitLogAt = 0;
 
+let lastBusySkipLogAt = 0;
+
 function isRpcRateLimitError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return (
-    /429|rate.?limit|-32429|too many requests/i.test(msg) ||
+    /429|rate.?limit|-32429|too many requests|compute units per second/i.test(msg) ||
     /connect.?timeout|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|fetch failed/i.test(msg)
+  );
+}
+
+function resolveMigrationRpcRole(): 'primary' | 'secondary' | 'utility' | 'watchers' | null {
+  const share = Boolean(config.rpc?.shareLoad);
+  let role = getRpcRoleFor('migration', share);
+  try {
+    const { shouldShedPrimaryMonitoring, isLaneSpiking } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    const primaryHot =
+      shouldShedPrimaryMonitoring() || isLaneSpiking('primary');
+    if (role === 'primary' && primaryHot) {
+      if (share && !lanesShareEndpoint()) return 'secondary';
+      return null;
+    }
+  } catch {
+    /* optional */
+  }
+  if (role === 'secondary' && alchemyCooldownRemainingMs() > 0) {
+    return null;
+  }
+  return role;
+}
+
+function noteMigrationBusySkip(err: unknown): void {
+  rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + 8_000);
+  if (Date.now() - lastBusySkipLogAt < 60_000) return;
+  lastBusySkipLogAt = Date.now();
+  const msg = err instanceof Error ? err.message : String(err);
+  console.warn(
+    `[migration] poll skipped (lane busy) — retrying on scanners/watchers, not an error (${msg.slice(0, 120)})`
   );
 }
 
 function armRateLimitBackoff(err: unknown): void {
   rateLimitedUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
   noteActiveRpcFailure(err, 'primary');
+  const msg = err instanceof Error ? err.message : String(err);
+  try {
+    const { isAlchemyCuLimitMessage, noteAlchemyCuLimit } =
+      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
+    if (isAlchemyCuLimitMessage(msg)) noteAlchemyCuLimit();
+  } catch {
+    /* optional */
+  }
   if (Date.now() - lastRateLimitLogAt > 15_000) {
     lastRateLimitLogAt = Date.now();
     console.warn(
@@ -453,13 +497,18 @@ async function handleLogsNotification(
 
   migrationParseInFlight += 1;
   try {
-    const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
+    const role = resolveMigrationRpcRole();
+    if (!role) return;
     await runWithRpcRole(
       role,
       () => processMigrationTx(signature, 'websocket', program),
       'migration'
     );
-  } catch {
+  } catch (err) {
+    if (isRpcGateSkipError(err)) {
+      noteMigrationBusySkip(err);
+      return;
+    }
     /* fail-soft: poll interval still covers migrations */
   } finally {
     migrationParseInFlight -= 1;
@@ -517,66 +566,68 @@ async function pollMigrations(): Promise<void> {
   if (!running) return;
   if (Date.now() < rateLimitedUntil) return;
 
-  const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
-  return runWithRpcRole(role, async () => {
+  const role = resolveMigrationRpcRole();
+  if (!role) return;
+
   try {
-    const conn = getConnection();
-    const softRpc = isSoftThrottleRpcUrl(conn.rpcEndpoint);
-    // Poll both PumpSwap (post-migrate venue) and Pump.fun (migrate ix)
-    const targets = [
-      { id: config.pumpSwapProgramId, label: 'pumpswap' as const },
-      { id: config.pumpFunProgramId, label: 'pumpfun' as const },
-    ];
+    await runWithRpcRole(role, async () => {
+      const conn = getConnection();
+      const softRpc = isSoftThrottleRpcUrl(conn.rpcEndpoint);
+      const targets = [
+        { id: config.pumpSwapProgramId, label: 'pumpswap' as const },
+        { id: config.pumpFunProgramId, label: 'pumpfun' as const },
+      ];
 
-    for (const target of targets) {
-      if (Date.now() < rateLimitedUntil) break;
-      const signatures = await conn.getSignaturesForAddress(
-        new PublicKey(target.id),
-        { limit: softRpc ? 8 : 15 }
-      );
-      if (signatures.length === 0) continue;
-
-      // First sight: seed cursor only — never replay historical program txs
-      // as migrations (same pattern as wallet poll in v1.1.26).
-      if (!seededPollPrograms.has(target.id)) {
-        for (const sig of signatures) {
-          rememberSig(sig.signature);
-        }
-        seededPollPrograms.add(target.id);
-        lastMigrationSig = signatures[0].signature;
-        console.log(
-          `[migration] Seeded poll cursor for ${target.label} ` +
-            `(${signatures.length} sigs) — watching for new migrations only`
-        );
-        continue;
-      }
-
-      const newSigs: string[] = [];
-      for (const sig of signatures) {
-        if (processedSigs.has(sig.signature)) continue;
-        newSigs.push(sig.signature);
-      }
-
-      if (newSigs.length === 0) continue;
-
-      // Newest first for latency; tighter cap on free/public RPCs to avoid 429 storms
-      const parseCap = softRpc ? 2 : 5;
-      for (const sig of newSigs.slice(0, parseCap)) {
+      for (const target of targets) {
         if (Date.now() < rateLimitedUntil) break;
-        const ok = await processMigrationTx(sig, 'poll', target.label);
-        if (!ok && Date.now() < rateLimitedUntil) break;
-      }
-    }
+        const signatures = await conn.getSignaturesForAddress(
+          new PublicKey(target.id),
+          { limit: softRpc ? 8 : 15 }
+        );
+        if (signatures.length === 0) continue;
 
-    pruneExpired();
+        if (!seededPollPrograms.has(target.id)) {
+          for (const sig of signatures) {
+            rememberSig(sig.signature);
+          }
+          seededPollPrograms.add(target.id);
+          lastMigrationSig = signatures[0].signature;
+          console.log(
+            `[migration] Seeded poll cursor for ${target.label} ` +
+              `(${signatures.length} sigs) — watching for new migrations only`
+          );
+          continue;
+        }
+
+        const newSigs: string[] = [];
+        for (const sig of signatures) {
+          if (processedSigs.has(sig.signature)) continue;
+          newSigs.push(sig.signature);
+        }
+
+        if (newSigs.length === 0) continue;
+
+        const parseCap = softRpc ? 2 : 5;
+        for (const sig of newSigs.slice(0, parseCap)) {
+          if (Date.now() < rateLimitedUntil) break;
+          const ok = await processMigrationTx(sig, 'poll', target.label);
+          if (!ok && Date.now() < rateLimitedUntil) break;
+        }
+      }
+
+      pruneExpired();
+    }, 'migration');
   } catch (err) {
+    if (isRpcGateSkipError(err)) {
+      noteMigrationBusySkip(err);
+      return;
+    }
     if (isRpcRateLimitError(err)) {
       armRateLimitBackoff(err);
       return;
     }
     console.error('[migration] Poll error:', err);
   }
-  }, 'migration');
 }
 
 /** @returns false when rate-limited (caller should abort this poll cycle) */

@@ -56,6 +56,14 @@ import {
   shouldSkipCreditsProvider,
 } from './creditsGuard';
 import { guardRpcWebSocket } from './rpcWsGuard';
+import {
+  acquireAlchemyPaceSlot,
+  isAlchemyCuLimitMessage,
+  isAlchemyRpcUrl,
+  noteAlchemyCuLimit,
+  noteAlchemyOk,
+  shouldSkipAlchemyRpc,
+} from './rpcProviderPace';
 
 dotenv.config();
 
@@ -355,6 +363,7 @@ function meteredFetch(endpointLabel: string) {
     const methods = parseRpcMethodsFromBody(init?.body);
     const url = fetchInputUrl(input);
     const provider = classifyCreditsProvider(url);
+    const alchemy = isAlchemyRpcUrl(url);
     const source = `rpc:${methods[0] || endpointLabel}`;
     const feature = rpcFeatureAls.getStore() || 'ungated';
     if (
@@ -363,6 +372,21 @@ function meteredFetch(endpointLabel: string) {
       shouldSkipCreditsProvider('helius')
     ) {
       throw new Error('Insufficient credits for this request');
+    }
+    if (alchemy && shouldSkipAlchemyRpc(feature)) {
+      throw new Error(
+        '429 Too Many Requests: compute units per second capacity'
+      );
+    }
+    const pace = alchemy
+      ? acquireAlchemyPaceSlot(feature)
+      : { allowed: true, release: () => undefined };
+    if (alchemy && !pace.allowed) {
+      throw new RpcGateSkipError(
+        'rate',
+        rpcRoleAls.getStore() || 'secondary',
+        feature
+      );
     }
     const t0 = Date.now();
     let ok = false;
@@ -391,6 +415,23 @@ function meteredFetch(endpointLabel: string) {
           noteCreditsExhausted(source, 'helius', url);
         }
       }
+      if (!res.ok && alchemy) {
+        let peek = '';
+        try {
+          peek = await res.clone().text();
+        } catch {
+          peek = '';
+        }
+        if (
+          res.status === 429 ||
+          isAlchemyCuLimitMessage(peek) ||
+          isAlchemyCuLimitMessage(`${res.status} ${peek}`)
+        ) {
+          noteAlchemyCuLimit(url);
+        }
+      } else if (res.ok && alchemy) {
+        noteAlchemyOk();
+      }
       return res;
     } catch (err) {
       const latencyMs = Date.now() - t0;
@@ -404,6 +445,8 @@ function meteredFetch(endpointLabel: string) {
         });
       }
       throw err;
+    } finally {
+      pace.release();
     }
   };
   return async (
@@ -509,7 +552,7 @@ function latencyStressGraceMs(state: EndpointState | undefined): number {
  * the hosts were fine.
  */
 function isRpcRateLimitMessage(error: string): boolean {
-  return /429|rate.?limit|-32429|too many requests|insufficient credits|credit usage limit/i.test(
+  return /429|rate.?limit|-32429|too many requests|insufficient credits|credit usage limit|compute units per second/i.test(
     error
   );
 }
@@ -1462,6 +1505,9 @@ function recordFailure(index: number, error: string): void {
 
   if (isRateLimit) {
     state.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    if (isAlchemyRpcUrl(state.endpoint.url) && isAlchemyCuLimitMessage(error)) {
+      noteAlchemyCuLimit(state.endpoint.url);
+    }
   } else if (
     /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|probe timeout/i.test(
       error
@@ -1595,8 +1641,8 @@ async function withRpcInner<T>(
   let lastError: unknown;
   const critical =
     exitSend ||
-    /trade|migrat|send|confirm|swap|buy|sell/i.test(label) ||
-    r === 'primary';
+    r === 'primary' ||
+    /trade|send|confirm|swap|buy|sell/i.test(`${label} ${feature}`);
   const defaultMax = critical
     ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
     : WITH_RPC_MAX_ATTEMPTS_OTHER;
@@ -1635,10 +1681,19 @@ async function withRpcInner<T>(
   });
 
   let attempts = 0;
+  let rateLimitHits = 0;
   for (let oi = 0; oi < order.length && attempts < maxAttempts; oi++) {
     const index = order[oi];
     const state = endpoints[index];
     if (!state) continue;
+
+    if (
+      !exitSend &&
+      isAlchemyRpcUrl(state.endpoint.url) &&
+      shouldSkipAlchemyRpc(feature)
+    ) {
+      continue;
+    }
 
     // Skip cooling 429 / hard-fail hosts when another endpoint can take the call.
     // Exit sends stay on Helius — never skip the only Trading endpoint.
@@ -1691,16 +1746,30 @@ async function withRpcInner<T>(
       return result;
     } catch (err) {
       lastError = err;
+      if (isRpcGateSkipError(err)) break;
       const message = err instanceof Error ? err.message : String(err);
+      const alreadyCooling = isEndpointRateLimited(state);
       recordFailure(index, message);
-      logger.warn('RPC', `${label} failed`, {
-        role: r,
-        endpoint: state.endpoint.label,
-        attempt: attempts,
-        maxAttempts,
-        latencyMs: Date.now() - t0,
-        ...errorToMeta(err),
-      });
+      if (!(isRpcRateLimitMessage(message) && alreadyCooling)) {
+        logger.warn('RPC', `${label} failed`, {
+          role: r,
+          endpoint: state.endpoint.label,
+          attempt: attempts,
+          maxAttempts,
+          latencyMs: Date.now() - t0,
+          ...errorToMeta(err),
+        });
+      }
+      if (!exitSend && isRpcRateLimitMessage(message)) {
+        rateLimitHits += 1;
+        if (
+          isAlchemyCuLimitMessage(message) ||
+          isAlchemyRpcUrl(state.endpoint.url)
+        ) {
+          noteAlchemyCuLimit(state.endpoint.url);
+        }
+        if (rateLimitHits >= 2) break;
+      }
     }
   }
 

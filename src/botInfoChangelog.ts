@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.398',
+    title: 'Alchemy CU/s cooldown + quieter migration skips',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Alchemy 429 compute-units-per-second sets a sticky 15–60s provider cooldown (one alchemy_cu_s_limit log per window). Scanners/watchers cap in-flight and stop tight-retrying other Alchemy URLs. Exits stay on Trading.',
+      'Migration poll uses Scanners when Share load is on, and skips Trading when that lane is busy/spiking instead of erroring every 12s. RpcGateSkipError is a rate-limited warning, not a fatal poll error.',
+    ],
+  },
+  {
     version: '1.2.397',
     title: 'Discovery Feeds: hide fake STALE, stop repeat drops',
     sections: ['scanners', 'knobs'],

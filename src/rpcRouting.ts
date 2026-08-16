@@ -38,8 +38,8 @@ export function getRpcRoleFor(
     case 'trade_entry':
     case 'trade_exit':
     case 'send_tx':
-    case 'migration':
       return 'primary';
+    case 'migration':
     case 'market_scanner':
     case 'alpha_scan':
     case 'zion':

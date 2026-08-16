@@ -501,11 +501,12 @@ export const RPC_LANE_SUPPORTS = {
   primary: [
     'Critical: trade entries / turbo / migration sniper / copy buys',
     'Wallet buy detection (signal poll)',
-    'Migration listener parses',
+    'Migration listener polls / parses (Share ON → Scanners; never competes with Trading when busy)',
     'Preferred: Helius → Alchemy → QuickNode → public',
   ],
   secondary: [
     'Market Scanner + AlphaScan (Share ON)',
+    'Migration poll fallback (Share ON)',
     'Zion micro-bot + KOL Token Scanner',
     'Zion Place Trade on-chain bits',
     'Preferred: Alchemy → Helius → QuickNode → public',

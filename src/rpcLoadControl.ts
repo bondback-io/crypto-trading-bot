@@ -143,6 +143,19 @@ function recompute(external?: {
     reasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
   }
 
+  try {
+    const { alchemyCooldownRemainingMs } =
+      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
+    const cool = alchemyCooldownRemainingMs(now);
+    if (cool > 0) {
+      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
+      shedBackground = true;
+      reasons.push(`alchemy CU/s cooldown ${Math.round(cool / 1000)}s`);
+    }
+  } catch {
+    /* optional */
+  }
+
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
     utilitySlowFactor: Math.min(4, utilitySlowFactor),
@@ -184,7 +197,16 @@ export function getRpcLoadControlSnapshot(): RpcLoadControlSnapshot {
 /** Effective scanner poll interval after adaptive slowdown. */
 export function adaptiveScannerIntervalMs(baseMs: number): number {
   const f = getRpcLoadControlSnapshot().scannerSlowFactor;
-  return Math.round(Math.max(baseMs, baseMs * f));
+  let ms = Math.round(Math.max(baseMs, baseMs * f));
+  try {
+    const { alchemyCooldownRemainingMs } =
+      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
+    const cool = alchemyCooldownRemainingMs();
+    if (cool > 0) ms = Math.max(ms, Math.min(90_000, cool + 5_000));
+  } catch {
+    /* optional */
+  }
+  return ms;
 }
 
 function secondarySpikeDegradesEnrich(): boolean {

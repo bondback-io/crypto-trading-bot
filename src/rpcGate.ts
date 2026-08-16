@@ -51,7 +51,6 @@ type LaneState = {
 const CRITICAL_FEATURES = new Set([
   'trade_entry',
   'trade_exit',
-  'migration',
   'mev_sandwich',
   'send_tx',
   'confirm_tx',
@@ -82,16 +81,16 @@ function laneLimits(role: RpcGateRole): {
   }
   if (role === 'secondary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 2, 1, 24),
+      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 4, 1, 80),
       maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
       maxWaitMs: 3_000,
     };
   }
   if (role === 'watchers') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_WATCHERS', 3, 1, 16),
-      maxRps: envInt('RPC_LANE_RPS_WATCHERS', 6, 1, 60),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_WATCHERS', 2, 1, 16),
+      maxRps: envInt('RPC_LANE_RPS_WATCHERS', 4, 1, 60),
       maxQueue: envInt('RPC_LANE_QUEUE_WATCHERS', 6, 0, 80),
       maxWaitMs: 3_000,
     };
