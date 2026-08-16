@@ -345,8 +345,10 @@ export interface BuyOptions {
   lateChaseAtEntry?: boolean;
   /** Armed setup-watch handoff */
   armedWatch?: boolean;
-  /** armed_trigger | discretionary */
+  /** armed_trigger | hybrid_fast_arm | flow_fast_arm | selective_arm | discretionary */
   entryPath?: 'armed_trigger' | 'discretionary' | string;
+  admissionMode?: string;
+  fastArmProximityPct?: number | null;
   /** scalper | dip | grad when opened from a setup watch */
   setupWatchFamily?: 'scalper' | 'dip' | 'grad' | string;
   entryStyleHint?: string;
@@ -1264,6 +1266,8 @@ export async function executeBuy(
         entryPath:
           meta?.entryPath ||
           (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+        admissionMode: meta?.admissionMode,
+        fastArmProximityPct: meta?.fastArmProximityPct,
         setupWatchFamily: meta?.setupWatchFamily,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
@@ -1447,6 +1451,8 @@ export async function executeBuy(
         entryPath:
           meta?.entryPath ||
           (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+        admissionMode: meta?.admissionMode,
+        fastArmProximityPct: meta?.fastArmProximityPct,
         setupWatchFamily: meta?.setupWatchFamily,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,

@@ -8,6 +8,7 @@ import { config } from '../src/config';
 import {
   __ageLaneSamplesForTests,
   __ageOpenSpikeStartedAtForTests,
+  __clearEntryPauseCooldownForTests,
   __clearHardCallCooldownForTests,
   __endOpenSpikeForTests,
   __forceSpikeRecoveringElapsedForTests,
@@ -99,7 +100,7 @@ check(
 noteRpcCall({
   lane: 'primary',
   provider: 'Helius',
-  method: 'sendTransaction',
+  method: 'getTransaction',
   queueWaitMs: 20,
   networkMs: 2100,
   totalMs: 2120,
@@ -113,8 +114,11 @@ check(
   shouldSoftPauseNewEntries() === true
 );
 check(
-  'trading spike retry cap 1–2',
-  withRpcAttemptCap(true, 4) === 2 && withRpcAttemptCap(false, 3) === 1
+  'trading spike retry cap 1–2 on monitor only; exits uncapped',
+  withRpcAttemptCap(true, 4) === 4 &&
+    withRpcAttemptCap(false, 3) === 2 &&
+    withRpcAttemptCap(true, 4, { monitor: true }) === 2 &&
+    withRpcAttemptCap(true, 4, { exitSend: true }) === 4
 );
 check(
   'watchers isolate still independent of trading spike',
@@ -220,7 +224,7 @@ __resetRpcSpikeInspectorForTests();
 noteRpcCall({
   lane: 'primary',
   provider: 'Helius',
-  method: 'sendTransaction',
+  method: 'getTransaction',
   queueWaitMs: 20,
   networkMs: 2100,
   totalMs: 2120,
@@ -396,7 +400,7 @@ __setSpikeInspectorUptimeForTests(130_000);
 noteRpcCall({
   lane: 'primary',
   provider: 'Helius',
-  method: 'sendTransaction',
+  method: 'getTransaction',
   queueWaitMs: 20,
   networkMs: 2100,
   totalMs: 2120,
@@ -637,10 +641,68 @@ for (let i = 0; i < 5; i++) {
 __ageOpenSpikeStartedAtForTests('primary', 91_000);
 getSpikeInspectorSnapshot();
 check(
-  '1.2.389 max_age recovers when last 5 probes are under 280ms',
+  '1.2.389 max_age recovers when last 5 probes are under the clear bar',
   isLaneSpiking('primary') === false &&
     getLastRpcSpikeRecoverReason() === 'max_age',
   String(getLastRpcSpikeRecoverReason())
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+for (let i = 0; i < 8; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 8,
+    networkMs: 397,
+    totalMs: 405,
+    outcome: 'success',
+    inFlight: 1,
+  });
+}
+check(
+  '1.2.393 p95 ~400ms does not start a Trading spike or pause',
+  isLaneSpiking('primary') === false &&
+    shouldSoftPauseNewEntries() === false &&
+    getSpikeInspectorSnapshot().trading.status === 'ok',
+  `spike=${isLaneSpiking('primary')} pause=${shouldSoftPauseNewEntries()} status=${getSpikeInspectorSnapshot().trading.status} p95=${getSpikeInspectorSnapshot().trading.p95}`
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 2,
+});
+check(
+  'hard Trading call pauses entries while p95 is still hot',
+  shouldSoftPauseNewEntries() === true
+);
+for (let i = 0; i < 8; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 8,
+    networkMs: 400,
+    totalMs: 408,
+    outcome: 'success',
+    inFlight: 2,
+  });
+}
+check(
+  '1.2.393 ~400ms p95 does not hold entry pause',
+  shouldSoftPauseNewEntries() === false,
+  `pause=${shouldSoftPauseNewEntries()} spike=${isLaneSpiking('primary')}`
 );
 
 __resetRpcSpikeInspectorForTests();
@@ -662,13 +724,16 @@ for (let i = 0; i < 8; i++) {
     provider: 'Helius',
     method: 'getSlot',
     queueWaitMs: 8,
-    networkMs: 400,
-    totalMs: 408,
+    networkMs: 692,
+    totalMs: 700,
     outcome: 'success',
     inFlight: 2,
   });
 }
-check('1.2.389 pause on while spike is young', shouldSoftPauseNewEntries() === true);
+check(
+  'pause off at ~700ms (below enter, above clear) while spike can stay open',
+  shouldSoftPauseNewEntries() === false && isLaneSpiking('primary') === true
+);
 __ageOpenSpikeStartedAtForTests('primary', 91_000);
 const snapPause = getSpikeInspectorSnapshot();
 check(
@@ -692,8 +757,29 @@ noteRpcCall({
   inFlight: 2,
 });
 check(
-  '1.2.389 new spike re-pauses entries',
-  shouldSoftPauseNewEntries() === true && isLaneSpiking('primary') === true
+  '1.2.393 re-pause cooldown blocks immediate re-pause after max_age/auto_clear',
+  shouldSoftPauseNewEntries() === false,
+  `pause=${shouldSoftPauseNewEntries()} spike=${isLaneSpiking('primary')}`
+);
+__endOpenSpikeForTests('primary');
+__clearHardCallCooldownForTests('primary');
+__clearEntryPauseCooldownForTests();
+for (let i = 0; i < 8; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 10,
+    networkMs: 940,
+    totalMs: 950,
+    outcome: 'success',
+    inFlight: 2,
+  });
+}
+check(
+  '1.2.393 sustained p95 > enter re-pauses after cooldown',
+  shouldSoftPauseNewEntries() === true && isLaneSpiking('primary') === true,
+  `pause=${shouldSoftPauseNewEntries()} spike=${isLaneSpiking('primary')} p95=${getSpikeInspectorSnapshot().trading.p95}`
 );
 
 __resetExitLaneGuardTripsForTests();
@@ -763,27 +849,45 @@ const gaiB = acquireSpikeAccountInfoCap(
   ['getAccountInfo'],
   'token_metrics'
 );
-const gaiC = acquireSpikeAccountInfoCap(
+const gaiArm = acquireSpikeAccountInfoCap(
   'watchers',
   ['getAccountInfo'],
-  'market_scanner'
+  'arm_dip'
+);
+const gaiArm2 = acquireSpikeAccountInfoCap(
+  'watchers',
+  ['getAccountInfo'],
+  'trigger_scalper'
 );
 check(
-  'watchers spike drops 3rd concurrent getAccountInfo enrich',
+  'watchers spike: enrich cap 1, arm/trigger can use 2nd slot, 3rd dropped',
   gaiA.allowed === true &&
-    gaiB.allowed === true &&
-    gaiC.allowed === false &&
+    gaiB.allowed === false &&
+    gaiArm.allowed === true &&
+    gaiArm2.allowed === false &&
     getSpikeAccountInfoInFlight('watchers') === 2,
-  `a=${gaiA.allowed} b=${gaiB.allowed} c=${gaiC.allowed} inflight=${getSpikeAccountInfoInFlight('watchers')}`
+  `a=${gaiA.allowed} b=${gaiB.allowed} arm=${gaiArm.allowed} arm2=${gaiArm2.allowed} inflight=${getSpikeAccountInfoInFlight('watchers')}`
 );
 gaiA.release();
 gaiB.release();
-gaiC.release();
+gaiArm.release();
+gaiArm2.release();
 check(
   'executeSell still has no containment pause',
   !/export async function executeSell[\s\S]*shouldSoftPauseNewEntries/.test(
     readSrc('src/trade.ts')
   )
+);
+check(
+  'pause_on / pause_off logs include p95 and reason',
+  /\[rpc_entry_pause\]/.test(readSrc('src/rpcSpikeInspector.ts')) &&
+    /pause_on/.test(readSrc('src/rpcSpikeInspector.ts')) &&
+    /pause_off/.test(readSrc('src/rpcSpikeInspector.ts'))
+);
+check(
+  'primary tx monitor skips new polls during shed (join in-flight only)',
+  /PRIMARY_TX_MONITOR_METHODS/.test(connSrc) &&
+    /startIfMissing:\s*false/.test(connSrc)
 );
 
 __resetRpcSpikeInspectorForTests();
@@ -821,7 +925,7 @@ const d2 = runDedupedRpcJob(
   },
   { join: true }
 );
-void Promise.all([d1, d2]).then(([r1, r2]) => {
+void Promise.all([d1, d2]).then(async ([r1, r2]) => {
   check(
     'duplicate primary getSignatures joins in-flight (no extra storm)',
     monitorRuns === 1 &&
@@ -833,6 +937,15 @@ void Promise.all([d1, d2]).then(([r1, r2]) => {
   check(
     'meteredFetch dedupes primary monitor methods during spike',
     /PRIMARY_MONITOR_METHODS/.test(connSrc) && /runDedupedRpcJob/.test(connSrc)
+  );
+  const skipped = await runDedupedRpcJob(
+    'primary:monitor:getTransaction:skip-new',
+    async () => 'should-not-run',
+    { join: true, startIfMissing: false }
+  );
+  check(
+    'shed skips a new getTransaction when none is in-flight',
+    skipped === undefined
   );
   const mevSrc = readSrc('src/mev.ts');
   check(

@@ -18,6 +18,9 @@ import {
 } from './tradeProfiles';
 import {
   analyzeSrConfluenceFromCandles,
+  buildSupportSideMcTargets,
+  isSupportSideLevel,
+  marketCapAtPriceLevel,
   type SrTimeframe,
 } from './technicalLevels';
 import { isMintOnActiveDipWatch } from './dipSetupWatch';
@@ -250,57 +253,26 @@ function isScalperFamilyEnabled(): boolean {
   return true;
 }
 
-function mcAtPrice(
-  marketCapUsd: number | undefined,
-  lastPriceSol: number | null | undefined,
-  levelPriceSol: number | null | undefined
-): number | null {
-  if (
-    marketCapUsd == null ||
-    !Number.isFinite(marketCapUsd) ||
-    marketCapUsd <= 0
-  ) {
-    return null;
-  }
-  if (
-    lastPriceSol == null ||
-    !Number.isFinite(lastPriceSol) ||
-    lastPriceSol <= 0
-  ) {
-    return null;
-  }
-  if (
-    levelPriceSol == null ||
-    !Number.isFinite(levelPriceSol) ||
-    levelPriceSol <= 0
-  ) {
-    return null;
-  }
-  return marketCapUsd * (levelPriceSol / lastPriceSol);
-}
-
 function buildTargetEntries(w: {
   marketCapUsd?: number;
   lastPriceSol?: number | null;
   supportPriceSol?: number | null;
   resistancePriceSol?: number | null;
 }): ScalperTargetEntry[] {
-  const out: ScalperTargetEntry[] = [];
-  const push = (label: string, priceSol: number | null | undefined) => {
-    const mc = mcAtPrice(w.marketCapUsd, w.lastPriceSol, priceSol);
-    if (mc == null || priceSol == null) return;
-    if (
-      out.some(
-        (e) =>
-          Math.abs(e.priceSol - priceSol) / Math.max(e.priceSol, 1e-18) < 0.005
-      )
-    ) {
-      return;
+  const support = buildSupportSideMcTargets({
+    marketCapUsd: w.marketCapUsd,
+    lastPriceSol: w.lastPriceSol,
+    levels: [{ label: 'Support', priceSol: w.supportPriceSol }],
+  });
+  const out: ScalperTargetEntry[] = [...support];
+  const resPx = Number(w.resistancePriceSol);
+  const live = Number(w.lastPriceSol);
+  if (resPx > 0 && live > 0 && resPx >= live * 0.98) {
+    const mc = marketCapAtPriceLevel(w.marketCapUsd, w.lastPriceSol, resPx);
+    if (mc != null) {
+      out.push({ label: 'Resistance', priceSol: resPx, mcUsd: mc });
     }
-    out.push({ label, priceSol, mcUsd: mc });
-  };
-  push('Support', w.supportPriceSol);
-  push('Resistance', w.resistancePriceSol);
+  }
   return out;
 }
 
@@ -616,7 +588,9 @@ async function refreshWatchMarket(
       w.nearMultiTfResistance = conf.nearMultiTfResistance;
       w.nearSupport = conf.supportTfHits.length > 0;
       if (conf.primarySupport != null && conf.primarySupport > 0) {
-        w.supportPriceSol = conf.primarySupport;
+        if (isSupportSideLevel(conf.primarySupport, w.lastPriceSol)) {
+          w.supportPriceSol = conf.primarySupport;
+        }
       }
       if (conf.primaryResistance != null && conf.primaryResistance > 0) {
         w.resistancePriceSol = conf.primaryResistance;
@@ -1091,7 +1065,7 @@ export async function tickScalperSetupWatches(opts?: {
     }
 
     const armLife = applyArmLifecycleTimeout(w, now);
-    if (armLife) {
+    if (armLife && armLife !== 'promote_fast_arm') {
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = armLife;

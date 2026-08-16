@@ -197,6 +197,16 @@ check(
   )
 );
 
+const adm = readSrc('src/admissionMode.ts');
+check(
+  'admissionMode helper exists with hybrid default',
+  /shouldFastArmOpen/.test(adm) && /normalizeAdmissionMode/.test(adm)
+);
+check(
+  'Watchlist Ready now / Waiting chips exist',
+  /Ready now/.test(dash) && /is-waiting/.test(dash)
+);
+
 if (failed) {
   console.error(`\n${failed} check(s) failed`);
   process.exit(1);

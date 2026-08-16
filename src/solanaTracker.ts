@@ -5,6 +5,7 @@
 
 import { config } from './config';
 import { logger, errorToMeta, loggedFetch } from './logger';
+import { shouldSkipCreditsProvider } from './creditsGuard';
 
 export type SolanaTrackerPlatform = 'axiom' | 'photon' | 'bloom' | 'bullx';
 
@@ -136,6 +137,14 @@ export async function fetchPlatformLeaderboard(
       traders: [],
       error: 'SOLANA_TRACKER_API_KEY not set',
       status: 0,
+    };
+  }
+  if (shouldSkipCreditsProvider('solanatracker')) {
+    return {
+      ok: false,
+      traders: [],
+      error: 'Solana Tracker credits backoff',
+      status: 429,
     };
   }
 

@@ -1275,6 +1275,7 @@ export function createServer(): express.Application {
       lateChaseAtEntry: p.lateChaseAtEntry,
       armedWatch: p.armedWatch,
       entryPath: p.entryPath,
+      admissionMode: (p as { admissionMode?: string }).admissionMode,
       setupWatchFamily: p.setupWatchFamily,
       entryQualityScore: p.entryQualityScore,
       strategyKind: p.strategyKind,
@@ -4086,6 +4087,59 @@ export function createServer(): express.Application {
         ok: false,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  });
+
+  app.get('/api/config/admission-mode', (_req: Request, res: Response) => {
+    try {
+      const { getAdmissionModeStatus } =
+        require('./admissionMode') as typeof import('./admissionMode');
+      res.json({ ok: true, ...getAdmissionModeStatus() });
+    } catch (err) {
+      sendApiError(res, err);
+    }
+  });
+
+  app.post('/api/config/admission-mode', (req: Request, res: Response) => {
+    try {
+      const {
+        isAdmissionMode,
+        setAdmissionMode,
+        setFastArmProximityPct,
+        setFlowMaxWaitingArmMinutes,
+        setAdmissionModeByProfile,
+        getAdmissionModeStatus,
+      } = require('./admissionMode') as typeof import('./admissionMode');
+      const body = (req.body ?? {}) as {
+        admissionMode?: unknown;
+        fastArmProximityPct?: unknown;
+        flowMaxWaitingArmMinutes?: unknown;
+        admissionModeByProfile?: unknown;
+      };
+      if (body.admissionMode !== undefined) {
+        if (!isAdmissionMode(body.admissionMode)) {
+          res.status(400).json({
+            ok: false,
+            error: 'admissionMode must be selective | flow | hybrid',
+          });
+          return;
+        }
+        setAdmissionMode(body.admissionMode);
+      }
+      if (body.fastArmProximityPct !== undefined) {
+        setFastArmProximityPct(body.fastArmProximityPct);
+      }
+      if (body.flowMaxWaitingArmMinutes !== undefined) {
+        setFlowMaxWaitingArmMinutes(body.flowMaxWaitingArmMinutes);
+      }
+      if (body.admissionModeByProfile !== undefined) {
+        setAdmissionModeByProfile(
+          body.admissionModeByProfile as Record<string, 'selective' | 'flow' | 'hybrid'>
+        );
+      }
+      res.json({ ok: true, ...getAdmissionModeStatus() });
+    } catch (err) {
+      sendApiError(res, err);
     }
   });
 

@@ -1,3 +1,5 @@
+import { isSupportSideLevel } from './technicalLevels';
+
 /**
  * Shared support / Fib / multi-TF reclaim detector + late-chase helper.
  * Used by Dip / Scalper setup watches and lane entry-style DNA.
@@ -80,19 +82,25 @@ function pickNearestLevel(input: DetectSupportReclaimInput): {
   const f05 = finitePos(input.fib05PriceSol);
   if (f05 != null) candidates.push({ price: f05, kind: 'fib' });
 
-  if (!candidates.length) return { price: null, kind: 'none' };
+  const pxForSide = finitePos(input.priceSol);
+  const supportSide =
+    pxForSide != null
+      ? candidates.filter((c) => isSupportSideLevel(c.price, pxForSide))
+      : candidates;
+  const pool = supportSide.length ? supportSide : [];
+  if (!pool.length) return { price: null, kind: 'none' };
   if (px == null) {
     // Prefer mtf → support → fib order when price unknown
     const prefer =
-      candidates.find((c) => c.kind === 'mtf') ||
-      candidates.find((c) => c.kind === 'support') ||
-      candidates[0]!;
+      pool.find((c) => c.kind === 'mtf') ||
+      pool.find((c) => c.kind === 'support') ||
+      pool[0]!;
     return { price: prefer.price, kind: prefer.kind };
   }
-  let best = candidates[0]!;
+  let best = pool[0]!;
   let bestDist = Math.abs(px - best.price) / best.price;
-  for (let i = 1; i < candidates.length; i++) {
-    const c = candidates[i]!;
+  for (let i = 1; i < pool.length; i++) {
+    const c = pool[i]!;
     const d = Math.abs(px - c.price) / c.price;
     if (d < bestDist) {
       best = c;

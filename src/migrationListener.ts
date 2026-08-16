@@ -26,6 +26,12 @@ import {
 } from './connection';
 import { isPublicRpcUrl, isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
+import {
+  getLogsSubscribeDisableReason,
+  isLogsSubscribeDisabled,
+  isLogsSubscribeUnsupportedError,
+  shouldAttemptLogsSubscribe,
+} from './rpcWsGuard';
 
 /** Raydium AMM v4 — common post-migration venue */
 const RAYDIUM_AMM_V4 = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
@@ -158,10 +164,15 @@ export function startMigrationListener(): void {
 
   // Public RPCs cannot handle program-wide onLogs (flood → OOM / crash loop on Render).
   const rpcUrl = getRpcUrl();
-  if (isPublicRpcUrl(rpcUrl)) {
+  if (isPublicRpcUrl(rpcUrl) || !shouldAttemptLogsSubscribe(rpcUrl)) {
+    const reason = isPublicRpcUrl(rpcUrl)
+      ? 'public_rpc'
+      : getLogsSubscribeDisableReason(rpcUrl) || 'disabled';
     console.warn(
-      '[migration] Public RPC detected — WebSocket program logs DISABLED (poll-only). ' +
-        'Set HELIUS_API_KEY + ALCHEMY_API_KEY (or a paid RPC_URL) for real-time migration WS.'
+      `[migration] WebSocket program logs DISABLED (${reason}) — poll-only. ` +
+        (reason === 'public_rpc'
+          ? 'Set HELIUS_API_KEY + ALCHEMY_API_KEY (or a paid RPC_URL) for real-time migration WS.'
+          : 'logsSubscribe is unsupported on this provider; not retrying.')
     );
     wsMode = false;
   } else {
@@ -242,6 +253,9 @@ export function getMigrationStatus() {
     subscribedRpcUrl: subscribedRpcUrl
       ? subscribedRpcUrl.replace(/\/\/.*@/, '//***@').slice(0, 64)
       : null,
+    logsSubscribeDisabled: isLogsSubscribeDisabled(subscribedRpcUrl || getRpcUrl()),
+    logsSubscribeReason:
+      getLogsSubscribeDisableReason(subscribedRpcUrl || getRpcUrl()) || null,
     priorityEnabled: config.strategy.enableMigrationPriority,
     volumeSpikeSol:
       config.strategy.migrationVolumeSpikeSol ?? DEFAULT_VOLUME_SPIKE_SOL,
@@ -268,9 +282,18 @@ function unsubscribeAll(): void {
 
 function subscribeWebSocket(): boolean {
   try {
+    const rpcUrl = getRpcUrl();
+    if (isPublicRpcUrl(rpcUrl) || !shouldAttemptLogsSubscribe(rpcUrl)) {
+      wsMode = false;
+      return false;
+    }
     unsubscribeAll();
     const conn = getConnection();
     subscribedRpcUrl = conn.rpcEndpoint;
+    if (!shouldAttemptLogsSubscribe(subscribedRpcUrl)) {
+      wsMode = false;
+      return false;
+    }
     lastSubscribeAt = Date.now();
 
     const programs: { id: string; label: MigrationEvent['program'] }[] = [
@@ -284,7 +307,16 @@ function subscribeWebSocket(): boolean {
         new PublicKey(id),
         (logs: Logs, ctx: Context) => {
           lastWsEventAt = Date.now();
-          void handleLogsNotification(logs, ctx, label);
+          void handleLogsNotification(logs, ctx, label).catch((err) => {
+            if (
+              isLogsSubscribeUnsupportedError(err) ||
+              /logsSubscribe|-32601/i.test(String(err))
+            ) {
+              wsMode = false;
+              return;
+            }
+            /* poll path still runs */
+          });
         },
         'confirmed'
       );
@@ -301,6 +333,21 @@ function subscribeWebSocket(): boolean {
     );
     return true;
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/logsSubscribe|not found|-32601/i.test(msg)) {
+      wsMode = false;
+      try {
+        const { disableLogsSubscribe } =
+          require('./rpcWsGuard') as typeof import('./rpcWsGuard');
+        disableLogsSubscribe(getRpcUrl(), 'method_not_found');
+      } catch {
+        /* optional */
+      }
+      console.warn(
+        '[migration] logsSubscribe unsupported — staying poll-only (no WS retry)'
+      );
+      return false;
+    }
     console.error('[migration] WebSocket subscription error:', err);
     wsMode = false;
     return false;
@@ -310,9 +357,10 @@ function subscribeWebSocket(): boolean {
 function scheduleReconnect(reason: string): void {
   if (!running) return;
   if (reconnectTimer) return;
-  // Never reconnect WS against public RPC — it crash-loops the host.
+  // Never reconnect WS against public RPC or a provider that rejected logsSubscribe.
   try {
-    if (isPublicRpcUrl(getRpcUrl())) {
+    const rpcUrl = getRpcUrl();
+    if (isPublicRpcUrl(rpcUrl) || isLogsSubscribeDisabled(rpcUrl)) {
       wsMode = false;
       return;
     }
@@ -345,9 +393,10 @@ function scheduleReconnect(reason: string): void {
 function checkSubscriptionHealth(): void {
   if (!running) return;
 
-  // Stay poll-only on public RPCs — never try to (re)open program log websockets.
+  // Stay poll-only on public RPCs or providers that do not support logsSubscribe.
   try {
-    if (isPublicRpcUrl(getRpcUrl())) {
+    const rpcUrl = getRpcUrl();
+    if (isPublicRpcUrl(rpcUrl) || isLogsSubscribeDisabled(rpcUrl)) {
       wsMode = false;
       return;
     }
@@ -410,6 +459,8 @@ async function handleLogsNotification(
       () => processMigrationTx(signature, 'websocket', program),
       'migration'
     );
+  } catch {
+    /* fail-soft: poll interval still covers migrations */
   } finally {
     migrationParseInFlight -= 1;
   }

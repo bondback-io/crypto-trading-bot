@@ -20,6 +20,13 @@ import {
 } from './dataDir';
 import { config, upsertSmartWallet } from './config';
 import { isValidSolanaAddress, inferWalletCategory } from './walletStore';
+import {
+  classifyCreditsProvider,
+  isInsufficientCreditsBody,
+  logCreditsRequest,
+  noteCreditsExhausted,
+  shouldSkipCreditsProvider,
+} from './creditsGuard';
 
 const NANSEN_BASE = 'https://api.nansen.ai';
 const CACHE_FILE = 'nansen-wallets-cache.json';
@@ -347,7 +354,16 @@ async function nansenPost<T>(
     throw new NansenApiError('NANSEN_API_KEY is not configured', 401);
   }
 
-  const res = await fetch(`${NANSEN_BASE}${path}`, {
+  const url = `${NANSEN_BASE}${path}`;
+  const provider = classifyCreditsProvider(url);
+  if (shouldSkipCreditsProvider(provider)) {
+    throw new NansenApiError('Nansen credits backoff', 429, {
+      creditsRemaining: lastCreditsRemaining,
+    });
+  }
+  logCreditsRequest('nansenPost', provider, url);
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       apiKey,
@@ -365,6 +381,10 @@ async function nansenPost<T>(
   if (creditsRemaining != null) lastCreditsRemaining = creditsRemaining;
 
   if (res.status === 429) {
+    const peek = await res.clone().text().catch(() => '');
+    if (isInsufficientCreditsBody(peek)) {
+      noteCreditsExhausted('nansenPost', provider, url);
+    }
     const retry =
       Number(res.headers.get('retry-after')) ||
       Number((await res.json().catch(() => ({})) as { retry_after?: number }).retry_after) ||
@@ -378,15 +398,22 @@ async function nansenPost<T>(
   if (!res.ok) {
     let detail = '';
     try {
-      const j = (await res.json()) as { detail?: unknown };
+      const j = (await res.json()) as { detail?: unknown; error?: unknown };
       detail =
         typeof j.detail === 'string'
           ? j.detail
           : j.detail != null
             ? JSON.stringify(j.detail)
-            : '';
+            : typeof j.error === 'string'
+              ? j.error
+              : j.error != null
+                ? JSON.stringify(j.error)
+                : '';
     } catch {
       detail = await res.text().catch(() => '');
+    }
+    if (isInsufficientCreditsBody(detail) || res.status === 402) {
+      noteCreditsExhausted('nansenPost', provider, url);
     }
     const msg =
       res.status === 401

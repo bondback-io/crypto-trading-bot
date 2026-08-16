@@ -33,6 +33,8 @@ import { analyzeChartPatterns } from './chartPatterns';
 import {
   getTechnicalLevelsForStrategy,
   analyzeSrConfluenceFromCandles,
+  isSupportSideLevel,
+  pickDipRetracementLevels,
   type SrTimeframe,
 } from './technicalLevels';
 import { evaluateIndicators } from './indicators';
@@ -753,7 +755,9 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
       nearMultiTfSupport = conf.nearMultiTfSupport;
       nearMultiTfResistance = conf.nearMultiTfResistance;
       if (conf.primarySupport != null && conf.primarySupport > 0) {
-        supportPriceSol = conf.primarySupport;
+        if (isSupportSideLevel(conf.primarySupport, lastPriceSol)) {
+          supportPriceSol = conf.primarySupport;
+        }
       }
       if (conf.primaryResistance != null && conf.primaryResistance > 0) {
         resistancePriceSol = conf.primaryResistance;
@@ -796,7 +800,8 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
       supportPriceSol == null &&
       supPx != null &&
       Number.isFinite(supPx) &&
-      supPx > 0
+      supPx > 0 &&
+      isSupportSideLevel(supPx, lastPriceSol)
     ) {
       supportPriceSol = Number(supPx);
     }
@@ -808,28 +813,30 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     ) {
       resistancePriceSol = Number(res.mid);
     }
-    for (const z of techSnap.fibZones || []) {
+    let raw05: number | null = null;
+    let raw618: number | null = null;
+    for (const z of [
+      ...(techSnap.fibZones || []),
+      ...(techSnap.snapshot?.fib?.levels || []),
+    ]) {
       const ratio = Number(z.ratio);
       const px = Number(z.price);
       if (!Number.isFinite(px) || px <= 0) continue;
-      if (Math.abs(ratio - 0.5) < 0.001) fib05PriceSol = px;
-      if (Math.abs(ratio - 0.618) < 0.02) fib618PriceSol = px;
+      if (raw05 == null && Math.abs(ratio - 0.5) < 0.001) raw05 = px;
+      if (raw618 == null && Math.abs(ratio - 0.618) < 0.02) raw618 = px;
     }
-    // Also scan full fib ladder if zones filtered out non-key levels
-    for (const z of techSnap.snapshot?.fib?.levels || []) {
-      const ratio = Number(z.ratio);
-      const px = Number(z.price);
-      if (!Number.isFinite(px) || px <= 0) continue;
-      if (fib05PriceSol == null && Math.abs(ratio - 0.5) < 0.001) {
-        fib05PriceSol = px;
-      }
-      if (fib618PriceSol == null && Math.abs(ratio - 0.618) < 0.02) {
-        fib618PriceSol = px;
-      }
-    }
+    const picked = pickDipRetracementLevels({
+      livePrice: lastPriceSol,
+      swingHigh: techSnap.snapshot?.fib?.swingHigh,
+      swingLow: techSnap.snapshot?.fib?.swingLow,
+      fib05: raw05,
+      fib618: raw618,
+    });
+    fib05PriceSol = picked.fib05;
+    fib618PriceSol = picked.fib618;
     if (supportPriceSol == null) {
-      const fibPx = fib05PriceSol ?? fib618PriceSol ?? techSnap.fibZones?.[0]?.price;
-      if (fibPx != null && Number.isFinite(fibPx) && fibPx > 0) {
+      const fibPx = fib05PriceSol ?? fib618PriceSol;
+      if (fibPx != null && isSupportSideLevel(fibPx, lastPriceSol)) {
         supportPriceSol = Number(fibPx);
       }
     }

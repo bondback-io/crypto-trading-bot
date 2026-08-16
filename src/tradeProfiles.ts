@@ -4761,21 +4761,31 @@ export function evaluateTradeProfileLanes(
       b.priority - a.priority
   );
 
-  // Soft MARL ranking — additive only; never mutates TP/SL or learning overrides.
+  // Soft MARL ranking — skip heavy reorder in Flow (rule-based assignment).
+  let skipMarl = false;
   try {
-    const { applyMarlLaneRanking } =
-      require('./marlCoordinator') as typeof import('./marlCoordinator');
-    applyMarlLaneRanking(results);
+    const { shouldSkipMarlReorder } =
+      require('./admissionMode') as typeof import('./admissionMode');
+    skipMarl = shouldSkipMarlReorder(ctx.preferProfileId || null);
   } catch {
-    /* optional */
+    skipMarl = false;
   }
+  if (!skipMarl) {
+    try {
+      const { applyMarlLaneRanking } =
+        require('./marlCoordinator') as typeof import('./marlCoordinator');
+      applyMarlLaneRanking(results);
+    } catch {
+      /* optional */
+    }
 
-  try {
-    const { applyProfileRlLaneRanking } =
-      require('./profileRlAgent') as typeof import('./profileRlAgent');
-    applyProfileRlLaneRanking(results);
-  } catch {
-    /* optional */
+    try {
+      const { applyProfileRlLaneRanking } =
+        require('./profileRlAgent') as typeof import('./profileRlAgent');
+      applyProfileRlLaneRanking(results);
+    } catch {
+      /* optional */
+    }
   }
 
   // Grad-watch / preferred Migration Sniper: if stamped preferred and eligibility
@@ -5366,6 +5376,11 @@ function scoreProfile(
           volumeDecayState: ctx.volumeDecayState ?? null,
           nearSupport: atSupportReclaim || ctx.nearSupport === true,
           nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+          lastPriceSol: ctx.priceSol ?? null,
+          supportPriceSol: ctx.supportPriceSol ?? null,
+          fib05PriceSol: ctx.fib05PriceSol ?? null,
+          fib618PriceSol: ctx.fib618PriceSol ?? null,
+          lateChase: ctx.lateChase === true,
         });
         if (habit.skip) {
           console.log(

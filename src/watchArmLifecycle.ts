@@ -31,6 +31,9 @@ export type ArmLifecycleRow = {
   preferredProfileId?: string | null;
   lastArmEvalAt?: number | null;
   fightDipDna?: boolean;
+  lastPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
 };
 
 export function isWatchersIsolate(): boolean {
@@ -150,7 +153,7 @@ export function resetArmClockOnArm(w: ArmLifecycleRow): void {
 export function applyArmLifecycleTimeout(
   w: ArmLifecycleRow,
   now: number
-): 'arm_timeout' | 'trigger_timeout' | null {
+): 'arm_timeout' | 'trigger_timeout' | 'promote_fast_arm' | null {
   const status = String(w.status || '');
   if (status === 'armed' && isTradingEntryPaused()) {
     if (w.armClockPausedAt == null) w.armClockPausedAt = now;
@@ -162,8 +165,40 @@ export function applyArmLifecycleTimeout(
   }
   const paused = Number(w.armClockPausedMs) || 0;
   if (status === 'watching') {
-    const t0 = Number(w.createdAt) || now;
-    if (now - t0 >= WAITING_ARM_TIMEOUT_MS) return 'arm_timeout';
+    let waitMs = WAITING_ARM_TIMEOUT_MS;
+    try {
+      const { waitingArmTimeoutMs, shouldFastArmOpen } =
+        require('./admissionMode') as typeof import('./admissionMode');
+      waitMs = waitingArmTimeoutMs(w.preferredProfileId);
+      if (now - (Number(w.createdAt) || now) >= waitMs) {
+        const fa = shouldFastArmOpen({
+          profileId: w.preferredProfileId,
+          lateChase: /late.?chase/i.test(String(w.lastReason || '')),
+          lastPriceSol: w.lastPriceSol,
+          supportPriceSol: w.supportPriceSol,
+          fib05PriceSol: w.fib05PriceSol,
+          fib618PriceSol: w.fib618PriceSol,
+          nearKeyFib: w.nearKeyFib === true,
+          nearSupport: w.nearSupport === true,
+          nearMultiTfSupport: w.nearMultiTfSupport === true,
+          hasLevelEvidence: watchHasLevelEvidence(w),
+        });
+        if (fa.fastArm) {
+          w.status = 'armed';
+          w.armedAt = now;
+          w.lastReason = 'timeout_fast_arm';
+          w.lastArmEvalAt = now;
+          return 'promote_fast_arm';
+        }
+        return 'arm_timeout';
+      }
+      return null;
+    } catch {
+      if (now - (Number(w.createdAt) || now) >= WAITING_ARM_TIMEOUT_MS) {
+        return 'arm_timeout';
+      }
+      return null;
+    }
   }
   if (status === 'armed') {
     const t0 = Number(w.armedAt) || Number(w.createdAt) || now;

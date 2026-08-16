@@ -314,7 +314,8 @@ export function isRpcGateSkipError(err: unknown): err is RpcGateSkipError {
   return err instanceof RpcGateSkipError;
 }
 
-const SPIKE_ACCOUNTINFO_CAP = 2;
+const SPIKE_ACCOUNTINFO_ENRICH_CAP = 1;
+const SPIKE_ACCOUNTINFO_TOTAL_CAP = 2;
 const accountInfoInFlight: Record<'watchers' | 'secondary', number> = {
   watchers: 0,
   secondary: 0,
@@ -348,8 +349,8 @@ export function __resetSpikeAccountInfoCapForTests(): void {
 }
 
 /**
- * During a Watchers/secondary spike, cap concurrent getAccountInfo at 2.
- * Excess enrich calls are dropped (reuse last / skip). Exits are never dropped.
+ * During a Watchers/secondary spike, cap concurrent getAccountInfo (enrich 1, total 2).
+ * Prefer arm/trigger over optional enrich. Exits are never dropped.
  */
 export function acquireSpikeAccountInfoCap(
   role: RpcGateRole | undefined,
@@ -367,7 +368,8 @@ export function acquireSpikeAccountInfoCap(
     return noop;
   }
   const enrich = isAccountInfoEnrichFeature(feature);
-  if (accountInfoInFlight[role] >= SPIKE_ACCOUNTINFO_CAP && enrich) {
+  const cap = enrich ? SPIKE_ACCOUNTINFO_ENRICH_CAP : SPIKE_ACCOUNTINFO_TOTAL_CAP;
+  if (accountInfoInFlight[role] >= cap) {
     lanes[role].skipped += 1;
     try {
       const { noteBackgroundRpcSkip } =
@@ -376,10 +378,16 @@ export function acquireSpikeAccountInfoCap(
     } catch {
       /* */
     }
-    logGate(role, 'getAccountInfo enrich dropped (spike cap 2)', {
-      feature: feature || 'ungated',
-      inFlight: accountInfoInFlight[role],
-    });
+    logGate(
+      role,
+      enrich
+        ? 'getAccountInfo enrich dropped (spike cap 1)'
+        : 'getAccountInfo arm/trigger dropped (spike cap 2)',
+      {
+        feature: feature || 'ungated',
+        inFlight: accountInfoInFlight[role],
+      }
+    );
     return { allowed: false, release: () => {} };
   }
   accountInfoInFlight[role] += 1;
@@ -400,7 +408,12 @@ const inflightJobs = new Map<string, Promise<unknown>>();
 export async function runDedupedRpcJob<T>(
   key: string,
   fn: () => Promise<T>,
-  opts?: { /** If true, join the in-flight job; else skip with undefined */ join?: boolean }
+  opts?: {
+    /** If true, join the in-flight job; else skip with undefined */
+    join?: boolean;
+    /** If false and nothing is in-flight, do not start a new job. */
+    startIfMissing?: boolean;
+  }
 ): Promise<T | undefined> {
   const existing = inflightJobs.get(key);
   if (existing) {
@@ -418,6 +431,7 @@ export async function runDedupedRpcJob<T>(
     if (opts?.join === false) return undefined;
     return (await existing) as T;
   }
+  if (opts?.startIfMissing === false) return undefined;
   const promise = (async () => {
     try {
       return await fn();

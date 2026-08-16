@@ -29,6 +29,26 @@ export type ExpectancyWindow = 20 | 50 | 100;
 export const EXPECTANCY_WINDOWS = [20, 50, 100] as const;
 export const DEFAULT_EXPECTANCY_WINDOW: ExpectancyWindow = 50;
 
+function entryPathIsArmedLike(
+  entryPath?: string | null,
+  armedWatch?: boolean
+): boolean {
+  if (armedWatch === true) return true;
+  try {
+    const { isArmedLikeEntryPath } =
+      require('./admissionMode') as typeof import('./admissionMode');
+    return isArmedLikeEntryPath(entryPath);
+  } catch {
+    const p = String(entryPath || '').toLowerCase();
+    return (
+      p === 'armed_trigger' ||
+      p === 'hybrid_fast_arm' ||
+      p === 'flow_fast_arm' ||
+      p === 'selective_arm'
+    );
+  }
+}
+
 export type ExpectancyFamily =
   | 'scalp_reclaim_burst'
   | 'reversal_reclaim'
@@ -375,10 +395,7 @@ export function shouldBlockZeroMfePattern(input: {
 }): { block: boolean; reason?: string; share?: number; n?: number } {
   try {
     // Do not freeze armed trigger→open on historical DOA share (1.2.269).
-    if (
-      input.armedWatch === true ||
-      String(input.entryPath || '') === 'armed_trigger'
-    ) {
+    if (entryPathIsArmedLike(input.entryPath, input.armedWatch)) {
       return { block: false };
     }
     const pid = String(input.profileId || '');
@@ -779,19 +796,14 @@ export function classifyTradeFamily(input: {
     return 'migration_hold_reclaim';
   }
 
-  const armed =
-    input.armedWatch === true ||
-    String(input.entryPath || '').toLowerCase() === 'armed_trigger';
+  const armed = entryPathIsArmedLike(input.entryPath, input.armedWatch);
   const setupFam = String(input.setupWatchFamily || '')
     .trim()
     .toLowerCase();
   const pid = String(input.profileId || '');
 
   // Armed grad / migration profile armed → migration_hold_reclaim
-  if (
-    setupFam === 'grad' &&
-    (armed || String(input.entryPath || '').toLowerCase() === 'armed_trigger')
-  ) {
+  if (setupFam === 'grad' && armed) {
     return 'migration_hold_reclaim';
   }
   if (
@@ -938,7 +950,7 @@ function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
       : mfeCaptureFrom(pnlPct, maxRunup);
   const armed =
     e.armedWatch === true ||
-    e.entryPath === 'armed_trigger' ||
+    entryPathIsArmedLike(e.entryPath) ||
     e.scalperWatchTriggered === true;
   const mc = readEntryMcStamp(e as unknown as Record<string, unknown>);
   const setupWatchFamily = String(
@@ -1020,7 +1032,7 @@ function fromClosed(t: Record<string, unknown>): ExpectancyTradeRow | null {
   );
   const armed =
     t.armedWatch === true ||
-    t.entryPath === 'armed_trigger' ||
+    entryPathIsArmedLike(String(t.entryPath || '')) ||
     t.scalperWatchTriggered === true;
   const style = String(t.entryStyle || '');
   const mc = readEntryMcStamp(t);
@@ -1563,9 +1575,7 @@ export function admitFamilyForGovernor(input: {
     return 'late_chase';
   }
 
-  const armed =
-    input.armedWatch === true ||
-    String(input.entryPath || '').toLowerCase() === 'armed_trigger';
+  const armed = entryPathIsArmedLike(input.entryPath, input.armedWatch);
   const setupFam = String(input.setupWatchFamily || '')
     .trim()
     .toLowerCase();
@@ -1688,9 +1698,7 @@ export function shouldBlockUnarmedDipDisc(input: {
 }): { skip: boolean; reason?: string; reasonCode?: string } {
   const pid = String(input.profileId || '');
   if (pid !== 'dip_buyer') return { skip: false };
-  const armed =
-    input.armedWatch === true ||
-    String(input.entryPath || '').toLowerCase() === 'armed_trigger';
+  const armed = entryPathIsArmedLike(input.entryPath, input.armedWatch);
   if (armed) return { skip: false };
   const restricted =
     input.restricted != null
@@ -1747,8 +1755,7 @@ export function shouldSkipFamilyGovernor(input: {
       : family;
   const pid = String(input.profileId || '');
   const armed =
-    input.armedWatch === true ||
-    String(input.entryPath || '').toLowerCase() === 'armed_trigger' ||
+    entryPathIsArmedLike(input.entryPath, input.armedWatch) ||
     String(input.setupWatchFamily || '').toLowerCase() === 'grad';
   const secondaryLate = /late.?chase/i.test(
     String(input.entryStyleSecondary || '')
@@ -2954,7 +2961,6 @@ export function evaluateEntrySelectivity(
   ctx: EntrySelectivityCtx
 ): EntrySelectivityResult {
   const baselineV235 = isAdmissionBaselineV235();
-  const armedWatch = ctx.armedWatch === true;
   const entryStyle = String(ctx.entryStyle || '');
   const secondaryStyle = String(ctx.entryStyleSecondary || '');
   const lateChase =
@@ -2962,7 +2968,9 @@ export function evaluateEntrySelectivity(
     entryStyle === 'late_chase' ||
     /late.?chase/i.test(secondaryStyle);
   const entryPath =
-    ctx.entryPath || (armedWatch ? 'armed_trigger' : 'discretionary');
+    ctx.entryPath || (ctx.armedWatch === true ? 'armed_trigger' : 'discretionary');
+  const armedWatch =
+    ctx.armedWatch === true || entryPathIsArmedLike(entryPath);
   const reasons: string[] = [];
   const chips: string[] = [];
   const reasonCodes: string[] = [];

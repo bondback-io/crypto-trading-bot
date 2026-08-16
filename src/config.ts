@@ -2135,6 +2135,31 @@ export interface BotConfig {
    */
   entrySkillArmedTargetPct: number;
 
+  /**
+   * Admission / Entry Mode — timing path (independent of Entry Skill baseline).
+   * selective = Arming-ON park-all; hybrid = fast-arm when near + watch otherwise;
+   * flow = prefer fast-arm / short wait.
+   */
+  admissionMode: 'selective' | 'flow' | 'hybrid';
+  /** Ready-now if within this % of support/Fib/level (5–20, default 12). */
+  fastArmProximityPct: number;
+  /** Short waiting-arm cap for Flow/Hybrid wait path (5–20 minutes, default 10). */
+  flowMaxWaitingArmMinutes: number;
+  /** Per-profile override; unset = inherit global admissionMode. */
+  admissionModeByProfile: Partial<
+    Record<
+      | 'scalper'
+      | 'dip_buyer'
+      | 'trend_rider'
+      | 'migration_sniper'
+      | 'high_win_rate'
+      | 'momentum_burst'
+      | 'steady_compounder'
+      | 'reversal_scalper',
+      'selective' | 'flow' | 'hybrid'
+    >
+  >;
+
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 
@@ -2425,6 +2450,11 @@ export const config: BotConfig = {
   admissionBaseline: 'governed',
 
   entrySkillArmedTargetPct: 80,
+
+  admissionMode: 'hybrid',
+  fastArmProximityPct: 12,
+  flowMaxWaitingArmMinutes: 10,
+  admissionModeByProfile: {},
 
   peakProfitProtection: {
     enabled: true,
@@ -3226,6 +3256,21 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       if (!Number.isFinite(n)) return 80;
       return Math.min(90, Math.max(60, Math.round(n)));
     })(),
+    admissionMode:
+      config.admissionMode === 'selective' || config.admissionMode === 'flow'
+        ? config.admissionMode
+        : 'hybrid',
+    fastArmProximityPct: (() => {
+      const n = Number(config.fastArmProximityPct);
+      if (!Number.isFinite(n)) return 12;
+      return Math.min(20, Math.max(5, Math.round(n)));
+    })(),
+    flowMaxWaitingArmMinutes: (() => {
+      const n = Number(config.flowMaxWaitingArmMinutes);
+      if (!Number.isFinite(n)) return 10;
+      return Math.min(20, Math.max(5, Math.round(n)));
+    })(),
+    admissionModeByProfile: cloneJson(config.admissionModeByProfile || {}),
     peakProfitProtection: cloneJson(
       config.peakProfitProtection || {
         enabled: true,
@@ -4211,6 +4256,54 @@ function applySettingsSnapshot(
     }
   } else if (config.entrySkillArmedTargetPct == null) {
     config.entrySkillArmedTargetPct = 80;
+  }
+  if (
+    saved.admissionMode === 'selective' ||
+    saved.admissionMode === 'flow' ||
+    saved.admissionMode === 'hybrid'
+  ) {
+    config.admissionMode = saved.admissionMode;
+  } else if (saved.admissionMode == null) {
+    config.admissionMode = 'hybrid';
+  }
+  if (saved.fastArmProximityPct != null) {
+    const n = Number(saved.fastArmProximityPct);
+    if (Number.isFinite(n)) {
+      config.fastArmProximityPct = Math.min(20, Math.max(5, Math.round(n)));
+    }
+  } else if (config.fastArmProximityPct == null) {
+    config.fastArmProximityPct = 12;
+  }
+  if (saved.flowMaxWaitingArmMinutes != null) {
+    const n = Number(saved.flowMaxWaitingArmMinutes);
+    if (Number.isFinite(n)) {
+      config.flowMaxWaitingArmMinutes = Math.min(
+        20,
+        Math.max(5, Math.round(n))
+      );
+    }
+  } else if (config.flowMaxWaitingArmMinutes == null) {
+    config.flowMaxWaitingArmMinutes = 10;
+  }
+  if (
+    saved.admissionModeByProfile &&
+    typeof saved.admissionModeByProfile === 'object'
+  ) {
+    const next: typeof config.admissionModeByProfile = {};
+    for (const id of [
+      'scalper',
+      'dip_buyer',
+      'trend_rider',
+      'migration_sniper',
+      'high_win_rate',
+      'momentum_burst',
+      'steady_compounder',
+      'reversal_scalper',
+    ] as const) {
+      const v = (saved.admissionModeByProfile as Record<string, unknown>)[id];
+      if (v === 'selective' || v === 'flow' || v === 'hybrid') next[id] = v;
+    }
+    config.admissionModeByProfile = next;
   }
   if (saved.peakProfitProtection && typeof saved.peakProfitProtection === 'object') {
     const s = saved.peakProfitProtection;
@@ -6797,5 +6890,20 @@ export function getConfigSnapshot() {
       if (!Number.isFinite(n)) return 80;
       return Math.min(90, Math.max(60, Math.round(n)));
     })(),
+    admissionMode:
+      config.admissionMode === 'selective' || config.admissionMode === 'flow'
+        ? config.admissionMode
+        : 'hybrid',
+    fastArmProximityPct: (() => {
+      const n = Number(config.fastArmProximityPct);
+      if (!Number.isFinite(n)) return 12;
+      return Math.min(20, Math.max(5, Math.round(n)));
+    })(),
+    flowMaxWaitingArmMinutes: (() => {
+      const n = Number(config.flowMaxWaitingArmMinutes);
+      if (!Number.isFinite(n)) return 10;
+      return Math.min(20, Math.max(5, Math.round(n)));
+    })(),
+    admissionModeByProfile: { ...(config.admissionModeByProfile || {}) },
   };
 }

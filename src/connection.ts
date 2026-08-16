@@ -48,6 +48,14 @@ import {
   shouldShedPrimaryMonitoring,
   withRpcAttemptCap,
 } from './rpcSpikeInspector';
+import {
+  classifyCreditsProvider,
+  isInsufficientCreditsBody,
+  logCreditsRequest,
+  noteCreditsExhausted,
+  shouldSkipCreditsProvider,
+} from './creditsGuard';
+import { guardRpcWebSocket } from './rpcWsGuard';
 
 dotenv.config();
 
@@ -286,6 +294,11 @@ const PRIMARY_MONITOR_METHODS = new Set([
   'getParsedTransaction',
   'getAccountInfo',
 ]);
+const PRIMARY_TX_MONITOR_METHODS = new Set([
+  'getSignaturesForAddress',
+  'getTransaction',
+  'getParsedTransaction',
+]);
 
 function isExitRpcFeature(feature: string): boolean {
   return /send_tx|sendRawTransaction|sendLegacy|trade_exit|confirm_tx|confirmTransaction/i.test(
@@ -326,6 +339,13 @@ export function applyExitSendLaneGuard(
   return 'primary';
 }
 
+function fetchInputUrl(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  if (typeof Request !== 'undefined' && input instanceof Request) return input.url;
+  return String(input);
+}
+
 function meteredFetch(endpointLabel: string) {
   const baseFetch = globalThis.fetch.bind(globalThis);
   const doFetch = async (
@@ -333,6 +353,17 @@ function meteredFetch(endpointLabel: string) {
     init?: Parameters<typeof fetch>[1]
   ): Promise<Response> => {
     const methods = parseRpcMethodsFromBody(init?.body);
+    const url = fetchInputUrl(input);
+    const provider = classifyCreditsProvider(url);
+    const source = `rpc:${methods[0] || endpointLabel}`;
+    const feature = rpcFeatureAls.getStore() || 'ungated';
+    if (
+      provider === 'helius' &&
+      !isExitRpcFeature(feature) &&
+      shouldSkipCreditsProvider('helius')
+    ) {
+      throw new Error('Insufficient credits for this request');
+    }
     const t0 = Date.now();
     let ok = false;
     try {
@@ -347,6 +378,18 @@ function meteredFetch(endpointLabel: string) {
           latencyMs,
           status: res.status,
         });
+      }
+      if (!res.ok && provider === 'helius') {
+        logCreditsRequest(source, 'helius', url);
+        let peek = '';
+        try {
+          peek = await res.clone().text();
+        } catch {
+          peek = '';
+        }
+        if (isInsufficientCreditsBody(peek) || res.status === 402) {
+          noteCreditsExhausted(source, 'helius', url);
+        }
       }
       return res;
     } catch (err) {
@@ -371,6 +414,7 @@ function meteredFetch(endpointLabel: string) {
     const role = rpcRoleAls.getStore();
     const feature = rpcFeatureAls.getStore() || 'ungated';
     const monitor = methods.some((m) => PRIMARY_MONITOR_METHODS.has(m));
+    const txMonitor = methods.some((m) => PRIMARY_TX_MONITOR_METHODS.has(m));
     const accountCap = acquireSpikeAccountInfoCap(role, methods, feature);
     if (!accountCap.allowed) {
       throw new RpcGateSkipError('busy', role || 'watchers', feature);
@@ -378,7 +422,26 @@ function meteredFetch(endpointLabel: string) {
     try {
       if (
         role === 'primary' &&
+        txMonitor &&
+        !isExitRpcFeature(feature) &&
+        shouldShedPrimaryMonitoring()
+      ) {
+        const raw =
+          typeof init?.body === 'string'
+            ? init.body
+            : String(init?.body || '');
+        const key = `primary:monitor:${methods.slice().sort().join('+')}:${raw.slice(0, 240)}`;
+        const joined = await runDedupedRpcJob(key, () => doFetch(input, init), {
+          join: true,
+          startIfMissing: false,
+        });
+        if (joined) return joined;
+        throw new RpcGateSkipError('busy', 'primary', feature);
+      }
+      if (
+        role === 'primary' &&
         monitor &&
+        !txMonitor &&
         !isExitRpcFeature(feature) &&
         shouldShedPrimaryMonitoring()
       ) {
@@ -446,7 +509,9 @@ function latencyStressGraceMs(state: EndpointState | undefined): number {
  * the hosts were fine.
  */
 function isRpcRateLimitMessage(error: string): boolean {
-  return /429|rate.?limit|-32429|too many requests/i.test(error);
+  return /429|rate.?limit|-32429|too many requests|insufficient credits|credit usage limit/i.test(
+    error
+  );
 }
 
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {
@@ -626,6 +691,21 @@ function toWsUrl(httpUrl: string): string {
   return httpUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 }
 
+function createGuardedConnection(
+  url: string,
+  label: string,
+  wsUrl?: string
+): Connection {
+  const connection = new Connection(url, {
+    commitment: 'confirmed',
+    wsEndpoint: wsUrl || toWsUrl(url),
+    disableRetryOnRateLimit: true,
+    fetch: meteredFetch(label || 'rpc'),
+  });
+  guardRpcWebSocket(connection, { url, label });
+  return connection;
+}
+
 function ensureEndpoints(): void {
   if (endpoints.length > 0) return;
 
@@ -644,12 +724,11 @@ function ensureEndpoints(): void {
               : 'fallback');
     return {
       endpoint: { ...endpoint, role },
-      connection: new Connection(endpoint.url, {
-        commitment: 'confirmed',
-        wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
-        disableRetryOnRateLimit: true,
-        fetch: meteredFetch(endpoint.label || `rpc`),
-      }),
+      connection: createGuardedConnection(
+        endpoint.url,
+        endpoint.label || `rpc`,
+        endpoint.wsUrl
+      ),
       healthy: true,
       latencyMs: null,
       lastCallLatencyMs: null,
@@ -757,12 +836,7 @@ function ensureHeliusExtraFallbackEndpoint(): number {
   extraCriticalIdx = endpoints.length;
   endpoints.push({
     endpoint: { url, label, role: 'fallback' },
-    connection: new Connection(url, {
-      commitment: 'confirmed',
-      wsEndpoint: toWsUrl(url),
-      disableRetryOnRateLimit: true,
-      fetch: meteredFetch(label),
-    }),
+    connection: createGuardedConnection(url, label),
     healthy: true,
     latencyMs: null,
     lastCallLatencyMs: null,
@@ -1355,6 +1429,19 @@ function recordFailure(index: number, error: string): void {
   const state = endpoints[index];
   if (!state) return;
 
+  const provider = classifyCreditsProvider(state.endpoint.url);
+  if (
+    provider !== 'other' &&
+    isInsufficientCreditsBody(error) &&
+    !shouldSkipCreditsProvider(provider)
+  ) {
+    noteCreditsExhausted(
+      `rpc:${state.endpoint.label}`,
+      provider,
+      state.endpoint.url
+    );
+  }
+
   const isRateLimit = isRpcRateLimitMessage(error);
   const alreadyCooling = isEndpointRateLimited(state);
 
@@ -1513,7 +1600,15 @@ async function withRpcInner<T>(
   const defaultMax = critical
     ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
     : WITH_RPC_MAX_ATTEMPTS_OTHER;
-  const maxAttempts = withRpcAttemptCap(critical, defaultMax);
+  const monitorCall =
+    !exitSend &&
+    /getTransaction|getParsedTransaction|getSignaturesForAddress/i.test(
+      `${label} ${feature}`
+    );
+  const maxAttempts = withRpcAttemptCap(critical, defaultMax, {
+    exitSend,
+    monitor: monitorCall,
+  });
 
   // Build attempt order: preferred → other paid → QuickNode → utility → remaining
   const order: number[] = [];

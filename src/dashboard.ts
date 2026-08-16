@@ -162,6 +162,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       color: #F1BB72;
       fill: #F1BB72;
     }
+    .header-actions #header-admission-mode-badge {
+      padding: 2px 7px;
+      gap: 0;
+      min-width: 0;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .header-actions #header-admission-mode-badge.adm-hybrid {
+      border-color: rgba(52, 211, 153, 0.5);
+      color: #6ee7b7;
+      background: rgba(6, 78, 59, 0.35);
+    }
+    .header-actions #header-admission-mode-badge.adm-flow {
+      border-color: rgba(96, 165, 250, 0.5);
+      color: #93c5fd;
+      background: rgba(30, 58, 138, 0.35);
+    }
+    .header-actions #header-admission-mode-badge.adm-selective {
+      border-color: rgba(241, 187, 114, 0.5);
+      color: #F1BB72;
+      background: rgba(120, 53, 15, 0.35);
+    }
+    #watchlist-admission-chip {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 0.12rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      background: rgba(15, 23, 42, 0.55);
+      text-transform: none;
+    }
+    #watchlist-admission-chip.adm-hybrid { color: #6ee7b7; border-color: #059669; }
+    #watchlist-admission-chip.adm-flow { color: #93c5fd; border-color: #2563eb; }
+    #watchlist-admission-chip.adm-selective { color: #F1BB72; border-color: #b45309; }
     @media (prefers-reduced-motion: reduce) {
       .dot-running,
       .run-status.run-running #run-status-icon,
@@ -5447,6 +5484,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       text-transform: none;
     }
     .setup-watch-chip.is-near { color: #a5b4fc; border-color: #6366f1; }
+    .setup-watch-chip.is-ready { color: #6ee7b7; border-color: #34d399; text-transform: none; }
+    .setup-watch-chip.is-waiting { color: #fdba74; border-color: #c2410c; text-transform: none; }
     .setup-watch-chip.is-level { color: #86efac; border-color: #16a34a; }
     .setup-watch-chip.is-nolevel { color: #fca5a5; border-color: #b91c1c; }
     .setup-watch-chip.is-lowmov { color: #fdba74; border-color: #c2410c; }
@@ -7504,6 +7543,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span id="header-learning-mode-badge" class="badge status-badge has-tip lm-off lm-strictness-middle" title="Learning Mode OFF" aria-label="Learning Mode OFF">
             <svg class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/><path d="M9 21h6"/><path d="M10 17v4"/><path d="M14 17v4"/></svg>
           </span>
+          <span id="header-admission-mode-badge" class="badge status-badge has-tip adm-hybrid" title="Admission: Hybrid — open now if near a playbook level, otherwise watch→arm→trigger" aria-label="Admission Hybrid">
+            <span id="header-admission-mode-label">Hyb</span>
+          </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
           <span class="status-stat rpc-status rpc-pill rpc-unknown has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint and last measured latency">
@@ -8553,7 +8595,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" style="padding-bottom:0.55rem">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-0">Watchlist <span class="tip" tabindex="0" data-tip="Setup watches, market scanner / AlphaScan, and activity feeds — split into tabs so the page stays scannable. Readiness strip above stays observe-only."></span></div>
+            <div class="section-title !text-sm mb-0">Watchlist <span class="tip" tabindex="0" data-tip="Setup watches, market scanner / AlphaScan, and activity feeds — split into tabs so the page stays scannable. Readiness strip above stays observe-only."></span> <span id="watchlist-admission-chip" class="adm-hybrid" title="Admission / Entry Mode">Hybrid</span></div>
             <p class="text-xs text-slate-400 mb-0">Setups are the armed watch inventory. Scanner configures the live universe. Activity shows Pump / signals / re-entry.</p>
           </div>
           <div class="flex flex-wrap gap-2 items-center" style="flex-shrink:0">
@@ -9944,6 +9986,34 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="mint text-sm" id="risk-level-summary">—</div>
         <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
         <div class="mint mt-2" id="risk-status">—</div>
+
+        <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="admission-mode-card">
+          <div class="section-title !text-sm mb-1">Admission / Entry Mode <span class="tip" tabindex="0" data-tip="How timing works. Independent of Entry Skill (v235 vs governed) on Stats. Selective = today's Arming-ON park-all. Hybrid (default) opens now when price is within the proximity band of that bot's TA level; otherwise watch→arm→trigger. Flow prefers fast-arm and skips MARL reorder."></span></div>
+          <p class="text-xs text-slate-400 mb-2">Hybrid: open now if near level (fast-arm); otherwise watch until that bot's TA setup completes. Scalper still blocks chase entries with no level.</p>
+          <div class="flex flex-wrap gap-2 items-center mb-2" id="admission-mode-toggle">
+            <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="admission-mode-selective" onclick="setAdmissionMode('selective')" title="Park all unarmed opens — watch→arm→trigger">Selective</button>
+            <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="admission-mode-flow" onclick="setAdmissionMode('flow')" title="Prefer fast-arm / short wait; skip MARL reorder">Flow</button>
+            <button type="button" class="btn btn-primary text-xs sm:text-sm" id="admission-mode-hybrid" onclick="setAdmissionMode('hybrid')" title="Fast-arm when near a playbook level; otherwise watch→arm→trigger">Hybrid</button>
+            <span class="mint self-center text-xs" id="admission-mode-label">Hybrid</span>
+          </div>
+          <div class="mb-2">
+            <label class="text-xs text-slate-300" for="fast-arm-proximity-pct">Ready now if within this % of support/Fib/level — <span class="val" id="v-fast-arm-proximity-pct">12</span>%</label>
+            <input type="range" id="fast-arm-proximity-pct" min="5" max="20" step="1" value="12" oninput="onFastArmProximityInput(this.value)" onchange="saveAdmissionModeSettings()" style="width:100%;max-width:280px" />
+            <div class="flex justify-between text-xs text-slate-500" style="max-width:280px">
+              <span>5%</span><span>12%</span><span>20%</span>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="text-xs text-slate-300" for="flow-max-waiting-arm-minutes">Flow / Hybrid waiting-arm timeout (minutes)</label>
+            <input type="number" id="flow-max-waiting-arm-minutes" min="5" max="20" step="1" value="10" class="ctl-sm" style="width:5rem;margin-left:0.4rem" onchange="saveAdmissionModeSettings()" />
+            <span class="text-xs text-slate-500">Selective stays 20m</span>
+          </div>
+          <details class="mt-2">
+            <summary class="text-xs text-slate-400 cursor-pointer">Per-profile override (default inherit)</summary>
+            <div id="admission-mode-profile-overrides" class="mt-2 grid gap-1 text-xs" style="max-width:420px"></div>
+          </details>
+          <span class="mint text-xs" id="admission-mode-status">—</span>
+        </div>
 
         <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="learning-mode-card">
           <div class="section-title !text-sm mb-1">Learning Mode <span class="tip" tabindex="0" data-tip="Softens micro-bot entry gates vs your live baselines (conviction, cluster, WQ, sniper/bundler, top10, MC/liq/age) and fairness-boosts low-episode bots. Middle/Looser never tighten vs current floors; also raises effective Max Positions (≥16/≥24) and softens trade-rate at runtime without changing the Max Positions slider or SOL size. Default OFF. Per-bot Participate toggles live on Micro Bots cards."></span></div>
@@ -13992,6 +14062,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '/15m' +
           ' · conv ' +
           convTxt +
+          (function () {
+            const d = wp.conversion_diagnostics || {};
+            const h = Number(wp.hybrid_fast_arm_opens || d.hybrid_fast_arm_opens) || 0;
+            const f = Number(wp.flow_fast_arm_opens || d.flow_fast_arm_opens) || 0;
+            const s = Number(wp.selective_arm_opens || d.selective_arm_opens) || 0;
+            if (!h && !f && !s) return '';
+            return ' · fast-arm H/F ' + h + '/' + f + (s ? ' · sel-arm ' + s : '');
+          })() +
           ' · orphan MC ' +
           orphanN +
           orphanEx +
@@ -14254,10 +14332,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ' holders</span>'
             : '';
         let target = '';
-        if (kind === 'dip') {
-          const entries = Array.isArray(e.targetDipEntries)
-            ? e.targetDipEntries
+        if (kind === 'dip' || kind === 'trend') {
+          const entries = Array.isArray(kind === 'dip' ? e.targetDipEntries : e.targetEntries)
+            ? (kind === 'dip' ? e.targetDipEntries : e.targetEntries)
             : [];
+          const liveMc = Number(e.marketCapUsd);
           if (entries.length) {
             const bits = entries
               .slice(0, 3)
@@ -14265,6 +14344,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 const label = escHtml(String(t.label || 'Level'));
                 const mcN = Number(t.mcUsd);
                 if (!isFinite(mcN) || mcN <= 0) return '';
+                if (isFinite(liveMc) && liveMc > 0 && mcN > liveMc * 1.05) return '';
                 return (
                   label +
                   ' ~$' +
@@ -14274,7 +14354,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               .filter(Boolean);
             if (bits.length) {
               target =
-                '<span class="setup-watch-mc setup-watch-target" title="Approx MC at Fib / Support reclaim (MC × level/price)">Target Dip Entry: ' +
+                '<span class="setup-watch-mc setup-watch-target" title="Approx MC at HTF support / Fib retracement at or below live price">Target Dip Entry: ' +
                 bits.join(' · ') +
                 '</span>';
             }
@@ -14286,12 +14366,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '</span>'
             : '';
           const entries = Array.isArray(e.targetEntries) ? e.targetEntries : [];
+          const liveMc = Number(e.marketCapUsd);
           const bits = entries
             .slice(0, 2)
             .map(function (t) {
               const label = escHtml(String(t.label || 'Level'));
               const mcN = Number(t.mcUsd);
               if (!isFinite(mcN) || mcN <= 0) return '';
+              if (
+                String(t.label || '').toLowerCase() === 'support' &&
+                isFinite(liveMc) &&
+                liveMc > 0 &&
+                mcN > liveMc * 1.05
+              ) {
+                return '';
+              }
               return label + ' ~$' + Math.round(mcN).toLocaleString();
             })
             .filter(Boolean);
@@ -14520,6 +14609,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '">' +
           escHtml(status) +
           '</span>' +
+          (function () {
+            const nearNow =
+              e.nearKeyFib === true ||
+              e.nearSupport === true ||
+              e.nearMultiTfSupport === true ||
+              e.nearLevel === true;
+            if (status === 'armed' || (status === 'watching' && nearNow)) {
+              return '<span class="setup-watch-chip is-ready">Ready now</span>';
+            }
+            if (status === 'watching') {
+              return '<span class="setup-watch-chip is-waiting">Waiting</span>';
+            }
+            return '';
+          })() +
           scoreHtml +
           (tradeOpened
             ? '<span class="setup-watch-chip is-opened" title="Open position assigned to this micro-bot">Trade Opened</span>'
@@ -21526,6 +21629,167 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.updateLearningModeUi = updateLearningModeUi;
 
+    const ADMISSION_MODES = ['selective', 'flow', 'hybrid'];
+    const ADMISSION_MODE_LABELS = {
+      selective: 'Selective',
+      flow: 'Flow',
+      hybrid: 'Hybrid',
+    };
+    const ADMISSION_MODE_TIPS = {
+      selective: 'Admission: Selective — park unarmed opens; watch→arm→trigger',
+      flow: 'Admission: Flow — prefer fast-arm / short wait; skip MARL reorder',
+      hybrid: 'Admission: Hybrid — open now if near a playbook level, otherwise watch→arm→trigger',
+    };
+    const ADMISSION_OVERRIDE_PROFILES = [
+      { id: 'scalper', label: 'Scalper' },
+      { id: 'dip_buyer', label: 'Dip Buyer' },
+      { id: 'trend_rider', label: 'Trend Rider' },
+      { id: 'migration_sniper', label: 'Migration' },
+      { id: 'high_win_rate', label: 'HWR' },
+      { id: 'momentum_burst', label: 'Momentum Burst' },
+      { id: 'steady_compounder', label: 'Steady' },
+      { id: 'reversal_scalper', label: 'Reversal' },
+    ];
+
+    function normalizeAdmissionMode(raw) {
+      const v = String(raw || '').toLowerCase();
+      return ADMISSION_MODES.indexOf(v) >= 0 ? v : 'hybrid';
+    }
+
+    function readAdmissionOverrideMap() {
+      const out = {};
+      const wrap = document.getElementById('admission-mode-profile-overrides');
+      if (!wrap) return out;
+      wrap.querySelectorAll('select[data-admission-profile]').forEach(function (sel) {
+        const id = sel.getAttribute('data-admission-profile');
+        const v = String(sel.value || '').toLowerCase();
+        if (id && ADMISSION_MODES.indexOf(v) >= 0) out[id] = v;
+      });
+      return out;
+    }
+
+    function updateAdmissionModeUi(src) {
+      const cfg = src || _lastConfig || {};
+      const mode = normalizeAdmissionMode(cfg.admissionMode);
+      const proxRaw = Number(cfg.fastArmProximityPct);
+      const prox = Number.isFinite(proxRaw) ? Math.min(20, Math.max(5, Math.round(proxRaw))) : 12;
+      const waitRaw = Number(cfg.flowMaxWaitingArmMinutes);
+      const wait = Number.isFinite(waitRaw) ? Math.min(20, Math.max(5, Math.round(waitRaw))) : 10;
+      const overrides = cfg.admissionModeByProfile && typeof cfg.admissionModeByProfile === 'object'
+        ? cfg.admissionModeByProfile
+        : {};
+      ADMISSION_MODES.forEach(function (id) {
+        const btn = document.getElementById('admission-mode-' + id);
+        if (!btn) return;
+        const on = id === mode;
+        btn.className = on
+          ? 'btn btn-primary text-xs sm:text-sm'
+          : 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
+      });
+      const label = document.getElementById('admission-mode-label');
+      if (label) label.textContent = ADMISSION_MODE_LABELS[mode] || 'Hybrid';
+      const slider = document.getElementById('fast-arm-proximity-pct');
+      if (slider && document.activeElement !== slider) slider.value = String(prox);
+      const vProx = document.getElementById('v-fast-arm-proximity-pct');
+      if (vProx) vProx.textContent = String(prox);
+      const waitEl = document.getElementById('flow-max-waiting-arm-minutes');
+      if (waitEl && document.activeElement !== waitEl) waitEl.value = String(wait);
+      const wrap = document.getElementById('admission-mode-profile-overrides');
+      if (wrap && !wrap.dataset.built) {
+        wrap.innerHTML = ADMISSION_OVERRIDE_PROFILES.map(function (p) {
+          return (
+            '<label class="flex items-center justify-between gap-2">' +
+            '<span class="text-slate-300">' + p.label + '</span>' +
+            '<select class="ctl-sm" data-admission-profile="' + p.id + '" onchange="saveAdmissionModeSettings()" style="min-width:7.5rem">' +
+            '<option value="">Inherit</option>' +
+            '<option value="selective">Selective</option>' +
+            '<option value="flow">Flow</option>' +
+            '<option value="hybrid">Hybrid</option>' +
+            '</select></label>'
+          );
+        }).join('');
+        wrap.dataset.built = '1';
+      }
+      if (wrap) {
+        wrap.querySelectorAll('select[data-admission-profile]').forEach(function (sel) {
+          if (document.activeElement === sel) return;
+          const id = sel.getAttribute('data-admission-profile');
+          const ov = id ? String(overrides[id] || '') : '';
+          sel.value = ADMISSION_MODES.indexOf(ov) >= 0 ? ov : '';
+        });
+      }
+      const status = document.getElementById('admission-mode-status');
+      if (status) {
+        status.textContent =
+          (ADMISSION_MODE_LABELS[mode] || 'Hybrid') +
+          ' · near ' + prox + '% · wait ' + wait + 'm';
+      }
+      const header = document.getElementById('header-admission-mode-badge');
+      const headerLabel = document.getElementById('header-admission-mode-label');
+      const short = { selective: 'Sel', flow: 'Flow', hybrid: 'Hyb' };
+      if (headerLabel) headerLabel.textContent = short[mode] || 'Hyb';
+      if (header) {
+        header.classList.remove('adm-hybrid', 'adm-flow', 'adm-selective');
+        header.classList.add('adm-' + mode);
+        header.title = ADMISSION_MODE_TIPS[mode] || ADMISSION_MODE_TIPS.hybrid;
+        header.setAttribute('aria-label', 'Admission ' + (ADMISSION_MODE_LABELS[mode] || 'Hybrid'));
+      }
+      const chip = document.getElementById('watchlist-admission-chip');
+      if (chip) {
+        chip.classList.remove('adm-hybrid', 'adm-flow', 'adm-selective');
+        chip.classList.add('adm-' + mode);
+        chip.textContent = ADMISSION_MODE_LABELS[mode] || 'Hybrid';
+        chip.title = ADMISSION_MODE_TIPS[mode] || ADMISSION_MODE_TIPS.hybrid;
+      }
+    }
+    window.updateAdmissionModeUi = updateAdmissionModeUi;
+
+    function onFastArmProximityInput(v) {
+      const n = Math.min(20, Math.max(5, Math.round(Number(v) || 12)));
+      const el = document.getElementById('v-fast-arm-proximity-pct');
+      if (el) el.textContent = String(n);
+    }
+    window.onFastArmProximityInput = onFastArmProximityInput;
+
+    async function saveAdmissionModeSettings(partial) {
+      const slider = document.getElementById('fast-arm-proximity-pct');
+      const waitEl = document.getElementById('flow-max-waiting-arm-minutes');
+      const body = Object.assign({
+        admissionMode: normalizeAdmissionMode(
+          (partial && partial.admissionMode) ||
+            ((_lastConfig && _lastConfig.admissionMode) || 'hybrid')
+        ),
+        fastArmProximityPct: slider ? Number(slider.value) : 12,
+        flowMaxWaitingArmMinutes: waitEl ? Number(waitEl.value) : 10,
+        admissionModeByProfile: readAdmissionOverrideMap(),
+      }, partial || {});
+      try {
+        const data = await fetchJSON('/api/config/admission-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const next = {
+          admissionMode: data.admissionMode,
+          fastArmProximityPct: data.fastArmProximityPct,
+          flowMaxWaitingArmMinutes: data.flowMaxWaitingArmMinutes,
+          admissionModeByProfile: data.admissionModeByProfile || {},
+        };
+        if (_lastConfig && typeof _lastConfig === 'object') {
+          Object.assign(_lastConfig, next);
+        }
+        updateAdmissionModeUi(Object.assign({}, _lastConfig || {}, next));
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.saveAdmissionModeSettings = saveAdmissionModeSettings;
+
+    async function setAdmissionMode(mode) {
+      await saveAdmissionModeSettings({ admissionMode: normalizeAdmissionMode(mode) });
+    }
+    window.setAdmissionMode = setAdmissionMode;
+
     function onLearningModeStrictnessInput(v) {
       const idx = Math.max(0, Math.min(2, Number(v) || 0));
       const el = document.getElementById('v-learning-mode-strictness');
@@ -24306,15 +24570,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function fmtExpectancyLiftBadges(p) {
       if (!p) return '';
       var bits = '';
+      var path = String(p.entryPath || '').toLowerCase();
       var armed =
         p.armedWatch === true ||
-        p.entryPath === 'armed_trigger' ||
+        path === 'armed_trigger' ||
+        path === 'hybrid_fast_arm' ||
+        path === 'flow_fast_arm' ||
+        path === 'selective_arm' ||
         p.scalperWatchTriggered === true;
-      var pathLabel = armed
-        ? 'armed'
-        : p.entryPath === 'discretionary' || p.entryPath
-          ? 'discretionary'
-          : '';
+      var pathLabel =
+        path === 'hybrid_fast_arm' || path === 'flow_fast_arm'
+          ? 'fast-arm'
+          : armed
+            ? 'armed'
+            : p.entryPath === 'discretionary' || p.entryPath
+              ? 'discretionary'
+              : '';
       if (pathLabel) {
         bits +=
           '<span class="badge" style="background:' +
@@ -27530,6 +27801,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (typeof updateLearningModeUi === 'function') {
           updateLearningModeUi(cfg.learningMode || null);
         }
+        if (typeof updateAdmissionModeUi === 'function') {
+          updateAdmissionModeUi(cfg);
+        }
         if (typeof updateLiveModeLearningUi === 'function') {
           updateLiveModeLearningUi(cfg.learning || null);
         }
@@ -28344,6 +28618,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const migStatus = migrations.status || {};
       const migLiveText =
         (migStatus.wsMode ? 'WS live' : 'poll fallback') +
+        (migStatus.logsSubscribeDisabled ? ' · logsSubscribe off' : '') +
         ' · ' + (migStatus.recentCount ?? 0) + ' tracked' +
         (migStatus.reconnectAttempts ? ' · reconnects:' + migStatus.reconnectAttempts : '') +
         (migStatus.priorityEnabled ? ' · priority ON' : ' · priority OFF');
@@ -30777,6 +31052,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       window._cfgLoaded = false;
       applyStrategyConfigValues(cfg);
       updateRiskLevelUI(cfg);
+      if (typeof updateAdmissionModeUi === 'function') updateAdmissionModeUi(cfg);
       updateStrictModeUI(cfg, strictStatus);
     }
 
@@ -31128,7 +31404,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return;
         }
         if (list) {
-          list.innerHTML = influencers
+          const holdNote =
+            data.error === 'mirror_holdings_unavailable'
+              ? '<div class="setup-watch-empty" style="color:#fbbf24">Holdings RPC unavailable (403 / credits) — using last snapshot, not retrying in a loop.</div>'
+              : '';
+          list.innerHTML =
+            holdNote +
+            influencers
             .map(function (inf) {
               const pnl =
                 inf.pnl30dUsd != null

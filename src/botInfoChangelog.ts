@@ -43,6 +43,51 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.396',
+    title: 'Stop insufficient-credits retry storms',
+    sections: ['execution', 'scanners', 'copy'],
+    items: [
+      'Paid APIs (Helius, Solana Tracker, Birdeye, Nansen) log credits_request per attempt and credits_exhausted once per source per 60s, then exponential backoff. The body: Insufficient credits log is no longer repeated every 45s. Graduating feed stops after the first credits miss instead of trying 3 URLs.',
+      'Helius JSON-RPC credit errors cool that endpoint like a 429 so utility/holdings can fail over; exit/send still pin to Trading. Process stays up. Turn off Graduating / soon feed while Tracker credits are empty.',
+    ],
+  },
+  {
+    version: '1.2.395',
+    title: 'Stop logsSubscribe -32601 retry storms',
+    sections: ['execution', 'scanners', 'copy'],
+    items: [
+      'Providers that reject logsSubscribe (JSON-RPC -32601 / method not found) are flagged once and never resubscribed. Migration stays on poll fallback. Identical WS errors log at most once per 60s. DISABLE_LOGS_SUBSCRIBE=1 stays off after boot. Trading HTTP lanes unchanged.',
+      'Influencer-mirror holdings 403 / insufficient credits back off exponentially and skip the fetch (mirror_holdings_unavailable) instead of tight-retrying. Process stays up; exits and watch paths keep running.',
+    ],
+  },
+  {
+    version: '1.2.394',
+    title: 'Target Dip Entry is support below live MC',
+    sections: ['microbots', 'scanners', 'tradecraft'],
+    items: [
+      'Target Dip Entry (Dip, Steady, HWR, Trend) only shows Fib/Support at or below live MC. Overhead Fib 0.5 after a dump is no longer listed as a dip buy (it cannot trigger). Quality parks read 1h/4h support instead of 5m midpoints.',
+      'Stored Fib 0.5 / 0.618 are retracements down from the swing high. Arm/near-fib no longer latches onto a level above price. Scalper Support is the same support-side rule; Resistance can still sit above.',
+    ],
+  },
+  {
+    version: '1.2.393',
+    title: 'Trading pause hysteresis + monitor shed',
+    sections: ['knobs', 'execution'],
+    items: [
+      'Trading spike enter is now p95 > 900ms (sustained); clear below 550ms for 45s. ~400ms Helius no longer holds entry pause. After auto_clear / max_age, a 45s re-pause cooldown plus another sustained breach is required. pause_on / pause_off log p95 and reason. Exits never pause.',
+      'During a Trading spike or entry pause, non-exit getTransaction / getSignaturesForAddress join in-flight or skip; retry cap 1–2 applies to monitor only. Watchers spike caps concurrent getAccountInfo at 1 enrich / 2 total, preferring arm/trigger over enrich. No lane merge.',
+    ],
+  },
+  {
+    version: '1.2.392',
+    title: 'Hybrid admission modes (Selective | Flow | Hybrid)',
+    sections: ['knobs', 'microbots', 'scanners', 'execution'],
+    items: [
+      'Settings → Admission / Entry Mode: Selective parks all unarmed opens (watch→arm→trigger). Hybrid (default) fast-arms when price is within ~12% of that bot’s TA level, otherwise parks. Flow prefers fast-arm / 10m wait and skips MARL reorder. Scalper still blocks no-level chase.',
+      'Opens stamp entryPath (hybrid_fast_arm / flow_fast_arm / selective_arm / armed_trigger) plus admissionMode. Header and Watchlist show the mode; watch rows hint Ready now vs Waiting. Missing key on disk defaults to Hybrid.',
+    ],
+  },
+  {
     version: '1.2.391',
     title: 'Settings saves no longer 502 on Render',
     sections: ['knobs', 'microbots', 'overview'],

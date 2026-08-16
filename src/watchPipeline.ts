@@ -115,6 +115,9 @@ export interface ConversionDiagnosticsSnapshot {
   trading_entry_pause: boolean;
   arm_timeout_total: number;
   open_fail_total: number;
+  hybrid_fast_arm_opens: number;
+  flow_fast_arm_opens: number;
+  selective_arm_opens: number;
 }
 
 export interface WatchPipelineSnapshot {
@@ -165,6 +168,9 @@ export interface WatchPipelineSnapshot {
     hold: string;
     lastArmEvalAt: number | null;
   }>;
+  hybrid_fast_arm_opens?: number;
+  flow_fast_arm_opens?: number;
+  selective_arm_opens?: number;
 }
 
 const WINDOW_MS = 60_000;
@@ -197,6 +203,9 @@ let dipPatternFailOnArmedReclaimCount = 0;
 const steadyBlockReasons: Record<string, number> = {};
 const hwrBlockReasons: Record<string, number> = {};
 let rejectedByAllMcBands = 0;
+let hybridFastArmOpens = 0;
+let flowFastArmOpens = 0;
+let selectiveArmOpens = 0;
 
 interface SourceFunnelState {
   candidates_in: number;
@@ -392,6 +401,13 @@ export function noteSourceOpened(
   for (const src of Array.isArray(sources) ? sources : [sources || 'unknown']) {
     funnelState(src).opened += 1;
   }
+}
+
+export function noteFastArmOpen(path?: string | null): void {
+  const p = String(path || '').toLowerCase();
+  if (p === 'flow_fast_arm') flowFastArmOpens += 1;
+  else if (p === 'selective_arm') selectiveArmOpens += 1;
+  else hybridFastArmOpens += 1;
 }
 
 function buildSourceFunnelRows(): SourceFunnelRow[] {
@@ -824,6 +840,9 @@ export function getConversionDiagnostics(): ConversionDiagnosticsSnapshot {
         return 0;
       }
     })(),
+    hybrid_fast_arm_opens: hybridFastArmOpens,
+    flow_fast_arm_opens: flowFastArmOpens,
+    selective_arm_opens: selectiveArmOpens,
   };
 }
 
@@ -1079,5 +1098,8 @@ export function getWatchPipelineSnapshot(opts?: {
         return [];
       }
     })(),
+    hybrid_fast_arm_opens: hybridFastArmOpens,
+    flow_fast_arm_opens: flowFastArmOpens,
+    selective_arm_opens: selectiveArmOpens,
   };
 }

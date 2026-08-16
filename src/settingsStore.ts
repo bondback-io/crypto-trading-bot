@@ -205,6 +205,23 @@ export interface PersistedBotSettings {
   admissionBaseline?: 'v235' | 'governed';
   /** Entry Skill armed-mix target pct (60–90, default 80). */
   entrySkillArmedTargetPct?: number;
+  /** Admission / Entry Mode — selective | flow | hybrid (default hybrid). */
+  admissionMode?: 'selective' | 'flow' | 'hybrid';
+  fastArmProximityPct?: number;
+  flowMaxWaitingArmMinutes?: number;
+  admissionModeByProfile?: Partial<
+    Record<
+      | 'scalper'
+      | 'dip_buyer'
+      | 'trend_rider'
+      | 'migration_sniper'
+      | 'high_win_rate'
+      | 'momentum_burst'
+      | 'steady_compounder'
+      | 'reversal_scalper',
+      'selective' | 'flow' | 'hybrid'
+    >
+  >;
   /** Soft Peak Profit Protection (TP-relative arm + proportional giveback) */
   peakProfitProtection?: {
     enabled?: boolean;

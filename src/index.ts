@@ -170,6 +170,20 @@ async function main(): Promise<void> {
 
   // Never let async RPC/WS work take down the process (Render → 502 crash loop).
   process.on('unhandledRejection', (reason) => {
+    try {
+      const { isLogsSubscribeUnsupportedError, logRpcWsErrorOnce } =
+        require('./rpcWsGuard') as typeof import('./rpcWsGuard');
+      if (isLogsSubscribeUnsupportedError(reason)) {
+        if (logRpcWsErrorOnce('rpc', reason)) {
+          console.warn(
+            '[boot] logsSubscribe unsupported — ignored (poll fallback, process stays up)'
+          );
+        }
+        return;
+      }
+    } catch {
+      /* optional */
+    }
     console.error('[boot] Unhandled rejection (kept alive):', reason);
     try {
       const { pushDashboardNotification } =

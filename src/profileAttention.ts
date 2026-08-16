@@ -389,6 +389,11 @@ export function shouldSoftSkipUnarmedScalperHabit(input: {
   volumeDecayState?: string | null;
   nearSupport?: boolean | null;
   nearMultiTfSupport?: boolean | null;
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+  lateChase?: boolean;
 }): { skip: boolean; reason?: string } {
   if (isV235Baseline()) return { skip: false };
   if (String(input.profileId || '') !== 'scalper') return { skip: false };
@@ -400,6 +405,32 @@ export function shouldSoftSkipUnarmedScalperHabit(input: {
       reasons
     );
   if (armed) return { skip: false };
+
+  if (input.lateChase === true) {
+    return {
+      skip: true,
+      reason: 'scalper_discretionary_skipped · late_chase',
+    };
+  }
+
+  try {
+    const { shouldFastArmOpen } =
+      require('./admissionMode') as typeof import('./admissionMode');
+    const fa = shouldFastArmOpen({
+      profileId: 'scalper',
+      armedWatch: false,
+      lateChase: false,
+      lastPriceSol: input.lastPriceSol,
+      supportPriceSol: input.supportPriceSol,
+      fib05PriceSol: input.fib05PriceSol,
+      fib618PriceSol: input.fib618PriceSol,
+      nearSupport: input.nearSupport === true,
+      nearMultiTfSupport: input.nearMultiTfSupport === true,
+    });
+    if (fa.fastArm) return { skip: false };
+  } catch {
+    /* optional */
+  }
 
   const volExpanding = String(input.volumeDecayState || '') === 'expanding';
   const nearS =

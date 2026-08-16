@@ -580,6 +580,75 @@ interface WalletHoldingsCache {
 }
 
 const holdingsCache = new Map<string, WalletHoldingsCache>();
+const HOLDINGS_BACKOFF_MIN_MS = 20_000;
+const HOLDINGS_BACKOFF_MAX_MS = 15 * 60_000;
+let holdingsBackoffUntil = 0;
+let holdingsBackoffMs = HOLDINGS_BACKOFF_MIN_MS;
+let holdingsUnavailableLogged = false;
+let lastHoldingsErrorLogAt = 0;
+
+export function isMirrorHoldingsUnavailableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const status =
+    typeof err === 'object' && err != null && 'status' in err
+      ? Number((err as { status?: unknown }).status)
+      : NaN;
+  if (status === 403) return true;
+  return /403|request blocked|insufficient credits|not enough credits|credit limit/i.test(
+    msg
+  );
+}
+
+export function getMirrorHoldingsStatus(): {
+  unavailable: boolean;
+  backoffMs: number;
+  until: number;
+} {
+  const until = holdingsBackoffUntil;
+  return {
+    unavailable: Date.now() < until,
+    backoffMs: Math.max(0, until - Date.now()),
+    until,
+  };
+}
+
+export function __resetMirrorHoldingsBackoffForTests(): void {
+  holdingsBackoffUntil = 0;
+  holdingsBackoffMs = HOLDINGS_BACKOFF_MIN_MS;
+  holdingsUnavailableLogged = false;
+  lastHoldingsErrorLogAt = 0;
+}
+
+function noteHoldingsUnavailable(err: unknown): void {
+  holdingsBackoffUntil = Date.now() + holdingsBackoffMs;
+  holdingsBackoffMs = Math.min(HOLDINGS_BACKOFF_MAX_MS, holdingsBackoffMs * 2);
+  try {
+    const { noteCreditsExhausted, isInsufficientCreditsError } =
+      require('./creditsGuard') as typeof import('./creditsGuard');
+    if (isInsufficientCreditsError(err)) {
+      noteCreditsExhausted(
+        'fetchWalletTokenMints',
+        'helius',
+        'rpc:getParsedTokenAccountsByOwner'
+      );
+    }
+  } catch {
+    /* creditsGuard optional */
+  }
+  if (!holdingsUnavailableLogged) {
+    holdingsUnavailableLogged = true;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[influencer-mirror] mirror_holdings_unavailable — ${msg.slice(0, 160)} ` +
+        `(backoff ${Math.round(holdingsBackoffMs / 1000)}s, no tight retry)`
+    );
+  }
+}
+
+function noteHoldingsOk(): void {
+  holdingsBackoffMs = HOLDINGS_BACKOFF_MIN_MS;
+  holdingsUnavailableLogged = false;
+}
 /** wallet:mint → last known event */
 const tokenEvents = new Map<
   string,
@@ -608,16 +677,20 @@ export function noteInfluencerTokenEvent(
 async function fetchWalletTokenMints(
   address: string
 ): Promise<InfluencerTokenSnap[]> {
+  if (Date.now() < holdingsBackoffUntil) {
+    return [];
+  }
   try {
     const { PublicKey } = require('@solana/web3.js') as typeof import('@solana/web3.js');
-    const { getConnection, runWithRpcRole } =
+    const { withRpc } =
       require('./connection') as typeof import('./connection');
     const owner = new PublicKey(address);
     const programId = new PublicKey(TOKEN_PROGRAM_ID);
-    const resp = await runWithRpcRole('utility', async () => {
-      const conn = getConnection();
-      return conn.getParsedTokenAccountsByOwner(owner, { programId });
-    });
+    const resp = await withRpc(
+      'mirror_holdings',
+      (conn) => conn.getParsedTokenAccountsByOwner(owner, { programId }),
+      'utility'
+    );
     const out: InfluencerTokenSnap[] = [];
     const now = Date.now();
     for (const row of resp?.value || []) {
@@ -639,12 +712,20 @@ async function fetchWalletTokenMints(
     }
     // Prefer largest balances first
     out.sort((a, b) => (b.amountUi || 0) - (a.amountUi || 0));
+    noteHoldingsOk();
     return out.slice(0, 12);
   } catch (err) {
-    console.warn(
-      '[influencer-mirror] holdings RPC failed:',
-      err instanceof Error ? err.message : err
-    );
+    if (isMirrorHoldingsUnavailableError(err)) {
+      noteHoldingsUnavailable(err);
+      return [];
+    }
+    if (Date.now() - lastHoldingsErrorLogAt > 60_000) {
+      lastHoldingsErrorLogAt = Date.now();
+      console.warn(
+        '[influencer-mirror] holdings RPC failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
     return [];
   }
 }
@@ -655,6 +736,9 @@ async function getWalletHoldingsCached(
   const hit = holdingsCache.get(address);
   if (hit && Date.now() - hit.fetchedAt < HOLDINGS_CACHE_TTL_MS) {
     return hit.tokens;
+  }
+  if (Date.now() < holdingsBackoffUntil) {
+    return hit?.tokens ?? [];
   }
   const tokens = await fetchWalletTokenMints(address);
   // Merge recent sell/partial events for status
@@ -936,7 +1020,13 @@ export async function buildSmartMirrorWatchlist(opts?: {
     };
   });
 
-  return { influencers, fetchedAt: Date.now() };
+  return {
+    influencers,
+    fetchedAt: Date.now(),
+    error: getMirrorHoldingsStatus().unavailable
+      ? 'mirror_holdings_unavailable'
+      : undefined,
+  };
 }
 
 /**

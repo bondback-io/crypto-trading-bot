@@ -833,7 +833,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
 
     stampWatchVolumeOk(w);
     const armLifeEarly = applyArmLifecycleTimeout(w, now);
-    if (armLifeEarly) {
+    if (armLifeEarly && armLifeEarly !== 'promote_fast_arm') {
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = armLifeEarly;
@@ -922,7 +922,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
 
     stampWatchVolumeOk(w);
     const armLife = applyArmLifecycleTimeout(w, now);
-    if (armLife) {
+    if (armLife && armLife !== 'promote_fast_arm') {
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = armLife;

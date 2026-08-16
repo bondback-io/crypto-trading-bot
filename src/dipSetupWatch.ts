@@ -19,7 +19,12 @@ import {
   resolveTradeProfileDefinition,
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
-import { analyzeSrConfluenceFromCandles } from './technicalLevels';
+import {
+  analyzeSrConfluenceFromCandles,
+  buildSupportSideMcTargets,
+  isSupportSideLevel,
+  pickDipRetracementLevels,
+} from './technicalLevels';
 import { noteWatcherPoll } from './watcherPollMetrics';
 import {
   stampWatchPriority,
@@ -851,34 +856,22 @@ function stampWatchPlan(w: DipWatchEntry): void {
   }
 }
 
-/** MC at a price level assuming constant supply: MC_now * (P_level / P_now). */
-function mcAtPrice(
-  marketCapUsd: number | undefined,
-  lastPriceSol: number | null | undefined,
-  levelPriceSol: number | null | undefined
-): number | null {
-  if (
-    marketCapUsd == null ||
-    !Number.isFinite(marketCapUsd) ||
-    marketCapUsd <= 0
-  ) {
-    return null;
+function sanitizeDipWatchLevels(w: {
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+}): void {
+  const picked = pickDipRetracementLevels({
+    livePrice: w.lastPriceSol,
+    fib05: w.fib05PriceSol,
+    fib618: w.fib618PriceSol,
+  });
+  w.fib05PriceSol = picked.fib05;
+  w.fib618PriceSol = picked.fib618;
+  if (!isSupportSideLevel(w.supportPriceSol, w.lastPriceSol)) {
+    w.supportPriceSol = null;
   }
-  if (
-    lastPriceSol == null ||
-    !Number.isFinite(lastPriceSol) ||
-    lastPriceSol <= 0
-  ) {
-    return null;
-  }
-  if (
-    levelPriceSol == null ||
-    !Number.isFinite(levelPriceSol) ||
-    levelPriceSol <= 0
-  ) {
-    return null;
-  }
-  return marketCapUsd * (levelPriceSol / lastPriceSol);
 }
 
 function buildTargetDipEntries(w: {
@@ -888,24 +881,16 @@ function buildTargetDipEntries(w: {
   fib05PriceSol?: number | null;
   fib618PriceSol?: number | null;
 }): DipTargetEntry[] {
-  const out: DipTargetEntry[] = [];
-  const push = (label: string, priceSol: number | null | undefined) => {
-    const mc = mcAtPrice(w.marketCapUsd, w.lastPriceSol, priceSol);
-    if (mc == null || priceSol == null) return;
-    // Dedupe near-identical prices
-    if (
-      out.some(
-        (e) => Math.abs(e.priceSol - priceSol) / Math.max(e.priceSol, 1e-18) < 0.005
-      )
-    ) {
-      return;
-    }
-    out.push({ label, priceSol, mcUsd: mc });
-  };
-  push('Fib 0.5', w.fib05PriceSol);
-  push('Fib 0.618', w.fib618PriceSol);
-  push('Support', w.supportPriceSol);
-  return out;
+  sanitizeDipWatchLevels(w);
+  return buildSupportSideMcTargets({
+    marketCapUsd: w.marketCapUsd,
+    lastPriceSol: w.lastPriceSol,
+    levels: [
+      { label: 'Fib 0.5', priceSol: w.fib05PriceSol },
+      { label: 'Fib 0.618', priceSol: w.fib618PriceSol },
+      { label: 'Support', priceSol: w.supportPriceSol },
+    ],
+  });
 }
 
 function isDipProfileEnabled(): boolean {
@@ -1006,7 +991,15 @@ function qualityNearBands(w: DipWatchEntry): {
 function recomputeProximityFromLevels(w: DipWatchEntry): void {
   const px = w.lastPriceSol;
   if (px == null || !Number.isFinite(px) || px <= 0) return;
+  sanitizeDipWatchLevels(w);
   const bands = qualityNearBands(w);
+  const nearPx = (level: number | null | undefined): boolean => {
+    if (level == null || !Number.isFinite(level) || level <= 0) return false;
+    const d = (px - level) / level;
+    return d >= -bands.undercut && d <= bands.nearBand;
+  };
+  w.nearKeyFib = nearPx(w.fib05PriceSol) || nearPx(w.fib618PriceSol);
+  w.nearSupport = nearPx(w.supportPriceSol);
   try {
     const det = detectSupportReclaim({
       priceSol: px,
@@ -1024,25 +1017,9 @@ function recomputeProximityFromLevels(w: DipWatchEntry): void {
       if (det.levelKind === 'support' || det.levelKind === 'mtf') {
         w.nearSupport = true;
       }
-      // When level kind ambiguous, mark both if either field was the pick
-      if (det.levelKind === 'fib' || det.levelKind === 'support') {
-        /* already set */
-      }
-    }
-    // Also distance-check each stored level independently (targets may differ)
-    const nearPx = (level: number | null | undefined): boolean => {
-      if (level == null || !Number.isFinite(level) || level <= 0) return false;
-      const d = (px - level) / level;
-      return d >= -bands.undercut && d <= bands.nearBand;
-    };
-    if (nearPx(w.fib05PriceSol) || nearPx(w.fib618PriceSol)) {
-      w.nearKeyFib = true;
-    }
-    if (nearPx(w.supportPriceSol)) {
-      w.nearSupport = true;
     }
   } catch {
-    /* keep prior flags */
+    /* keep computed flags */
   }
 }
 
@@ -1397,8 +1374,8 @@ async function refreshWatchMarket(
     try {
       const multi = await fetchMultiTfOhlcv(w.mint, {
         solUsd: undefined,
-        // Quality parks only need 1h/15m for Fib/S — skip full TF fan-out
-        tfs: isQuality ? ['5m', '15m', '1h'] : undefined,
+        // Quality parks: 1h/4h support (12h not in OHLCV set). Minors keep 5m/15m/1h.
+        tfs: isQuality ? ['15m', '1h', '4h'] : undefined,
       });
       lastOhlcvRefreshAt.set(w.mint, now);
       if (Object.keys(multi.byTf).length > 0) {
@@ -1407,7 +1384,9 @@ async function refreshWatchMarket(
           priceSol: w.lastPriceSol,
         });
         if (conf.primarySupport != null && conf.primarySupport > 0) {
-          w.supportPriceSol = conf.primarySupport;
+          if (isSupportSideLevel(conf.primarySupport, w.lastPriceSol)) {
+            w.supportPriceSol = conf.primarySupport;
+          }
         }
         const hits = conf.supportTfHits?.length ?? 0;
         w.multiTfSupportHits = hits;
@@ -1424,22 +1403,25 @@ async function refreshWatchMarket(
   try {
     const { getTechnicalLevelsForStrategy } =
       require('./technicalLevels') as typeof import('./technicalLevels');
-    // Prefer 1h candles, then 15m/5m — quality parks need Fib/S to arm
+    // Prefer 4h then 1h for quality parks; dip minors keep faster TFs
     const candlePick =
       (multiByTf &&
-        (multiByTf['1h'] ||
-          multiByTf['15m'] ||
-          multiByTf['5m'] ||
-          multiByTf['4h'] ||
-          multiByTf['30m'])) ||
+        (isQuality
+          ? multiByTf['4h'] ||
+            multiByTf['1h'] ||
+            multiByTf['30m'] ||
+            multiByTf['15m']
+          : multiByTf['1h'] ||
+            multiByTf['15m'] ||
+            multiByTf['5m'] ||
+            multiByTf['4h'] ||
+            multiByTf['30m'])) ||
       null;
     const tech = getTechnicalLevelsForStrategy({
       mint: w.mint,
       priceSol: w.lastPriceSol ?? undefined,
       candles:
-        isQualityBandSource(w.source) &&
-        candlePick &&
-        candlePick.length >= 8
+        candlePick && candlePick.length >= 8
           ? candlePick.map((c) => ({
               time: c.time,
               priceSol: c.priceSol,
@@ -1448,41 +1430,42 @@ async function refreshWatchMarket(
           : undefined,
     });
     if (tech) {
-      if (tech.nearFibZone) w.nearKeyFib = true;
-      if (tech.nearSupportZone) w.nearSupport = true;
+      const live = w.lastPriceSol;
       const supPx = tech.nearestSupport?.mid;
       if (
-        (w.supportPriceSol == null || w.supportPriceSol <= 0) &&
         supPx != null &&
         Number.isFinite(supPx) &&
-        supPx > 0
+        supPx > 0 &&
+        isSupportSideLevel(supPx, live)
       ) {
         w.supportPriceSol = Number(supPx);
+      } else if (
+        w.supportPriceSol != null &&
+        !isSupportSideLevel(w.supportPriceSol, live)
+      ) {
+        w.supportPriceSol = null;
       }
-      for (const z of tech.fibZones || []) {
+      let raw05: number | null = null;
+      let raw618: number | null = null;
+      for (const z of [
+        ...(tech.fibZones || []),
+        ...(tech.snapshot?.fib?.levels || []),
+      ]) {
         const ratio = Number(z.ratio);
         const px = Number(z.price);
         if (!Number.isFinite(px) || px <= 0) continue;
-        if (Math.abs(ratio - 0.5) < 0.001) w.fib05PriceSol = px;
-        if (Math.abs(ratio - 0.618) < 0.02) w.fib618PriceSol = px;
+        if (raw05 == null && Math.abs(ratio - 0.5) < 0.001) raw05 = px;
+        if (raw618 == null && Math.abs(ratio - 0.618) < 0.02) raw618 = px;
       }
-      for (const z of tech.snapshot?.fib?.levels || []) {
-        const ratio = Number(z.ratio);
-        const px = Number(z.price);
-        if (!Number.isFinite(px) || px <= 0) continue;
-        if (
-          (w.fib05PriceSol == null || w.fib05PriceSol <= 0) &&
-          Math.abs(ratio - 0.5) < 0.001
-        ) {
-          w.fib05PriceSol = px;
-        }
-        if (
-          (w.fib618PriceSol == null || w.fib618PriceSol <= 0) &&
-          Math.abs(ratio - 0.618) < 0.02
-        ) {
-          w.fib618PriceSol = px;
-        }
-      }
+      const picked = pickDipRetracementLevels({
+        livePrice: live,
+        swingHigh: tech.snapshot?.fib?.swingHigh,
+        swingLow: tech.snapshot?.fib?.swingLow,
+        fib05: raw05,
+        fib618: raw618,
+      });
+      w.fib05PriceSol = picked.fib05;
+      w.fib618PriceSol = picked.fib618;
     }
   } catch {
     /* optional TA */
@@ -2393,7 +2376,7 @@ export async function tickDipSetupWatches(opts?: {
     }
 
     const armLife = applyArmLifecycleTimeout(w, now);
-    if (armLife) {
+    if (armLife && armLife !== 'promote_fast_arm') {
       releaseQualitySoftArm(w.mint);
       w.status = 'expired';
       w.updatedAt = now;

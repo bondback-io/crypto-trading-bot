@@ -5,6 +5,15 @@
 
 import fs from 'fs';
 import path from 'path';
+import {
+  classifyCreditsProvider,
+  creditsBackoffResponse,
+  isCreditsGuardResponse,
+  isInsufficientCreditsBody,
+  logCreditsRequest,
+  noteCreditsExhausted,
+  shouldSkipCreditsProvider,
+} from './creditsGuard';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
@@ -315,6 +324,15 @@ export async function loggedFetch(
   if (attempt != null) metaBase.attempt = attempt;
   if (maxAttempts != null) metaBase.maxAttempts = maxAttempts;
 
+  const provider = classifyCreditsProvider(url);
+  const creditsSource = String(tag || context || 'loggedFetch');
+  if (shouldSkipCreditsProvider(provider)) {
+    return creditsBackoffResponse();
+  }
+  if (provider !== 'other') {
+    logCreditsRequest(creditsSource, provider, url);
+  }
+
   logger.info(context, `${tag} →`, metaBase);
 
   const signal =
@@ -338,10 +356,17 @@ export async function loggedFetch(
           body = undefined;
         }
       }
-      logger.warn(context, `${tag} ← HTTP ${res.status}`, {
-        ...okMeta,
-        body,
-      });
+      const creditsHit =
+        provider !== 'other' &&
+        (isInsufficientCreditsBody(body) || res.status === 402);
+      if (creditsHit) {
+        noteCreditsExhausted(creditsSource, provider, url);
+      } else {
+        logger.warn(context, `${tag} ← HTTP ${res.status}`, {
+          ...okMeta,
+          body,
+        });
+      }
     } else {
       logger.info(context, `${tag} ← ${res.status}`, okMeta);
     }
@@ -376,6 +401,12 @@ export async function loggedFetchJson<T = unknown>(
       lastStatus = res.status;
       if (!res.ok) {
         lastError = `HTTP ${res.status}`;
+        if (
+          isCreditsGuardResponse(res) ||
+          shouldSkipCreditsProvider(classifyCreditsProvider(url))
+        ) {
+          return { ok: false, error: lastError, status: lastStatus };
+        }
         if (attempt < maxAttempts) continue;
         return { ok: false, error: lastError, status: lastStatus };
       }

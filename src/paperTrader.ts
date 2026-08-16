@@ -454,6 +454,8 @@ export interface Position {
   /** Armed setup-watch handoff */
   armedWatch?: boolean;
   entryPath?: 'armed_trigger' | 'discretionary' | string;
+  admissionMode?: string;
+  fastArmProximityPct?: number | null;
   /** scalper | dip | grad when opened from a setup watch */
   setupWatchFamily?: 'scalper' | 'dip' | 'grad' | string;
   whaleStateAtEntry?: string;
@@ -943,7 +945,10 @@ function maybeRecordLearningEpisode(
           position.armedWatch === true ||
           position.scalperWatchTriggered === true ||
           position.dipWatchTriggered === true ||
-          position.entryPath === 'armed_trigger'
+          position.entryPath === 'armed_trigger' ||
+          position.entryPath === 'hybrid_fast_arm' ||
+          position.entryPath === 'flow_fast_arm' ||
+          position.entryPath === 'selective_arm'
         ) {
           tags.push('armed_trigger');
         }
@@ -2220,6 +2225,8 @@ export class PaperTrader {
     volumeStateAtWatch?: string;
     falseArmExpired?: boolean;
     entryPath?: string;
+    admissionMode?: string;
+    fastArmProximityPct?: number | null;
     setupWatchFamily?: string;
     whaleStateAtEntry?: string;
     profileTaPlainLanguage?: string;
@@ -2352,6 +2359,12 @@ export class PaperTrader {
       entryPath:
         input.entryPath ||
         (input.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+      admissionMode: input.admissionMode,
+      fastArmProximityPct:
+        input.fastArmProximityPct != null &&
+        Number.isFinite(Number(input.fastArmProximityPct))
+          ? Number(input.fastArmProximityPct)
+          : undefined,
       setupWatchFamily: input.setupWatchFamily
         ? String(input.setupWatchFamily)
         : undefined,
@@ -2782,6 +2795,8 @@ export class PaperTrader {
       volumeStateAtWatch?: string;
       falseArmExpired?: boolean;
       entryPath?: string;
+      admissionMode?: string;
+      fastArmProximityPct?: number | null;
       setupWatchFamily?: string;
       whaleStateAtEntry?: string;
       profileTaPlainLanguage?: string;
@@ -3000,6 +3015,12 @@ export class PaperTrader {
       entryPath:
         meta?.entryPath ||
         (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+      admissionMode: meta?.admissionMode,
+      fastArmProximityPct:
+        meta?.fastArmProximityPct != null &&
+        Number.isFinite(Number(meta.fastArmProximityPct))
+          ? Number(meta.fastArmProximityPct)
+          : undefined,
       setupWatchFamily: meta?.setupWatchFamily
         ? String(meta.setupWatchFamily)
         : undefined,

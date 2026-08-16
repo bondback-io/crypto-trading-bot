@@ -5,7 +5,7 @@
  */
 
 import type { LaunchEvent } from './marketData';
-import { fetchLiveTokenSnapshot } from './marketData';
+import { fetchLiveTokenSnapshot, fetchMultiTfOhlcv } from './marketData';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   handOffScannerCandidate,
@@ -16,6 +16,12 @@ import {
   isSmartBotProfilesEnabled,
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
+import {
+  analyzeSrConfluenceFromCandles,
+  buildSupportSideMcTargets,
+  isSupportSideLevel,
+  pickDipRetracementLevels,
+} from './technicalLevels';
 import {
   stampWatchPriority,
   sortActiveWatchesByScore,
@@ -59,6 +65,9 @@ export interface TrendWatchEntry {
   nearKeyFib?: boolean;
   supportPriceSol?: number | null;
   lastPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+  targetEntries?: Array<{ label: string; priceSol: number; mcUsd: number }>;
   lastReason?: string;
   kolCount?: number;
   source?: string;
@@ -216,6 +225,34 @@ function pruneTerminal(): void {
     watches.delete(oldest.mint);
     lastMcRefreshAt.delete(oldest.mint);
   }
+}
+
+function buildTrendTargetEntries(w: {
+  marketCapUsd?: number;
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+}): Array<{ label: string; priceSol: number; mcUsd: number }> {
+  if (!isSupportSideLevel(w.supportPriceSol, w.lastPriceSol)) {
+    w.supportPriceSol = null;
+  }
+  const picked = pickDipRetracementLevels({
+    livePrice: w.lastPriceSol,
+    fib05: w.fib05PriceSol,
+    fib618: w.fib618PriceSol,
+  });
+  w.fib05PriceSol = picked.fib05;
+  w.fib618PriceSol = picked.fib618;
+  return buildSupportSideMcTargets({
+    marketCapUsd: w.marketCapUsd,
+    lastPriceSol: w.lastPriceSol,
+    levels: [
+      { label: 'Fib 0.5', priceSol: w.fib05PriceSol },
+      { label: 'Fib 0.618', priceSol: w.fib618PriceSol },
+      { label: 'Support', priceSol: w.supportPriceSol },
+    ],
+  });
 }
 
 function stampWatchPlan(w: TrendWatchEntry): void {
@@ -489,6 +526,7 @@ export function considerTrendWatchSetup(input: {
     existing.volumeDecayState =
       input.volumeDecayState ?? existing.volumeDecayState;
     existing.updatedAt = Date.now();
+    existing.targetEntries = buildTrendTargetEntries(existing);
     stampTrendWatchEligibility(existing);
     return existing;
   }
@@ -528,6 +566,7 @@ export function considerTrendWatchSetup(input: {
       ? `armed · ${dna.reasons.slice(0, 3).join('+')}`
       : `watching · ${dna.reasons.slice(0, 3).join('+')}`,
   };
+  entry.targetEntries = buildTrendTargetEntries(entry);
   if (nearArm) stampWatchPlan(entry);
   watches.set(input.mint, entry);
   stampTrendWatchEligibility(entry, true);
@@ -673,6 +712,73 @@ async function refreshWatchMarket(w: TrendWatchEntry, now: number): Promise<void
   } catch {
     /* keep last */
   }
+  try {
+    const multi = await fetchMultiTfOhlcv(w.mint, {
+      solUsd: undefined,
+      tfs: ['15m', '1h', '4h'],
+    });
+    if (Object.keys(multi.byTf).length > 0) {
+      const conf = analyzeSrConfluenceFromCandles(w.mint, multi.byTf, {
+        priceSol: w.lastPriceSol,
+      });
+      if (
+        conf.primarySupport != null &&
+        conf.primarySupport > 0 &&
+        isSupportSideLevel(conf.primarySupport, w.lastPriceSol)
+      ) {
+        w.supportPriceSol = conf.primarySupport;
+        w.nearSupport = conf.nearMultiTfSupport || w.nearSupport;
+      } else if (!isSupportSideLevel(w.supportPriceSol, w.lastPriceSol)) {
+        w.supportPriceSol = null;
+      }
+      const candlePick =
+        multi.byTf['4h'] || multi.byTf['1h'] || multi.byTf['15m'] || null;
+      if (candlePick && candlePick.length >= 8) {
+        const { getTechnicalLevelsForStrategy } =
+          require('./technicalLevels') as typeof import('./technicalLevels');
+        const tech = getTechnicalLevelsForStrategy({
+          mint: w.mint,
+          priceSol: w.lastPriceSol ?? undefined,
+          candles: candlePick.map((c) => ({
+            time: c.time,
+            priceSol: c.priceSol,
+            volume: c.volume,
+          })),
+        });
+        let raw05: number | null = null;
+        let raw618: number | null = null;
+        for (const z of [
+          ...(tech.fibZones || []),
+          ...(tech.snapshot?.fib?.levels || []),
+        ]) {
+          const ratio = Number(z.ratio);
+          const px = Number(z.price);
+          if (!Number.isFinite(px) || px <= 0) continue;
+          if (raw05 == null && Math.abs(ratio - 0.5) < 0.001) raw05 = px;
+          if (raw618 == null && Math.abs(ratio - 0.618) < 0.02) raw618 = px;
+        }
+        const picked = pickDipRetracementLevels({
+          livePrice: w.lastPriceSol,
+          swingHigh: tech.snapshot?.fib?.swingHigh,
+          swingLow: tech.snapshot?.fib?.swingLow,
+          fib05: raw05,
+          fib618: raw618,
+        });
+        w.fib05PriceSol = picked.fib05;
+        w.fib618PriceSol = picked.fib618;
+        const supPx = tech.nearestSupport?.mid;
+        if (
+          (w.supportPriceSol == null || w.supportPriceSol <= 0) &&
+          isSupportSideLevel(supPx, w.lastPriceSol)
+        ) {
+          w.supportPriceSol = Number(supPx);
+        }
+      }
+    }
+  } catch {
+    /* keep last HTF levels */
+  }
+  w.targetEntries = buildTrendTargetEntries(w);
 }
 
 export async function tickTrendSetupWatches(opts?: {
@@ -739,6 +845,7 @@ export async function tickTrendSetupWatches(opts?: {
     if (px != null) w.lastPriceSol = px;
     recomputeNearSupportFromPrice(w);
     stampWatchVolumeOk(w);
+    w.targetEntries = buildTrendTargetEntries(w);
     stampTrend(w);
     const lifeT = watchLifecycleAction(w, 'trend_rider', now);
     if (lifeT === 'demote' && w.status === 'armed') {
@@ -769,7 +876,7 @@ export async function tickTrendSetupWatches(opts?: {
     }
 
     const armLife = applyArmLifecycleTimeout(w, now);
-    if (armLife) {
+    if (armLife && armLife !== 'promote_fast_arm') {
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = armLife;
@@ -966,6 +1073,9 @@ export function getTrendSetupWatchStatus(limit = 16): {
     .filter(isActiveWatch)
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, limit);
+  for (const e of active) {
+    e.targetEntries = buildTrendTargetEntries(e);
+  }
   const terminal = [...watches.values()]
     .filter((e) => {
       try {

@@ -41,6 +41,9 @@ export function computeEpisodeQualityWeight(episode: ProfileLearningEpisode): nu
   const armed =
     episode.armedWatch === true ||
     episode.entryPath === 'armed_trigger' ||
+    episode.entryPath === 'hybrid_fast_arm' ||
+    episode.entryPath === 'flow_fast_arm' ||
+    episode.entryPath === 'selective_arm' ||
     episode.scalperWatchTriggered === true ||
     /scalp_reclaim_burst|support_dip_reclaim/i.test(style);
   if (armed) w += 0.18;

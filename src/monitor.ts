@@ -514,7 +514,8 @@ function stampEntryStyleOnBuyOpts(
     }
     if (armed) {
       (buyOpts as { armedWatch?: boolean }).armedWatch = true;
-      (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
+      (buyOpts as { entryPath?: string }).entryPath =
+        signal.entryPath || 'armed_trigger';
       const fam =
         signal.setupWatchFamily ||
         (signal.dipWatchTriggered === true ||
@@ -546,7 +547,23 @@ function stampEntryStyleOnBuyOpts(
         );
       }
     } else {
-      (buyOpts as { entryPath?: string }).entryPath = 'discretionary';
+      (buyOpts as { entryPath?: string }).entryPath =
+        signal.entryPath || 'discretionary';
+    }
+    try {
+      const { getAdmissionMode } =
+        require('./admissionMode') as typeof import('./admissionMode');
+      (buyOpts as { admissionMode?: string }).admissionMode =
+        signal.admissionMode || getAdmissionMode();
+    } catch {
+      if (signal.admissionMode) {
+        (buyOpts as { admissionMode?: string }).admissionMode =
+          signal.admissionMode;
+      }
+    }
+    if (signal.fastArmProximityPct != null) {
+      (buyOpts as { fastArmProximityPct?: number | null }).fastArmProximityPct =
+        signal.fastArmProximityPct;
     }
     // Expectancy Lift stamps (permission score / governor influence)
     const sigPerm = (signal as { tradePermissionScore?: number })
@@ -1231,6 +1248,10 @@ export interface TradeSignal {
   hmcSetup?: string;
   hmcConfidence?: number;
   gateDecision?: string;
+  lateChaseAtEntry?: boolean;
+  entryPath?: string;
+  admissionMode?: string;
+  fastArmProximityPct?: number | null;
 }
 
 /**
@@ -1260,8 +1281,30 @@ function maybeParkArmingOpen(
     const gate = shouldParkUnarmedOpen({
       profileId,
       armedWatch: armed,
+      lateChase: signal.lateChaseAtEntry === true,
+      lastPriceSol: signal.lastPriceSol ?? signal.priceSol,
+      supportPriceSol: signal.supportPriceSol,
+      fib05PriceSol: signal.fib05PriceSol,
+      fib618PriceSol: signal.fib618PriceSol,
+      nearKeyFib: signal.nearKeyFib === true,
+      nearSupport: signal.nearSupport === true,
+      nearMultiTfSupport: signal.nearMultiTfSupport === true,
     });
-    if (!gate.park) return gate;
+    if (!gate.park) {
+      if (gate.fastArm) {
+        signal.entryPath = gate.entryPath || 'hybrid_fast_arm';
+        signal.admissionMode = gate.admissionMode;
+        signal.fastArmProximityPct = gate.proximityPct;
+        try {
+          const { noteFastArmOpen } =
+            require('./watchPipeline') as typeof import('./watchPipeline');
+          noteFastArmOpen(gate.entryPath || 'hybrid_fast_arm');
+        } catch {
+          /* optional */
+        }
+      }
+      return gate;
+    }
     const parked = parkSignalOnProfileWatch({
       profileId,
       mint: signal.mint,
@@ -1571,7 +1614,8 @@ function applyProfileTaPlaybookGate(
         ))
     ) {
       (buyOpts as { armedWatch?: boolean }).armedWatch = true;
-      (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
+      (buyOpts as { entryPath?: string }).entryPath =
+        signal.entryPath || 'armed_trigger';
       const fam =
         signal.setupWatchFamily ||
         (signal.dipWatchTriggered === true
@@ -1601,6 +1645,23 @@ function applyProfileTaPlaybookGate(
           `[monitor] scalper_armed_open symbol=${signal.symbol || '?'} · Mode B reclaim`
         );
       }
+    } else if (signal.entryPath) {
+      (buyOpts as { entryPath?: string }).entryPath = signal.entryPath;
+    }
+    try {
+      const { getAdmissionMode } =
+        require('./admissionMode') as typeof import('./admissionMode');
+      (buyOpts as { admissionMode?: string }).admissionMode =
+        signal.admissionMode || getAdmissionMode();
+    } catch {
+      if (signal.admissionMode) {
+        (buyOpts as { admissionMode?: string }).admissionMode =
+          signal.admissionMode;
+      }
+    }
+    if (signal.fastArmProximityPct != null) {
+      (buyOpts as { fastArmProximityPct?: number | null }).fastArmProximityPct =
+        signal.fastArmProximityPct;
     }
     if (signal.entryStyleHint) {
       (buyOpts as { entryStyleHint?: string }).entryStyleHint =
@@ -8348,7 +8409,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           mint: signal.mint,
           triggerConfirm,
           detectedEntryStyle: ctx.detectedEntryStyle,
-          entryPath: armedWatch ? 'armed_trigger' : 'discretionary',
+          entryPath:
+            signal.entryPath ||
+            (armedWatch ? 'armed_trigger' : 'discretionary'),
         });
         if (sel.softPassNative && sel.reasons[0]) {
           console.log(`[monitor] ${sel.reasons[0]}`);
@@ -8562,6 +8625,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             null,
           nearSupport: ctx.nearSupport === true,
           nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+          lastPriceSol: signal.lastPriceSol ?? signal.priceSol ?? ctx.priceSol,
+          supportPriceSol: signal.supportPriceSol ?? ctx.supportPriceSol,
+          fib05PriceSol: signal.fib05PriceSol ?? ctx.fib05PriceSol,
+          fib618PriceSol: signal.fib618PriceSol ?? ctx.fib618PriceSol,
+          lateChase: ctx.lateChase === true,
         });
         if (habit.skip) {
           console.log(

@@ -799,12 +799,21 @@ export function shouldParkUnarmedOpen(opts: {
   profileId?: string | null;
   armedWatch?: boolean;
   reentry?: boolean;
-}): { park: boolean; reason: string } {
+  lateChase?: boolean;
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+  nearKeyFib?: boolean;
+  nearSupport?: boolean;
+  nearMultiTfSupport?: boolean;
+  hasLevelEvidence?: boolean;
+}): { park: boolean; reason: string; fastArm?: boolean; entryPath?: string; proximityPct?: number | null; admissionMode?: string } {
   if (opts.reentry === true) {
     return { park: false, reason: 'reentry' };
   }
   if (opts.armedWatch === true) {
-    return { park: false, reason: 'armed_handoff' };
+    return { park: false, reason: 'armed_handoff', entryPath: 'armed_trigger' };
   }
   const id = String(opts.profileId || '').trim();
   if (!id || id === 'default' || id === 'zion') {
@@ -816,9 +825,39 @@ export function shouldParkUnarmedOpen(opts: {
   if (!isProfileArmingEnabled(id)) {
     return { park: false, reason: 'arming_off' };
   }
+  try {
+    const { shouldFastArmOpen } =
+      require('./admissionMode') as typeof import('./admissionMode');
+    const fa = shouldFastArmOpen({
+      profileId: id,
+      armedWatch: false,
+      lateChase: opts.lateChase === true,
+      lastPriceSol: opts.lastPriceSol,
+      supportPriceSol: opts.supportPriceSol,
+      fib05PriceSol: opts.fib05PriceSol,
+      fib618PriceSol: opts.fib618PriceSol,
+      nearKeyFib: opts.nearKeyFib === true,
+      nearSupport: opts.nearSupport === true,
+      nearMultiTfSupport: opts.nearMultiTfSupport === true,
+      hasLevelEvidence: opts.hasLevelEvidence === true,
+    });
+    if (fa.fastArm) {
+      return {
+        park: false,
+        reason: 'fast_arm',
+        fastArm: true,
+        entryPath: fa.entryPath,
+        proximityPct: fa.proximityPct,
+        admissionMode: fa.mode,
+      };
+    }
+  } catch {
+    /* optional */
+  }
   return {
     park: true,
     reason: `Arming ON — ${id} waits for watch→arm→trigger`,
+    entryPath: 'selective_arm',
   };
 }
 

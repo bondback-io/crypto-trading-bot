@@ -79,16 +79,22 @@ const SPIKE_CAP = 10;
 const BOOT_MS = 120_000;
 const RECOVER_STABLE_MS = 45_000;
 const RECENT_WINDOW_MS = 30_000;
-const P95_TRADING_MS = 200;
+/** Watchers / scanners / utility enter bars (unchanged). */
 const P95_WATCHERS_MS = 350;
 const P95_OTHER_MS = 400;
-/** Trading recover bar — a stable ~250ms Helius window is healthy. */
-const RECOVER_TRADING_MS = 280;
+/**
+ * Trading enter vs clear — hysteresis so ~400ms Helius does not pin a spike.
+ * Enter only on sustained p95 above 800–1000ms; clear below 500–600ms.
+ */
+const P95_TRADING_ENTER_MS = 900;
+const P95_TRADING_CLEAR_MS = 550;
 const HARD_SPIKE_MS = 1_500;
 const HARD_CALL_COOLDOWN_MS = 30_000;
 const MAX_SPIKE_AGE_MS = 90_000;
 const MAX_SPIKE_AGE_PROBES = 5;
 const SOFT_PAUSE_MAX_MS = 90_000;
+/** After pause_off / auto_clear / max_age, require this quiet window before re-pause. */
+const REPAUSE_COOLDOWN_MS = 45_000;
 const BURST_429_N = 3;
 const BURST_429_MS = 10_000;
 const EXIT_CRITICAL_METHOD_RE =
@@ -98,6 +104,10 @@ let lastRecoverReason: string | null = null;
 let entryPauseAutoCleared = 0;
 /** Spike id whose entry pause already auto-cleared — stays off until a new spike. */
 let entryPauseClearedSpikeId: string | null = null;
+let entryPauseActiveState = false;
+let entryPauseCooldownUntil = 0;
+/** After a pause_off, the next pause needs 8-sample p95 > enter (or 429/timeout). */
+let entryPauseNeedsSustainedReentry = false;
 
 const lanes: Record<RpcSpikeLane, LaneBuf> = {
   primary: emptyBuf(),
@@ -140,13 +150,13 @@ function pctl(values: number[], p: number): number | null {
 }
 
 function thresholdFor(lane: RpcSpikeLane): number {
-  if (lane === 'primary') return P95_TRADING_MS;
+  if (lane === 'primary') return P95_TRADING_ENTER_MS;
   if (lane === 'watchers') return P95_WATCHERS_MS;
   return P95_OTHER_MS;
 }
 
 function recoverThreshold(lane: RpcSpikeLane): number {
-  if (lane === 'primary') return RECOVER_TRADING_MS;
+  if (lane === 'primary') return P95_TRADING_CLEAR_MS;
   return thresholdFor(lane);
 }
 
@@ -402,6 +412,14 @@ function endOpenSpike(
   buf.recoveringSince = null;
   buf.hardCallCooldownUntil = now + HARD_CALL_COOLDOWN_MS;
   lastRecoverReason = reason;
+  if (lane === 'primary') {
+    latchEntryPauseOff(now, recentP95(buf, now), reason, rec.id);
+    entryPauseNeedsSustainedReentry = true;
+    entryPauseCooldownUntil = Math.max(
+      entryPauseCooldownUntil,
+      now + REPAUSE_COOLDOWN_MS
+    );
+  }
   console.warn('[rpc_spike_recovered]', {
     id: rec.id,
     lane,
@@ -538,8 +556,8 @@ export function noteRpcCall(opts: {
     }
   }
 
-  const thr = thresholdFor(lane);
-  const recentWin = recentSamples(buf, now);
+  const enterAt = thresholdFor(lane);
+  const recentWin = recoverSamples(buf, now);
   const recent = recentWin.length
     ? pctl(
         recentWin.map((s) => s.totalMs),
@@ -548,9 +566,12 @@ export function noteRpcCall(opts: {
     : null;
   const recoverAt = recoverThreshold(lane);
   const recentHealthy = recent == null || recent <= recoverAt;
-  const hard = totalMs >= Math.max(HARD_SPIKE_MS, thr * 3);
+  const hard =
+    totalMs >= Math.max(HARD_SPIKE_MS, enterAt) &&
+    !isExitCriticalMethod(String(opts.method || ''));
   const burst429 = buf.last429At.length >= BURST_429_N;
-  const p95Hot = recentWin.length >= 8 && recent != null && recent > thr;
+  const p95Hot =
+    recentWin.length >= 8 && recent != null && recent > enterAt;
 
   if (buf.openSpike) {
     buf.openSpike.peakP95 = Math.max(buf.openSpike.peakP95, recent ?? 0);
@@ -585,26 +606,99 @@ function recentWindowHasTimeoutOr429(buf: LaneBuf, now: number): boolean {
   );
 }
 
+function logEntryPause(
+  kind: 'pause_on' | 'pause_off',
+  p95: number | null,
+  reason: string,
+  spikeId?: string | null
+): void {
+  console.warn('[rpc_entry_pause]', kind, {
+    p95: p95 != null ? Math.round(p95) : null,
+    reason,
+    spikeId: spikeId || null,
+  });
+}
+
+function latchEntryPauseOff(
+  now: number,
+  p95: number | null,
+  reason: string,
+  spikeId?: string | null
+): void {
+  if (!entryPauseActiveState) return;
+  entryPauseActiveState = false;
+  entryPauseNeedsSustainedReentry = true;
+  entryPauseCooldownUntil = Math.max(
+    entryPauseCooldownUntil,
+    now + REPAUSE_COOLDOWN_MS
+  );
+  logEntryPause('pause_off', p95, reason, spikeId);
+}
+
+function entryPauseWanted(now: number): {
+  wanted: boolean;
+  reason: string;
+  p95: number | null;
+  rec: RpcSpikeRecord | null;
+} {
+  const buf = lanes.primary;
+  const rec = buf.openSpike;
+  const health = recoverHealth('primary', buf, now);
+  const p95 = health.p95 ?? recentP95(buf, now);
+  if (!isContainmentOn()) {
+    return { wanted: false, reason: 'containment_off', p95, rec };
+  }
+  if (!rec) {
+    return { wanted: false, reason: 'no_spike', p95, rec };
+  }
+  if (entryPauseClearedSpikeId === rec.id) {
+    return { wanted: false, reason: 'auto_cleared', p95, rec };
+  }
+  if (now < entryPauseCooldownUntil) {
+    return { wanted: false, reason: 'repause_cooldown', p95, rec };
+  }
+  const errors = recentWindowHasTimeoutOr429(buf, now);
+  if (now - rec.startedAt >= SOFT_PAUSE_MAX_MS && !errors) {
+    return { wanted: false, reason: 'auto_clear', p95, rec };
+  }
+  const windowN = recoverSamples(buf, now).length;
+  const hot = p95 != null && p95 > P95_TRADING_ENTER_MS;
+  const sustainedHot = hot && windowN >= 8;
+  if (entryPauseNeedsSustainedReentry) {
+    if (sustainedHot) return { wanted: true, reason: 'p95_hot_sustained', p95, rec };
+    if (errors) return { wanted: true, reason: 'timeout_or_429', p95, rec };
+    return { wanted: false, reason: 'need_sustained_reentry', p95, rec };
+  }
+  if (hot) return { wanted: true, reason: 'p95_hot', p95, rec };
+  if (errors) return { wanted: true, reason: 'timeout_or_429', p95, rec };
+  return { wanted: false, reason: 'p95_below_enter', p95, rec };
+}
+
 /**
- * Pause new entries while a primary spike is open, but not for the whole uptime.
- * After 90s with no timeouts/429s, auto-clear for this spike. A new spike re-pauses.
+ * Pause new entries only on a sustained Trading breach (p95 > enter) or
+ * timeouts/429s. Moderate ~400ms p95 does not hold pause. Exits never pause.
  */
 function refreshPrimaryEntryPause(now: number): boolean {
-  if (!isContainmentOn()) return false;
-  const rec = lanes.primary.openSpike;
-  if (!rec) return false;
-  if (entryPauseClearedSpikeId === rec.id) return false;
-  if (now - rec.startedAt < SOFT_PAUSE_MAX_MS) return true;
-  if (recentWindowHasTimeoutOr429(lanes.primary, now)) return true;
-  entryPauseClearedSpikeId = rec.id;
-  entryPauseAutoCleared += 1;
-  if (!rec.containmentActions.includes('entry_pause_auto_cleared')) {
-    rec.containmentActions.push('entry_pause_auto_cleared');
+  const { wanted, reason, p95, rec } = entryPauseWanted(now);
+  if (wanted) {
+    if (!entryPauseActiveState) {
+      entryPauseActiveState = true;
+      logEntryPause('pause_on', p95, reason, rec?.id);
+    }
+    return true;
   }
-  console.warn('[rpc_containment_action]', 'entry_pause_auto_cleared', {
-    spikeId: rec.id,
-    count: entryPauseAutoCleared,
-  });
+  if (reason === 'auto_clear' && rec && entryPauseClearedSpikeId !== rec.id) {
+    entryPauseClearedSpikeId = rec.id;
+    entryPauseAutoCleared += 1;
+    if (!rec.containmentActions.includes('entry_pause_auto_cleared')) {
+      rec.containmentActions.push('entry_pause_auto_cleared');
+    }
+    console.warn('[rpc_containment_action]', 'entry_pause_auto_cleared', {
+      spikeId: rec.id,
+      count: entryPauseAutoCleared,
+    });
+  }
+  latchEntryPauseOff(now, p95, reason, rec?.id);
   return false;
 }
 
@@ -612,18 +706,32 @@ export function shouldSoftPauseNewEntries(): boolean {
   return refreshPrimaryEntryPause(Date.now());
 }
 
-/** Shed non-exit getSignatures/getTransaction on Trading while a primary spike is open. */
+/** Shed non-exit getSignatures/getTransaction on Trading while spike or pause. */
 export function shouldShedPrimaryMonitoring(): boolean {
-  return isContainmentOn() && isLaneSpiking('primary');
+  if (!isContainmentOn()) return false;
+  return isLaneSpiking('primary') || entryPauseActiveState;
 }
 
 export function getLastRpcSpikeRecoverReason(): string | null {
   return lastRecoverReason;
 }
 
-export function withRpcAttemptCap(critical: boolean, defaultMax: number): number {
-  if (!isContainmentOn() || !isLaneSpiking('primary')) return defaultMax;
-  return critical ? Math.min(defaultMax, 2) : Math.min(defaultMax, 1);
+/**
+ * Retry cap 1–2 on monitor only. Exits / send_tx keep full attempts.
+ */
+export function withRpcAttemptCap(
+  critical: boolean,
+  defaultMax: number,
+  opts?: { exitSend?: boolean; monitor?: boolean }
+): number {
+  if (!isContainmentOn()) return defaultMax;
+  if (opts?.exitSend === true) return defaultMax;
+  const stressed = isLaneSpiking('primary') || entryPauseActiveState;
+  if (!stressed) return defaultMax;
+  if (opts?.monitor === true || critical === false) {
+    return Math.min(defaultMax, 2);
+  }
+  return defaultMax;
 }
 
 export function laneTelemetry(lane: RpcSpikeLane): RpcLaneTelemetry {
@@ -865,6 +973,9 @@ export function __resetRpcSpikeInspectorForTests(): void {
   lastRecoverReason = null;
   entryPauseAutoCleared = 0;
   entryPauseClearedSpikeId = null;
+  entryPauseActiveState = false;
+  entryPauseCooldownUntil = 0;
+  entryPauseNeedsSustainedReentry = false;
 }
 
 /** Pretend the inspector has been up for `ms` (post-boot hygiene tests). */
@@ -907,4 +1018,9 @@ export function __endOpenSpikeForTests(lane: RpcSpikeLane): void {
 /** Expire hard-call-only cooldown so a later lone hard call can be evaluated again. */
 export function __clearHardCallCooldownForTests(lane: RpcSpikeLane): void {
   lanes[lane].hardCallCooldownUntil = 0;
+}
+
+/** Expire re-pause cooldown so tests can assert the next sustained breach. */
+export function __clearEntryPauseCooldownForTests(): void {
+  entryPauseCooldownUntil = 0;
 }

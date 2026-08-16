@@ -7,6 +7,7 @@
 import type { LaunchEvent } from './marketData';
 import { hasSolanaTrackerKey, getSolanaTrackerApiKey, getSolanaTrackerBaseUrl } from './solanaTracker';
 import { loggedFetch } from './logger';
+import { shouldSkipCreditsProvider } from './creditsGuard';
 
 const MAX_ROWS = 40;
 let lastTrackerAt = 0;
@@ -51,6 +52,7 @@ let graduatingCount = 0;
 
 async function probeSolanaTrackerGraduating(): Promise<LaunchEvent[]> {
   if (!hasSolanaTrackerKey()) return [];
+  if (shouldSkipCreditsProvider('solanatracker')) return cachedTracker;
   const now = Date.now();
   if (now - lastTrackerAt < 45_000) return cachedTracker;
   lastTrackerAt = now;
@@ -62,6 +64,7 @@ async function probeSolanaTrackerGraduating(): Promise<LaunchEvent[]> {
     `${base}/search?query=graduating`,
   ];
   for (const url of urls) {
+    if (shouldSkipCreditsProvider('solanatracker')) break;
     try {
       const res = await loggedFetch(url, {
         context: 'MarketData',

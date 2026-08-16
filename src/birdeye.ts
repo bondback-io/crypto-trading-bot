@@ -5,6 +5,11 @@
 
 import { config } from './config';
 import { logger, errorToMeta, loggedFetch } from './logger';
+import {
+  isCreditsGuardResponse,
+  isInsufficientCreditsBody,
+  shouldSkipCreditsProvider,
+} from './creditsGuard';
 
 export interface BirdeyeTokenOverview {
   mint: string;
@@ -158,6 +163,14 @@ export async function birdeyeRequest(
   }
 
   const url = `${getBirdeyeBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
+  if (shouldSkipCreditsProvider('birdeye')) {
+    return {
+      ok: false,
+      status: 429,
+      data: null,
+      error: 'Birdeye credits backoff',
+    };
+  }
   const maxAttempts = 3;
   let lastError = 'Unknown error';
   let lastStatus = 0;
@@ -177,6 +190,19 @@ export async function birdeyeRequest(
           'x-chain': 'solana',
         },
       });
+      if (isCreditsGuardResponse(res)) {
+        lastStatus = res.status;
+        lastError = 'Birdeye credits backoff';
+        return { ok: false, status: res.status, data: null, error: lastError };
+      }
+      if (!res.ok) {
+        const peek = await res.clone().text().catch(() => '');
+        if (isInsufficientCreditsBody(peek) || res.status === 402) {
+          lastStatus = res.status;
+          lastError = `HTTP ${res.status} credits`;
+          return { ok: false, status: res.status, data: null, error: lastError };
+        }
+      }
       if (res.status === 429 || res.status >= 500) {
         lastStatus = res.status;
         lastError = `HTTP ${res.status}`;

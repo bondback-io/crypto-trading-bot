@@ -392,6 +392,102 @@ export function fibPriceFromLow(
   return low + (high - low) * ratio;
 }
 
+/**
+ * Slack so a slight undercut (price a few % below support) still counts as
+ * sitting on the level. Overhead Fib/S (reclaim / resistance) does not.
+ */
+export const SUPPORT_SIDE_SLACK_PCT = 4;
+
+/** True when `level` is at or below live price (dip/support), not overhead. */
+export function isSupportSideLevel(
+  levelPrice: number | null | undefined,
+  livePrice: number | null | undefined,
+  slackPct: number = SUPPORT_SIDE_SLACK_PCT
+): boolean {
+  const lvl = Number(levelPrice);
+  const live = Number(livePrice);
+  if (!(lvl > 0) || !(live > 0)) return false;
+  const slack = Math.max(0, Number(slackPct) || 0);
+  return lvl <= live * (1 + slack / 100);
+}
+
+export function marketCapAtPriceLevel(
+  marketCapUsd: number | undefined,
+  lastPriceSol: number | null | undefined,
+  levelPriceSol: number | null | undefined
+): number | null {
+  const mc = Number(marketCapUsd);
+  const last = Number(lastPriceSol);
+  const lvl = Number(levelPriceSol);
+  if (!(mc > 0) || !(last > 0) || !(lvl > 0)) return null;
+  return mc * (lvl / last);
+}
+
+export interface SupportSideMcTarget {
+  label: string;
+  priceSol: number;
+  mcUsd: number;
+}
+
+/**
+ * Build dashboard MC targets only for support-side prices (≤ live + slack).
+ * Overhead Fib 0.5 after a dump is a reclaim, not a dip buy.
+ */
+export function buildSupportSideMcTargets(input: {
+  marketCapUsd?: number;
+  lastPriceSol?: number | null;
+  levels: Array<{ label: string; priceSol: number | null | undefined }>;
+}): SupportSideMcTarget[] {
+  const live = input.lastPriceSol;
+  const out: SupportSideMcTarget[] = [];
+  for (const row of input.levels) {
+    const priceSol = Number(row.priceSol);
+    if (!isSupportSideLevel(priceSol, live)) continue;
+    const mcUsd = marketCapAtPriceLevel(
+      input.marketCapUsd,
+      live,
+      priceSol
+    );
+    if (mcUsd == null) continue;
+    if (
+      out.some(
+        (e) =>
+          Math.abs(e.priceSol - priceSol) / Math.max(e.priceSol, 1e-18) < 0.005
+      )
+    ) {
+      continue;
+    }
+    out.push({ label: row.label, priceSol, mcUsd });
+  }
+  return out;
+}
+
+/**
+ * Dip-buy Fib 0.5 / 0.618 are always retracements down from the swing high.
+ * `down_impulse` ladders place 0.618 above the low (bounce), which is not a dip.
+ */
+export function pickDipRetracementLevels(opts: {
+  livePrice?: number | null;
+  swingHigh?: number | null;
+  swingLow?: number | null;
+  fib05?: number | null;
+  fib618?: number | null;
+}): { fib05: number | null; fib618: number | null } {
+  const live = opts.livePrice;
+  const high = Number(opts.swingHigh);
+  const low = Number(opts.swingLow);
+  let f05 = Number(opts.fib05);
+  let f618 = Number(opts.fib618);
+  if (high > 0 && low > 0 && high > low) {
+    f05 = fibPriceFromHigh(high, low, 0.5);
+    f618 = fibPriceFromHigh(high, low, 0.618);
+  }
+  return {
+    fib05: isSupportSideLevel(f05, live) ? f05 : null,
+    fib618: isSupportSideLevel(f618, live) ? f618 : null,
+  };
+}
+
 export function isNearFibLevel(
   price: number,
   level: number | FibLevel,
@@ -1008,7 +1104,8 @@ export function analyzeTechnicals(
     srOpts
   );
 
-  const nearestSupport = supportZones[0] ?? null;
+  const nearestSupport =
+    supportZones.find((z) => isSupportSideLevel(z.mid, price)) ?? null;
   const nearestResistance = resistanceZones[0] ?? null;
 
   const impulse = selectImpulseSwing(fibPoints, c.pivotWindow, {
@@ -1034,7 +1131,8 @@ export function analyzeTechnicals(
         (c.prioritizeFibLevels.includes(l.ratio) ||
           c.secondaryFibLevels.includes(l.ratio) ||
           l.key) &&
-        l.near
+        l.near &&
+        isSupportSideLevel(l.price, price)
     ) === true;
   const nearSupport = nearestSupport?.near === true;
   const nearStrongSupport =
@@ -1476,11 +1574,22 @@ export function computeSrConfluence(
   const nearMultiTfResistance =
     resistanceTfHits.length >= minHits && (!requireHigher || hasHigherResist);
 
+  const livePrice =
+    perTf.find((p) => p.snapshot.price != null && p.snapshot.price > 0)
+      ?.snapshot.price ?? null;
+
   // Prefer higher-TF agreement for primary levels
   const pickPrimary = (
     hits: SrTimeframe[],
     kind: 'support' | 'resistance'
   ): number | null => {
+    const ok = (mid: number | null | undefined): mid is number => {
+      if (mid == null || !(mid > 0)) return false;
+      if (kind === 'support' && livePrice != null) {
+        return isSupportSideLevel(mid, livePrice);
+      }
+      return true;
+    };
     if (!hits.length) {
       // Fall back to strongest single TF mid even without confluence
       const ranked = [...perTf].sort(
@@ -1491,7 +1600,7 @@ export function computeSrConfluence(
           kind === 'support'
             ? p.nearestSupportMid
             : p.nearestResistanceMid;
-        if (mid != null && mid > 0) return mid;
+        if (ok(mid)) return mid;
       }
       return null;
     }
@@ -1502,7 +1611,7 @@ export function computeSrConfluence(
         kind === 'support'
           ? row?.nearestSupportMid
           : row?.nearestResistanceMid;
-      if (mid != null && mid > 0) return mid;
+      if (ok(mid)) return mid;
     }
     return null;
   };
