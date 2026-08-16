@@ -671,6 +671,17 @@ export async function tickTrendSetupWatches(opts?: {
     }
   }
   if (!isTrendProfileEnabled()) return 0;
+  try {
+    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
+      shouldIdleIsolate?: () => boolean;
+    };
+    if (shouldIdleIsolate?.()) {
+      pruneTerminal();
+      return 0;
+    }
+  } catch {
+    /* fail-open */
+  }
   pruneTerminal();
   const now = Date.now();
   let handed = 0;

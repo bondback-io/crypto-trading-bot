@@ -38,6 +38,8 @@ import {
   classifyRpcOutcome,
   currentSpikeCallContext,
   getSpikeInspectorSnapshot,
+  isLaneSpiking,
+  isRpcContainmentEnabled,
   noteRpcCall,
   runWithSpikeCallContext,
   withRpcAttemptCap,
@@ -2152,6 +2154,11 @@ export function startRpcHealthMonitor(): void {
     // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
     // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
     if (isUtil || index === activeUtility) {
+      // Utility spike containment: do not getSlot every cycle. Never applied to
+      // preferredPrimary (Helius) or exclusive Watchers — those branches are below.
+      if (isRpcContainmentEnabled() && isLaneSpiking('utility') && cycle % 3 !== 0) {
+        return false;
+      }
       // Preferred Utility already soft-failed elsewhere: probe it rarely so slow
       // Triton/rpc-url getSlot samples do not keep painting the Multi-RPC row.
       if (

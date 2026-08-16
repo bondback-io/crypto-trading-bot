@@ -1,5 +1,5 @@
 /**
- * Smoke: RPC Spike Inspector + containment (1.2.378).
+ * Smoke: RPC Spike Inspector + containment (1.2.378 / 1.2.380 wires).
  * Run: npx tsx scripts/smokeRpcSpikeInspector.ts
  */
 import fs from 'node:fs';
@@ -18,6 +18,11 @@ import {
   isRpcWorkloadEnabled,
   shouldIdleIsolate,
 } from '../src/rpcWorkloadControl';
+import {
+  shouldDegradeScannerEnrich,
+  shouldSkipScannerTick,
+  utilityPollScale,
+} from '../src/rpcLoadControl';
 
 let failed = 0;
 function check(label: string, ok: boolean, detail?: string): void {
@@ -127,6 +132,86 @@ check(
 );
 config.rpc.containmentEnabled = true;
 
+__resetRpcSpikeInspectorForTests();
+noteRpcCall({
+  lane: 'secondary',
+  provider: 'Alchemy',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 2,
+});
+check(
+  'secondary spike degrades scanner enrich',
+  isLaneSpiking('secondary') && shouldDegradeScannerEnrich() === true
+);
+check(
+  'secondary spike does not skip Market/Alpha intake ticks',
+  shouldSkipScannerTick('market_scanner').skip === false &&
+    shouldSkipScannerTick('alpha_scan').skip === false
+);
+config.rpc.containmentEnabled = false;
+check(
+  'containment OFF: secondary spike does not force enrich degrade',
+  isLaneSpiking('secondary') && shouldDegradeScannerEnrich() === false
+);
+config.rpc.containmentEnabled = true;
+check(
+  'secondary spike does not pause Trading entries',
+  shouldSoftPauseNewEntries() === false
+);
+
+__resetRpcSpikeInspectorForTests();
+noteRpcCall({
+  lane: 'utility',
+  provider: 'public',
+  method: 'getSignaturesForAddress',
+  queueWaitMs: 8,
+  networkMs: 1800,
+  totalMs: 1808,
+  outcome: 'success',
+  inFlight: 2,
+});
+const utilScaleOn = utilityPollScale();
+check(
+  'utility spike slows polls',
+  isLaneSpiking('utility') &&
+    utilScaleOn.skipActivity === true &&
+    utilScaleOn.gapScale >= 2.5 &&
+    utilScaleOn.cycleCapScale <= 0.4
+);
+check(
+  'utility spike does not pause Trading entries',
+  shouldSoftPauseNewEntries() === false
+);
+config.rpc.containmentEnabled = false;
+const utilScaleOff = utilityPollScale();
+check(
+  'containment OFF: utility spike does not force poll slowdown',
+  isLaneSpiking('utility') &&
+    utilScaleOff.skipActivity === false &&
+    utilScaleOff.gapScale < 2.5
+);
+config.rpc.containmentEnabled = true;
+
+__resetRpcSpikeInspectorForTests();
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'sendTransaction',
+  queueWaitMs: 20,
+  networkMs: 2100,
+  totalMs: 2120,
+  outcome: 'timeout',
+  inFlight: 5,
+});
+check(
+  'primary-only spike does not idle-isolate Watchers',
+  isLaneSpiking('primary') && shouldIdleIsolate() === false
+);
+
 const tradeSrc = readSrc('src/trade.ts');
 check(
   'executeSell wraps live path on primary send_tx',
@@ -177,6 +262,33 @@ check(
 check(
   'acquireRpcLane returns queueWaitMs',
   /queueWaitMs: Math\.max\(0, Date\.now\(\) - waitStartedAt\)/.test(gateSrc)
+);
+
+const trendSrc = readSrc('src/trendSetupWatch.ts');
+check(
+  'trend tick idle-isolates on Watchers spike',
+  /shouldIdleIsolate/.test(trendSrc)
+);
+const scalperSrc = readSrc('src/scalperSetupWatch.ts');
+check(
+  'scalper tick idle-isolates on Watchers spike',
+  /shouldIdleIsolate/.test(scalperSrc)
+);
+const scannerSrc = readSrc('src/marketScanner.ts');
+check(
+  'grad-first curve enrich skipped when crudeOnly',
+  /if \(!crudeOnly\)[\s\S]{0,180}offerGradWatchesCurveFirst/.test(scannerSrc)
+);
+const alphaSrc = readSrc('src/alphaScanFeed.ts');
+check(
+  'AlphaScan uses cache-only curve when degrading',
+  /shouldDegradeScannerEnrich\(\)[\s\S]{0,80}fetchBondingCurve/.test(alphaSrc)
+);
+const connSrc = readSrc('src/connection.ts');
+check(
+  'utility spike throttles getSlot probes; Helius/Watchers branches unchanged',
+  /isLaneSpiking\('utility'\)[\s\S]{0,80}cycle % 3/.test(connSrc) &&
+    /Helius \(critical\): every 3rd cycle/.test(connSrc)
 );
 
 __resetRpcSpikeInspectorForTests();

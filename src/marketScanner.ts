@@ -2209,22 +2209,25 @@ export async function runScannerPollOnce(): Promise<number> {
       `[marketScanner] poll ${universe.length} launches → ${picked.length} candidates ` +
         `(handed ${handed}) in ${lastPollMs}ms`
     );
-    // Curve-first graduation watches (no TA gate) — pump / Jupiter universe
-    try {
-      const grad = await offerGradWatchesCurveFirst(universe);
-      if (grad.offered > 0 || grad.triggered > 0) {
-        console.log(
-          `[marketScanner] grad-watch curve-first scanned ${grad.scanned} ` +
-            `→ offered ~${grad.offered}` +
-            (grad.triggered > 0 ? ` · triggered ${grad.triggered}` : '')
+    // Curve-first graduation watches (no TA gate) — pump / Jupiter universe.
+    // Skip on-chain enrichCurve during scanner degrade (Secondary spike / ×3).
+    if (!crudeOnly) {
+      try {
+        const grad = await offerGradWatchesCurveFirst(universe);
+        if (grad.offered > 0 || grad.triggered > 0) {
+          console.log(
+            `[marketScanner] grad-watch curve-first scanned ${grad.scanned} ` +
+              `→ offered ~${grad.offered}` +
+              (grad.triggered > 0 ? ` · triggered ${grad.triggered}` : '')
+          );
+        }
+      } catch (err) {
+        logger.warn(
+          'MarketScanner',
+          'Grad watch curve-first pass failed',
+          errorToMeta(err)
         );
       }
-    } catch (err) {
-      logger.warn(
-        'MarketScanner',
-        'Grad watch curve-first pass failed',
-        errorToMeta(err)
-      );
     }
     try {
       const { runProfileSpecialtyFeedPass } =

@@ -187,9 +187,30 @@ export function adaptiveScannerIntervalMs(baseMs: number): number {
   return Math.round(Math.max(baseMs, baseMs * f));
 }
 
+function secondarySpikeDegradesEnrich(): boolean {
+  try {
+    const { isRpcContainmentEnabled, isLaneSpiking } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    return isRpcContainmentEnabled() && isLaneSpiking('secondary');
+  } catch {
+    return false;
+  }
+}
+
+function utilitySpikeSlowsPolls(): boolean {
+  try {
+    const { isRpcContainmentEnabled, isLaneSpiking } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    return isRpcContainmentEnabled() && isLaneSpiking('utility');
+  } catch {
+    return false;
+  }
+}
+
 /** True when scanners should skip heavy enrich/curve and use crude rank. */
 export function shouldDegradeScannerEnrich(): boolean {
-  return getRpcLoadControlSnapshot().scannerSlowFactor >= 3;
+  if (getRpcLoadControlSnapshot().scannerSlowFactor >= 3) return true;
+  return secondarySpikeDegradesEnrich();
 }
 
 /** True if this scanner tick should skip under adaptive load. */
@@ -235,9 +256,13 @@ export function utilityPollScale(): {
   skipActivity: boolean;
 } {
   const f = getRpcLoadControlSnapshot().utilitySlowFactor;
-  return {
-    cycleCapScale: 1 / f,
-    gapScale: f,
-    skipActivity: f >= 2.5,
-  };
+  let cycleCapScale = 1 / f;
+  let gapScale = f;
+  let skipActivity = f >= 2.5;
+  if (utilitySpikeSlowsPolls()) {
+    gapScale = Math.max(gapScale, 2.5);
+    cycleCapScale = Math.min(cycleCapScale, 0.4);
+    skipActivity = true;
+  }
+  return { cycleCapScale, gapScale, skipActivity };
 }

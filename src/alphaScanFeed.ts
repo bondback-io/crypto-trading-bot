@@ -11,7 +11,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick } from './rpcLoadControl';
+import { shouldSkipScannerTick, shouldDegradeScannerEnrich } from './rpcLoadControl';
 import {
   fetchBondingCurve,
   getCachedBondingCurve,
@@ -279,7 +279,11 @@ async function enrichCurves(
         if (!mint) continue;
         try {
           const cached = getCachedBondingCurve(mint);
-          const state = cached || (await fetchBondingCurve(mint));
+          const state =
+            cached ||
+            (shouldDegradeScannerEnrich()
+              ? null
+              : await fetchBondingCurve(mint));
           if (!state || state.source === 'none') {
             out.set(mint, {
               progressPct: null,

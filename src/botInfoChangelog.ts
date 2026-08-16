@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.380',
+    title: 'RPC containment actually sheds scanner enrich and utility polls',
+    sections: ['knobs', 'scanners', 'execution'],
+    items: [
+      'Secondary Alchemy spikes now degrade scanner curve enrich (crude rank, skip grad-first RPC, AlphaScan cache-only). Market / Alpha / Zion intake ticks keep running.',
+      'Utility spikes slow Favourites polls and skip extra public getSlot probes. Trend and Scalper watch ticks idle-isolate with Dip/Grad when Watchers is hot. Exits stay on Critical/Helius.',
+    ],
+  },
+  {
     version: '1.2.379',
     title: 'Same-mint lock, live TA min copy, quieter dashboard polls',
     sections: ['execution', 'scanners', 'knobs'],
