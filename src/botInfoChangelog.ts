@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.381',
+    title: 'Watch/arm ownership: Mode B mid-band, MS watch max, fewer routing-none',
+    sections: ['scanners', 'microbots', 'execution'],
+    items: [
+      'Scalper Mode B always parks $150k–$1M fight-none (not only discretionary-skip). Dip min stays $1M; eased Dip below catalog remaps to Mode B. Restricted support_dip_reclaim still parks Dip in-band.',
+      'Migration tagged graduating uses the live MS max MC for watch vs buy (no $100k default hole). Buy still needs fire-band or armed ultra-fresh. Conversion proof shows MC gap none examples and Steady/HWR/Config holder floors vs fake-holder velocity max.',
+    ],
+  },
+  {
     version: '1.2.380',
     title: 'RPC containment actually sheds scanner enrich and utility polls',
     sections: ['knobs', 'scanners', 'execution'],

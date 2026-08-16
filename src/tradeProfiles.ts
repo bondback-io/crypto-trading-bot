@@ -2201,6 +2201,18 @@ export function remapPreferredToMcBandOwner(
   const mc = Number(marketCapUsd);
   const pid = remapOverMigrationSniperMax(profileId, marketCapUsd);
   if (!Number.isFinite(mc) || mc <= 0) return pid;
+  // Dip eased floors may pass below catalog min — Mode B owns that gap.
+  if (pid === 'dip_buyer' && mc < getDipBuyerMcBand().min) {
+    const owner = resolveMcBandOwner(mc, ctx);
+    if (
+      owner.overflow &&
+      profileInResolvedMcBand(owner.overflow, mc)
+    ) {
+      return owner.overflow;
+    }
+    if (owner.primary !== 'none') return owner.primary;
+    return 'scalper';
+  }
   if (pid && profileInResolvedMcBand(pid, mc)) return pid;
   const owner = resolveMcBandOwner(mc, ctx);
   if (
@@ -3155,7 +3167,7 @@ export function evaluateMsSetup(
   const maxMc =
     rules?.maxMarketCapUsd != null && Number.isFinite(rules.maxMarketCapUsd)
       ? Number(rules.maxMarketCapUsd)
-      : 100_000;
+      : getMigrationSniperMaxMcUsd();
 
   const progress =
     ctx.curveProgressPct != null && Number.isFinite(ctx.curveProgressPct)
@@ -3882,14 +3894,32 @@ export function resolveTop10SoftAllow(
         Number.isFinite(ctx.srConfluenceScore) &&
         Number(ctx.srConfluenceScore) >= 40) ||
       (Array.isArray(ctx.supportTfHits) && ctx.supportTfHits.length >= 2);
-    if (knownQuality || tfStructure) {
+    const volExpanding =
+      ctx.volumeDecayState === 'expanding' ||
+      (ctx.volumeM5Usd != null &&
+        Number.isFinite(ctx.volumeM5Usd) &&
+        Number(ctx.volumeM5Usd) >= 8_000);
+    const playbookHits =
+      (ctx.nearKeyFib === true ? 1 : 0) +
+      (ctx.nearSupport === true || ctx.nearMultiTfSupport === true ? 1 : 0) +
+      (volExpanding ? 1 : 0);
+    const substituteQuality =
+      ctx.nearKeyFib === true || volExpanding || playbookHits >= 2;
+    if (knownQuality || tfStructure || substituteQuality) {
+      const how = knownQuality
+        ? 'liq+vol+holders'
+        : tfStructure
+          ? 'TF structure'
+          : ctx.nearKeyFib
+            ? 'Fib substitute'
+            : volExpanding
+              ? 'vol expansion'
+              : 'playbook confluence';
       return {
         allow: true,
         grantTag: 'top10_soft_allow_age_unknown_quality_pass',
         sizeMult: TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT,
-        detail: `${def.name} age_unknown_quality_pass ${top10.toFixed(1)}% (${
-          knownQuality ? 'liq+vol+holders' : 'TF structure'
-        } · hard max ${maxTop10}% · soft ≤${softCeil}%)`,
+        detail: `${def.name} age_unknown_quality_pass ${top10.toFixed(1)}% (${how} · hard max ${maxTop10}% · soft ≤${softCeil}%)`,
       };
     }
     return {

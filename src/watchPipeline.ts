@@ -74,6 +74,8 @@ export interface ConversionDiagExample {
 
 export interface ConversionDiagnosticsSnapshot {
   mc_gap_orphan_count: number;
+  none_mc_gap_count: number;
+  none_mc_gap_examples: McOrphanFightExample[];
   mc_orphan_examples: McOrphanFightExample[];
   migration_tagged_but_not_setup_count: number;
   migration_tagged_examples: ConversionDiagExample[];
@@ -84,6 +86,7 @@ export interface ConversionDiagnosticsSnapshot {
   steady_block_reasons: Record<string, number>;
   hwr_block_reasons: Record<string, number>;
   resolved_min_holders: Record<string, number>;
+  fake_holder_velocity_max_15m: number;
 }
 
 export interface WatchPipelineSnapshot {
@@ -99,6 +102,7 @@ export interface WatchPipelineSnapshot {
   /** opened / max(armed, 1) from per-profile funnels */
   armed_to_open_conversion: number;
   mc_gap_orphan_count: number;
+  none_mc_gap_count: number;
   orphan_example_mc: number | null;
   orphan_examples: McGapOrphanExample[];
   rejected_by_all_mc_bands: number;
@@ -141,6 +145,8 @@ const throttle: WatchPipelineThrottleState = {
 };
 let watcherLaneLatency: number | string | null = '—';
 let mcGapOrphanCount = 0;
+let noneMcGapCount = 0;
+const noneMcGapExamples: McOrphanFightExample[] = [];
 let orphanExampleMc: number | null = null;
 const orphanExamples: McGapOrphanExample[] = [];
 const EXAMPLE_CAP = 8;
@@ -502,6 +508,36 @@ export function noteMcGapOrphan(
   }
 }
 
+/**
+ * Mid-band ($Scalper min–Dip catalog min) still exited as routing-none
+ * with no Mode B row. Distinct from owner-none orphans.
+ */
+export function noteNoneMcGap(
+  mcUsd?: number | null,
+  mint?: string | null,
+  extra?: {
+    classifier?: string | null;
+    rejects?: Array<{ profileId: string; reason: string }>;
+  }
+): void {
+  noneMcGapCount += 1;
+  const n = Number(mcUsd);
+  noneMcGapExamples.unshift({
+    mint: String(mint || '').slice(0, 12),
+    mc: Number.isFinite(n) && n > 0 ? n : 0,
+    classifier: extra?.classifier
+      ? String(extra.classifier).slice(0, 48)
+      : null,
+    rejects: (extra?.rejects || []).slice(0, 8).map((r) => ({
+      profileId: String(r.profileId || '').slice(0, 32),
+      reason: String(r.reason || '').slice(0, 120),
+    })),
+  });
+  if (noneMcGapExamples.length > EXAMPLE_CAP) {
+    noneMcGapExamples.length = EXAMPLE_CAP;
+  }
+}
+
 function pushExample(
   list: ConversionDiagExample[],
   mint: string | null | undefined,
@@ -578,11 +614,33 @@ export function getConversionDiagnostics(): ConversionDiagnosticsSnapshot {
   } catch {
     resolvedMinHolders = {};
   }
+  try {
+    const { config } = require('./config') as typeof import('./config');
+    const g = Number(config.filters?.minHolders);
+    if (Number.isFinite(g) && g > 0) resolvedMinHolders.global = g;
+  } catch {
+    /* optional */
+  }
+  let fakeHolderMax15m = 2_000;
+  try {
+    const { FAKE_HOLDER_VELOCITY_FLOORS } =
+      require('./deadTokenFilters') as typeof import('./deadTokenFilters');
+    const row = FAKE_HOLDER_VELOCITY_FLOORS.find(
+      (f) => Number(f.maxAgeMs) <= 15 * 60_000
+    );
+    if (row && Number.isFinite(row.maxHolders)) {
+      fakeHolderMax15m = Number(row.maxHolders);
+    }
+  } catch {
+    /* catalog */
+  }
   const sourceRows = buildSourceFunnelRows();
   const source_counts: Record<string, number> = {};
   for (const row of sourceRows) source_counts[row.source] = row.candidates_in;
   return {
     mc_gap_orphan_count: mcGapOrphanCount,
+    none_mc_gap_count: noneMcGapCount,
+    none_mc_gap_examples: noneMcGapExamples.slice(0, EXAMPLE_CAP),
     mc_orphan_examples: orphanFightExamples.slice(0, EXAMPLE_CAP),
     migration_tagged_but_not_setup_count: migrationTaggedNotSetupCount,
     migration_tagged_examples: migrationTaggedExamples.slice(0, EXAMPLE_CAP),
@@ -593,6 +651,7 @@ export function getConversionDiagnostics(): ConversionDiagnosticsSnapshot {
     steady_block_reasons: topReasons(steadyBlockReasons),
     hwr_block_reasons: topReasons(hwrBlockReasons),
     resolved_min_holders: resolvedMinHolders,
+    fake_holder_velocity_max_15m: fakeHolderMax15m,
   };
 }
 
@@ -731,6 +790,7 @@ export function getWatchPipelineSnapshot(opts?: {
     watcher_lane_latency: watcherLaneLatency,
     armed_to_open_conversion: openedSum / Math.max(armedSum, 1),
     mc_gap_orphan_count: mcGapOrphanCount,
+    none_mc_gap_count: noneMcGapCount,
     orphan_example_mc: orphanExampleMc,
     orphan_examples: orphanExamples.slice(),
     rejected_by_all_mc_bands: rejectedByAllMcBands,

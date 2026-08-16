@@ -1312,7 +1312,7 @@ function parkOwnedWatchFromFight(
     }
     const { parkSignalOnProfileWatch } =
       require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-    parkSignalOnProfileWatch({
+    const ok = parkSignalOnProfileWatch({
       profileId: ownerPrimary,
       mint: signal.mint,
       symbol: signal.symbol,
@@ -1329,10 +1329,70 @@ function parkOwnedWatchFromFight(
       curveProgressPct: signal.bondingCurve?.progressPct ?? null,
       dropFromPeakPct: signal.dropFromPeakPct,
     });
+    if (!ok) return null;
     return `owned_${family}_watch: waiting arm`;
   } catch {
     return null;
   }
+}
+
+/** Mode B park for Scalper-band fight-none. Does not open discretionary Scalper. */
+function tryParkModeBFromFight(
+  signal: TradeSignal,
+  ctx: {
+    volumeH1Usd?: number | null;
+    volumeM5Usd?: number | null;
+    holderCount?: number | null;
+    nearKeyFib?: boolean;
+    nearSupport?: boolean;
+    nearMultiTfSupport?: boolean;
+    srConfluenceScore?: number | null;
+    priceSol?: number | null;
+    supportPriceSol?: number | null;
+    resistancePriceSol?: number | null;
+  },
+  mcN: number | null | undefined,
+  overflow?: string | null
+): { ok: boolean; reason: string } {
+  const preferred =
+    overflow === 'momentum_burst' ? 'momentum_burst' : 'scalper';
+  try {
+    const {
+      isMintOnActiveScalperWatch,
+      offerScalperWatchFromCandidate,
+    } = require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    if (!isMintOnActiveScalperWatch(signal.mint)) {
+      const parked = offerScalperWatchFromCandidate({
+        mint: signal.mint,
+        symbol: signal.symbol,
+        name: signal.name,
+        marketCapUsd: mcN ?? undefined,
+        volumeH1Usd: ctx.volumeH1Usd ?? undefined,
+        volumeM5Usd: ctx.volumeM5Usd ?? undefined,
+        holderCount: ctx.holderCount ?? undefined,
+        nearKeyFib: ctx.nearKeyFib === true,
+        nearSupport: ctx.nearSupport === true,
+        nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+        srConfluenceScore: ctx.srConfluenceScore ?? undefined,
+        lastPriceSol: ctx.priceSol ?? undefined,
+        supportPriceSol: ctx.supportPriceSol ?? undefined,
+        resistancePriceSol: ctx.resistancePriceSol ?? undefined,
+        preferredProfileId: preferred,
+      });
+      if (!parked && !isMintOnActiveScalperWatch(signal.mint)) {
+        return { ok: false, reason: 'modeb_park_failed' };
+      }
+    }
+  } catch {
+    return { ok: false, reason: 'modeb_park_failed' };
+  }
+  return {
+    ok: true,
+    reason:
+      preferred === 'momentum_burst'
+        ? 'owned_mb_watch: waiting arm'
+        : 'owned_scalper_watch: waiting arm',
+  };
 }
 
 /**
@@ -8018,13 +8078,22 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           }
 
           const msLane = lanes.find((l) => l.profileId === 'migration_sniper');
-          const scalperLane = lanes.find((l) => l.profileId === 'scalper');
           let ownerPrimary: string = 'none';
+          let ownerOverflow: string | undefined;
           try {
-            const { resolveMcBandOwner, evaluateMsSetup } =
+            const {
+              resolveMcBandOwner,
+              evaluateMsSetup,
+              getDipBuyerMcBand,
+            } =
               require('./tradeProfiles') as typeof import('./tradeProfiles');
             if (mcN != null && mcN > 0) {
-              ownerPrimary = resolveMcBandOwner(mcN, ctx).primary;
+              const owner = resolveMcBandOwner(mcN, ctx);
+              ownerPrimary = owner.primary;
+              ownerOverflow = owner.overflow;
+              if (ownerPrimary === 'dip_buyer' && mcN < getDipBuyerMcBand().min) {
+                ownerPrimary = 'scalper';
+              }
             }
             const msSetup = evaluateMsSetup(ctx);
             if (msSetup.watchOk && !msSetup.buyOk) {
@@ -8097,44 +8166,35 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             return false;
           }
 
-          const discSkip = /scalper_discretionary_skipped/i.test(
-            String(scalperLane?.failReason || '')
-          );
-          if (discSkip && ownerPrimary === 'scalper') {
-            try {
-              const {
-                isMintOnActiveScalperWatch,
-                offerScalperWatchFromCandidate,
-              } = require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
-              if (!isMintOnActiveScalperWatch(signal.mint)) {
-                offerScalperWatchFromCandidate({
-                  mint: signal.mint,
-                  symbol: signal.symbol,
-                  name: signal.name,
-                  marketCapUsd: mcN ?? undefined,
-                  volumeH1Usd: ctx.volumeH1Usd ?? undefined,
-                  volumeM5Usd: ctx.volumeM5Usd ?? undefined,
-                  holderCount: ctx.holderCount ?? undefined,
-                  nearKeyFib: ctx.nearKeyFib === true,
-                  nearSupport: ctx.nearSupport === true,
-                  nearMultiTfSupport: ctx.nearMultiTfSupport === true,
-                  srConfluenceScore: ctx.srConfluenceScore ?? undefined,
-                  lastPriceSol: ctx.priceSol ?? undefined,
-                  supportPriceSol: ctx.supportPriceSol ?? undefined,
-                  resistancePriceSol: ctx.resistancePriceSol ?? undefined,
-                  preferredProfileId: 'scalper',
-                });
-              }
-            } catch {
-              /* optional */
-            }
-            const parkReason = 'owned_scalper_watch: waiting arm';
-            recordRejectedSignal(signal, parkReason);
-            console.log(
-              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-                `reason=smart-bot lane fight: ${parkReason}`
+          let inScalperBand = false;
+          try {
+            const { getScalperMcBand } =
+              require('./tradeProfiles') as typeof import('./tradeProfiles');
+            const band = getScalperMcBand();
+            inScalperBand =
+              mcN != null && mcN > 0 && mcN >= band.min && mcN <= band.max;
+          } catch {
+            inScalperBand =
+              mcN != null && mcN >= 150_000 && mcN <= 1_000_000;
+          }
+          const modeBOwner =
+            ownerPrimary === 'scalper' ||
+            (inScalperBand && ownerPrimary !== 'migration_sniper');
+          if (modeBOwner && inScalperBand) {
+            const modeB = tryParkModeBFromFight(
+              signal,
+              ctx,
+              mcN,
+              ownerOverflow
             );
-            return false;
+            if (modeB.ok) {
+              recordRejectedSignal(signal, modeB.reason);
+              console.log(
+                `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                  `reason=smart-bot lane fight: ${modeB.reason}`
+              );
+              return false;
+            }
           }
 
           const ownedPark = parkOwnedWatchFromFight(signal, ownerPrimary);
@@ -8152,6 +8212,18 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
               const { noteMcGapOrphan } =
                 require('./watchPipeline') as typeof import('./watchPipeline');
               noteMcGapOrphan(mcN, signal.mint, {
+                classifier: preferId,
+                rejects,
+              });
+            } catch {
+              /* optional */
+            }
+          }
+          if (inScalperBand) {
+            try {
+              const { noteNoneMcGap } =
+                require('./watchPipeline') as typeof import('./watchPipeline');
+              noteNoneMcGap(mcN, signal.mint, {
                 classifier: preferId,
                 rejects,
               });
@@ -8274,6 +8346,50 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         const why =
           govFails[0] || 'Entry Skill blocked all lane passers';
         if (/restricted support_dip_reclaim|gov_dip_disc_blocked/i.test(why)) {
+          const mcPark =
+            Number(
+              signal.metrics?.marketCapUsd ??
+                (signal as { sourceEntryMcUsd?: number }).sourceEntryMcUsd
+            ) || 0;
+          let dipMin = 1_000_000;
+          let scalperMax = 1_000_000;
+          try {
+            const { getDipBuyerMcBand, getScalperMcBand } =
+              require('./tradeProfiles') as typeof import('./tradeProfiles');
+            dipMin = getDipBuyerMcBand().min;
+            scalperMax = getScalperMcBand().max;
+          } catch {
+            /* catalog */
+          }
+          if (mcPark > 0 && mcPark < dipMin && mcPark <= scalperMax) {
+            const modeB = tryParkModeBFromFight(
+              signal,
+              {
+                volumeH1Usd: signal.metrics?.volumeH1Usd,
+                volumeM5Usd: signal.metrics?.volumeM5Usd,
+                holderCount: signal.metrics?.holderCountEstimate,
+                nearKeyFib: signal.nearKeyFib === true,
+                nearSupport: signal.nearSupport === true,
+                nearMultiTfSupport: signal.nearMultiTfSupport === true,
+                srConfluenceScore: signal.srConfluenceScore,
+                priceSol: signal.priceSol ?? signal.lastPriceSol,
+                supportPriceSol: signal.supportPriceSol,
+                resistancePriceSol: signal.resistancePriceSol,
+              },
+              mcPark,
+              'scalper'
+            );
+            const parked = modeB.ok
+              ? modeB.reason
+              : 'owned_scalper_watch: waiting arm';
+            recordRejectedSignal(signal, parked);
+            markLaneFightCascadeResult(signal.mint, false, parked);
+            console.log(
+              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                `reason=expectancy park: ${parked}`
+            );
+            return false;
+          }
           const parked =
             parkOwnedWatchFromFight(signal, 'dip_buyer') ||
             'owned_dip_watch: waiting arm';

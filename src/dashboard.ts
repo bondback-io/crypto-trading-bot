@@ -8560,7 +8560,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip Buyer setup watchlist</span>
-              <p class="setup-watch-sub mb-0" id="dip-watch-rules">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence 2. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0" id="dip-watch-rules">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M (Mode B owns below $1M). Min TA confluence 2. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
@@ -13758,7 +13758,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ? Math.round(Number(mins.dip_buyer))
             : 2;
           dipRules.textContent =
-            'Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence ' +
+            'Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M (Mode B owns below $1M). Min TA confluence ' +
             n +
             '. Unwatch cools 15m.';
         }
@@ -13793,6 +13793,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ? Math.round(conv * 1000) / 10 + '%'
           : '—';
         const orphanN = Number(wp.mc_gap_orphan_count) || 0;
+        const noneGapN = Number(wp.none_mc_gap_count) || 0;
         const orphanEx =
           wp.orphan_example_mc != null && Number(wp.orphan_example_mc) > 0
             ? ' e.g. $' + Math.round(Number(wp.orphan_example_mc)).toLocaleString()
@@ -13849,6 +13850,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           orphanN +
           orphanEx +
           (orphanMints ? ' [' + orphanMints + ']' : '') +
+          ' · MC gap none ' +
+          noneGapN +
           (topRej ? ' · reject ' + topRej : '') +
           (avgBits ? ' · score ' + avgBits : '') +
           ' · topQ ' +
@@ -17097,6 +17100,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           sum.textContent =
             'Orphans ' +
             (Number(d.mc_gap_orphan_count) || 0) +
+            ' · MC gap none ' +
+            (Number(d.none_mc_gap_count) || 0) +
             ' · tagged-not-buy ' +
             (Number(d.migration_tagged_but_not_setup_count) || 0) +
             ' · dip pattern armed ' +
@@ -17117,6 +17122,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             .join('<br>');
         };
         const examples = Array.isArray(d.mc_orphan_examples) ? d.mc_orphan_examples : [];
+        const gapEx = Array.isArray(d.none_mc_gap_examples) ? d.none_mc_gap_examples : [];
         const migEx = Array.isArray(d.migration_tagged_examples)
           ? d.migration_tagged_examples
           : [];
@@ -17133,7 +17139,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (holders.steady_compounder || '—') +
             ' · HWR ' +
             (holders.high_win_rate || '—') +
+            ' · Config ' +
+            (holders.global || '—') +
             '</p>' +
+            '<p class="mint mb-2">Catalog Steady 80 / HWR 150. Fake-holder velocity is a max (' +
+            (Number(d.fake_holder_velocity_max_15m) || 2000) +
+            '/15m), not a min floor.</p>' +
             '<p class="mb-1"><strong>MC fight none (last)</strong></p>' +
             (examples.length
               ? '<ul class="mb-2">' +
@@ -17168,6 +17179,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   .join('') +
                 '</ul>'
               : '<p class="mint mb-2">No fight-none examples yet.</p>') +
+            '<p class="mb-1"><strong>MC gap none $150k–Dip min (no Mode B row)</strong></p>' +
+            (gapEx.length
+              ? '<ul class="mb-2">' +
+                gapEx
+                  .slice(0, 6)
+                  .map(function (ex) {
+                    if (!ex || typeof ex !== 'object') return '';
+                    const rej = Array.isArray(ex.rejects)
+                      ? ex.rejects
+                          .slice(0, 4)
+                          .map(function (r) {
+                            return (
+                              escHtml(String(r.profileId || '')) +
+                              ':' +
+                              escHtml(String(r.reason || '').slice(0, 40))
+                            );
+                          })
+                          .join('; ')
+                      : '';
+                    return (
+                      '<li>' +
+                      escHtml(String(ex.mint || '')) +
+                      ' $' +
+                      Math.round(Number(ex.mc) || 0).toLocaleString() +
+                      (ex.classifier
+                        ? ' · ' + escHtml(String(ex.classifier))
+                        : '') +
+                      (rej ? ' — ' + rej : '') +
+                      '</li>'
+                    );
+                  })
+                  .join('') +
+                '</ul>'
+              : '<p class="mint mb-2">None this session.</p>') +
             '<p class="mb-1"><strong>Tagged Migration not buy</strong></p>' +
             (migEx.length
               ? '<ul class="mb-2">' +
