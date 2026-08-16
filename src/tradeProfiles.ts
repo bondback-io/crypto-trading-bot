@@ -2151,6 +2151,88 @@ export function remapOverMigrationSniperMax(
   return 'scalper';
 }
 
+/** True when MC sits inside the profile's resolved min/max (continuity floors). */
+export function profileInResolvedMcBand(
+  profileId: string | null | undefined,
+  mc: number
+): boolean {
+  const pid = String(profileId || '').trim();
+  const n = Number(mc);
+  if (!pid || !Number.isFinite(n) || n <= 0) return false;
+  try {
+    if (pid === 'scalper') {
+      const b = getScalperMcBand();
+      const min = resolveContinuousLaneMinMcUsd('scalper', b.min);
+      return n >= min && n <= b.max;
+    }
+    if (pid === 'dip_buyer') {
+      const b = getDipBuyerMcBand();
+      const min = resolveContinuousLaneMinMcUsd('dip_buyer', b.min);
+      return n >= min && n <= b.max;
+    }
+    if (pid === 'migration_sniper') {
+      return n <= getMigrationSniperMaxMcUsd();
+    }
+    const m = resolveTradeProfileDefinition(pid as TradeProfileId).match;
+    const min = Number(m.minMarketCapUsd);
+    const max = Number(m.maxMarketCapUsd);
+    if (Number.isFinite(min) && min > 0 && n < min) return false;
+    if (Number.isFinite(max) && max > 0 && n > max) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * If preferred is out of its resolved MC band, stamp the band owner.
+ * Overflow (e.g. MB) only when that lane is the stamped id and still in-band.
+ * Does not reopen Scalper discretionary or raise Scalper max.
+ */
+export function remapPreferredToMcBandOwner(
+  profileId: string | null | undefined,
+  marketCapUsd?: number | null,
+  ctx?: TradeProfileMatchContext
+): string {
+  const mc = Number(marketCapUsd);
+  const pid = remapOverMigrationSniperMax(profileId, marketCapUsd);
+  if (!Number.isFinite(mc) || mc <= 0) return pid;
+  if (pid && profileInResolvedMcBand(pid, mc)) return pid;
+  const owner = resolveMcBandOwner(mc, ctx);
+  if (
+    owner.overflow &&
+    pid === owner.overflow &&
+    profileInResolvedMcBand(owner.overflow, mc)
+  ) {
+    return owner.overflow;
+  }
+  if (owner.primary !== 'none') return owner.primary;
+  return pid;
+}
+
+export function mcBandOwnerWatchFamily(
+  owner: McBandOwnerId | string
+): 'dip' | 'trend' | 'steady' | 'hwr' | 'scalper' | 'grad' | null {
+  switch (String(owner || '')) {
+    case 'dip_buyer':
+      return 'dip';
+    case 'trend_rider':
+      return 'trend';
+    case 'steady_compounder':
+      return 'steady';
+    case 'high_win_rate':
+      return 'hwr';
+    case 'scalper':
+    case 'momentum_burst':
+    case 'reversal_scalper':
+      return 'scalper';
+    case 'migration_sniper':
+      return 'grad';
+    default:
+      return null;
+  }
+}
+
 /**
  * Exclusive Steady vs HWR watch routing (1.2.373).
  * Dump-reclaim in the Dip band stays Dip-only. Quality parks stamp one winner.

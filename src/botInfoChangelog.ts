@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.376',
+    title: 'Over-max Scalper stamps park Dip/Trend; skip tallies count unique parks',
+    sections: ['scanners', 'microbots', 'tradecraft'],
+    items: [
+      'Names above resolved Scalper max ($4M–$200M+ with a Scalper stamp) remap to the MC-band owner and park Dip/Trend/quality watch. Skip is owned_*_watch: waiting arm — not Scalper MC>max or rejected_by_all_mc_bands.',
+      'Classifier neighbors above Scalper max are Dip/Trend/Steady-HWR, not Scalper/MB/Reversal. Unarmed Dip while reclaim is restricted parks Dip watch instead of a dead conversion skip.',
+      'Diagnostics count park/watching skips once per mint. ms_setup_stage_low stays that key (no longer aliased to migration_not_setup on the skip card). Scalper max is unchanged.',
+    ],
+  },
+  {
     version: '1.2.375',
     title: 'Conversion force-fix: proof harness, Scalper-band park, MS watch vs buy',
     sections: ['scanners', 'microbots', 'tradecraft'],

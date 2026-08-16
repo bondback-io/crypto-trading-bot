@@ -579,18 +579,61 @@ export function classifySetup(
     : preferred;
   let preferredIds = preferred;
   if (msOverMax) {
-    const neighbors: HmcProfileId[] = [
+    let scalperMax = 1_000_000;
+    try {
+      const { getScalperMcBand } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      scalperMax = getScalperMcBand().max;
+    } catch {
+      /* catalog */
+    }
+    const aboveScalper = mcUsd != null && mcUsd > scalperMax;
+    let neighbors: HmcProfileId[] = [
       'scalper',
       'reversal_scalper',
       'momentum_burst',
     ];
-    const trendDna =
-      hint === 'trend_rider' || (chH1 != null && chH1 >= 4);
-    if (trendDna) neighbors.push('trend_rider');
+    if (aboveScalper && mcUsd != null) {
+      try {
+        const { resolveMcBandOwner } =
+          require('./tradeProfiles') as typeof import('./tradeProfiles');
+        const owner = resolveMcBandOwner(mcUsd);
+        neighbors = [owner.primary].filter(
+          (id) => id && id !== 'none' && id !== 'scalper'
+        );
+        if (owner.overflow && owner.overflow !== 'scalper') {
+          neighbors.push(owner.overflow);
+        }
+        if (!neighbors.includes('trend_rider')) neighbors.push('trend_rider');
+        if (
+          owner.primary === 'high_win_rate' &&
+          !neighbors.includes('steady_compounder')
+        ) {
+          neighbors.push('steady_compounder');
+        }
+        if (!neighbors.length) {
+          neighbors = ['dip_buyer', 'trend_rider', 'steady_compounder'];
+        }
+      } catch {
+        neighbors = ['dip_buyer', 'trend_rider', 'steady_compounder'];
+      }
+    } else {
+      const trendDna =
+        hint === 'trend_rider' || (chH1 != null && chH1 >= 4);
+      if (trendDna) neighbors.push('trend_rider');
+    }
     const stripMs = (ids: HmcProfileId[]) =>
       ids.filter((id) => id !== 'migration_sniper');
     preferredIds = stripMs(preferredIds);
     eligible = stripMs(eligible);
+    if (aboveScalper) {
+      preferredIds = preferredIds.filter(
+        (id) => id !== 'scalper' && id !== 'reversal_scalper' && id !== 'momentum_burst'
+      );
+      eligible = eligible.filter(
+        (id) => id !== 'scalper' && id !== 'reversal_scalper'
+      );
+    }
     if (preferredIds.length === 0) preferredIds = [...neighbors];
     for (const n of neighbors) {
       if (!eligible.includes(n)) eligible.push(n);

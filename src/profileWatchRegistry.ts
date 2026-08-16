@@ -8,7 +8,7 @@ import {
   getMinTaPlaybookConfluences,
   isProfileArmingEnabled,
   isProfileWatchEnabled,
-  remapOverMigrationSniperMax,
+  remapPreferredToMcBandOwner,
   resolveWatchEligibleProfileIds,
   WATCH_FAMILY_PROFILE_IDS,
   type WatchFamilyId,
@@ -687,7 +687,7 @@ export function prepareArmedWatchOpen(opts: {
   action?: 'keep_watching' | 'expire';
   reason?: string;
 } {
-  let pid = remapOverMigrationSniperMax(opts.profileId, opts.marketCapUsd);
+  let pid = remapPreferredToMcBandOwner(opts.profileId, opts.marketCapUsd);
   const status = String(opts.status || '').toLowerCase();
   if (status && status !== 'armed') {
     noteTriggerBlock(pid, 'trigger_not_armed');

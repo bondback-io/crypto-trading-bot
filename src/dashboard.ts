@@ -14908,7 +14908,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!el) return;
       try {
         const data = await fetchJSON('/api/tuning/status');
-        const counts = data.skipReasonCounts || [];
+        const counts = Array.isArray(data && data.skipReasonCounts)
+          ? data.skipReasonCounts
+          : [];
         if (!counts.length) {
           el.textContent = 'No skip tallies yet — wait for rejected signals.';
           return;
@@ -14916,19 +14918,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const top = counts.slice(0, 8);
         el.innerHTML = top
           .map(function (row) {
+            if (!row || typeof row !== 'object') return '';
             const reason = escHtml(String(row.reason || row.key || '—'));
             const n = row.count != null ? row.count : row.n;
+            const uniq = Number(row.uniqueMints);
+            const label =
+              Number.isFinite(uniq) && uniq > 0
+                ? String(uniq) + ' mints'
+                : escHtml(String(n ?? 0));
             return (
               '<div class="flex justify-between gap-2"><span>' +
               reason +
               '</span><strong>' +
-              escHtml(String(n ?? 0)) +
+              label +
               '</strong></div>'
             );
           })
           .join('');
       } catch (err) {
-        el.textContent = err.message || String(err);
+        try {
+          el.textContent =
+            'Skip diag: ' + ((err && err.message) || String(err));
+        } catch (_) {}
       }
     }
     window.refreshEntrySkipDiag = refreshEntrySkipDiag;
@@ -17049,6 +17060,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ? d.resolved_min_holders
           : {};
         if (body) {
+          try {
           body.innerHTML =
             '<p class="mint mb-2">Sources: ' +
             escHtml(srcBits || 'waiting for first poll') +
@@ -17117,6 +17129,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<div><strong>HWR blocks</strong><div class="mint">' +
             fmtMap(d.hwr_block_reasons) +
             '</div></div></div>';
+          } catch (_) {
+            try {
+              body.textContent = 'Conversion proof render failed';
+            } catch (_) {}
+          }
         }
         try {
           if (typeof window.paintMsSourceFunnel === 'function') {
@@ -17126,7 +17143,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (err) {
         if (sum) {
           sum.textContent =
-            'Conversion diagnostics unavailable: ' + (err.message || String(err));
+            'Conversion diagnostics unavailable: ' +
+            ((err && err.message) || String(err));
         }
         if (body) {
           body.innerHTML = '<p class="mint">Could not load conversion proof.</p>';
@@ -31471,7 +31489,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           grad;
       }
       try {
-        paintMsSourceFunnel(status);
+        if (typeof paintMsSourceFunnel === 'function') {
+          paintMsSourceFunnel(status);
+        } else if (typeof window.paintMsSourceFunnel === 'function') {
+          window.paintMsSourceFunnel(status);
+        }
       } catch (_) {}
       const statusEl = document.getElementById('scanner-status-tab');
       if (statusEl && status && status.regime) {

@@ -125,6 +125,25 @@ export function normalizeSkipReason(reason: string): string {
     .slice(0, 80);
 }
 
+/** Diagnostics keys: keep park/watching codes; soak aliases stay in normalizeSkipReason. */
+export function normalizeSkipDiagReason(reason: string): string {
+  const r = String(reason || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (!r) return 'unknown';
+  if (/^ms_setup_stage_low/i.test(r)) return 'ms_setup_stage_low';
+  if (/^ms_setup_tag_missing/i.test(r)) return 'ms_setup_tag_missing';
+  const owned = r.match(/^(owned_\w+_watch:\s*waiting arm)/i);
+  if (owned) return owned[1].replace(/\s+/g, ' ');
+  if (/^owned_\w+_watch/i.test(r)) return r.slice(0, 80);
+  return normalizeSkipReason(reason);
+}
+
+export function isParkWatchSkipReason(reason: string): boolean {
+  const r = String(reason || '');
+  return /owned_\w+_watch|ms_setup_stage_low|ms_setup_tag_missing/i.test(r);
+}
+
 export function markPnlPct(entryPriceSol: number, exitPriceSol: number): number | null {
   if (
     !(entryPriceSol > 0) ||

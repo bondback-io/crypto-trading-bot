@@ -10,7 +10,7 @@ import {
   PublicKey,
 } from '@solana/web3.js';
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
-import { normalizeSkipReason } from './soakMetrics';
+import { normalizeSkipDiagReason, isParkWatchSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   getConnection,
@@ -1291,6 +1291,47 @@ function maybeParkArmingOpen(
     };
   } catch {
     return { park: false, reason: 'park_eval_fail_open' };
+  }
+}
+
+function parkOwnedWatchFromFight(
+  signal: TradeSignal,
+  ownerPrimary: string
+): string | null {
+  try {
+    const { mcBandOwnerWatchFamily } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const family = mcBandOwnerWatchFamily(ownerPrimary);
+    if (
+      family !== 'dip' &&
+      family !== 'trend' &&
+      family !== 'steady' &&
+      family !== 'hwr'
+    ) {
+      return null;
+    }
+    const { parkSignalOnProfileWatch } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    parkSignalOnProfileWatch({
+      profileId: ownerPrimary,
+      mint: signal.mint,
+      symbol: signal.symbol,
+      name: signal.name,
+      marketCapUsd: signal.metrics?.marketCapUsd ?? signal.sourceEntryMcUsd,
+      volumeH1Usd: signal.metrics?.volumeH1Usd,
+      volumeM5Usd: signal.metrics?.volumeM5Usd,
+      holderCount: signal.metrics?.holderCountEstimate,
+      nearKeyFib: signal.nearKeyFib === true,
+      nearSupport: signal.nearSupport === true,
+      nearMultiTfSupport: signal.nearMultiTfSupport === true,
+      srConfluenceScore: signal.srConfluenceScore,
+      supportTfHits: signal.supportTfHits,
+      curveProgressPct: signal.bondingCurve?.progressPct ?? null,
+      dropFromPeakPct: signal.dropFromPeakPct,
+    });
+    return `owned_${family}_watch: waiting arm`;
+  } catch {
+    return null;
   }
 }
 
@@ -6631,29 +6672,45 @@ let lastFilterSkipReason: string | null = null;
 
 /** Rolling skip-reason tallies for soak / module A/B tuning. */
 const skipReasonCounts = new Map<string, number>();
+const skipReasonMints = new Map<string, Set<string>>();
 const MAX_SKIP_REASON_KEYS = 40;
 
-function bumpSkipReason(reason: string): void {
-  const key = normalizeSkipReason(reason);
+function bumpSkipReason(reason: string, mint?: string | null): void {
+  const key = normalizeSkipDiagReason(reason);
+  if (isParkWatchSkipReason(reason) && mint) {
+    const seen = skipReasonMints.get(key) || new Set<string>();
+    if (seen.has(mint)) return;
+    seen.add(mint);
+    skipReasonMints.set(key, seen);
+  }
   skipReasonCounts.set(key, (skipReasonCounts.get(key) || 0) + 1);
   if (skipReasonCounts.size > MAX_SKIP_REASON_KEYS) {
-    // Drop lowest-count keys when oversized
     const ranked = [...skipReasonCounts.entries()].sort((a, b) => a[1] - b[1]);
     for (let i = 0; i < ranked.length - MAX_SKIP_REASON_KEYS + 5; i++) {
       skipReasonCounts.delete(ranked[i][0]);
+      skipReasonMints.delete(ranked[i][0]);
     }
   }
 }
 
-export function getSkipReasonCounts(): Array<{ reason: string; count: number }> {
+export function getSkipReasonCounts(): Array<{
+  reason: string;
+  count: number;
+  uniqueMints?: number;
+}> {
   return [...skipReasonCounts.entries()]
-    .map(([reason, count]) => ({ reason, count }))
+    .map(([reason, count]) => ({
+      reason,
+      count,
+      uniqueMints: skipReasonMints.get(reason)?.size,
+    }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 15);
 }
 
 export function resetSkipReasonCounts(): void {
   skipReasonCounts.clear();
+  skipReasonMints.clear();
   lastFilterSkipReason = null;
 }
 
@@ -6663,7 +6720,7 @@ function recordRejectedSignal(signal: TradeSignal, reason: string): void {
   lastFilterSkipReason = reason;
   // Cascade retries must not annotate/bump until the final passer fails
   if (suppressRejectSideEffects) return;
-  bumpSkipReason(reason);
+  bumpSkipReason(reason, signal.mint);
   logger.info('Trade', 'FILTER_SKIP', {
     mint: signal.mint.slice(0, 12),
     symbol: signal.symbol,
@@ -7601,13 +7658,13 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     if (setupWatchPrefer && signal.candidateTradeProfileId) {
       let prefId = signal.candidateTradeProfileId;
       try {
-        const { remapOverMigrationSniperMax } =
+        const { remapPreferredToMcBandOwner } =
           require('./tradeProfiles') as typeof import('./tradeProfiles');
         const liveMc =
           signal.metrics?.marketCapUsd ??
           (signal as { sourceEntryMcUsd?: number }).sourceEntryMcUsd ??
           null;
-        const remapped = remapOverMigrationSniperMax(prefId, liveMc);
+        const remapped = remapPreferredToMcBandOwner(prefId, liveMc, ctx);
         if (remapped && remapped !== prefId) {
           prefId = remapped;
           signal.candidateTradeProfileId = remapped;
@@ -8080,6 +8137,16 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             return false;
           }
 
+          const ownedPark = parkOwnedWatchFromFight(signal, ownerPrimary);
+          if (ownedPark) {
+            recordRejectedSignal(signal, ownedPark);
+            console.log(
+              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                `reason=smart-bot lane fight: ${ownedPark}`
+            );
+            return false;
+          }
+
           if (mcOnlyFails.length >= 3 && ownerPrimary === 'none') {
             try {
               const { noteMcGapOrphan } =
@@ -8094,6 +8161,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           }
           let reason: string;
           if (
+            ownerPrimary === 'none' &&
             intended != null &&
             /MC \$\d+ > max/i.test(String(intended.failReason || '')) &&
             bandMisses.length >= Math.min(3, lanes.length)
@@ -8205,6 +8273,18 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       if (!admitted.length) {
         const why =
           govFails[0] || 'Entry Skill blocked all lane passers';
+        if (/restricted support_dip_reclaim|gov_dip_disc_blocked/i.test(why)) {
+          const parked =
+            parkOwnedWatchFromFight(signal, 'dip_buyer') ||
+            'owned_dip_watch: waiting arm';
+          recordRejectedSignal(signal, parked);
+          markLaneFightCascadeResult(signal.mint, false, parked);
+          console.log(
+            `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+              `reason=expectancy park: ${parked}`
+          );
+          return false;
+        }
         recordRejectedSignal(signal, why);
         markLaneFightCascadeResult(signal.mint, false, why);
         console.log(
@@ -9711,7 +9791,11 @@ export function getMonitorStatus(): {
   tradeRate: ReturnType<typeof getTradeRateStatus>;
   selectiveEnabled: boolean;
   recentSizedSignals: number;
-  skipReasonCounts: Array<{ reason: string; count: number }>;
+  skipReasonCounts: Array<{
+    reason: string;
+    count: number;
+    uniqueMints?: number;
+  }>;
   lastFilterSkipReason: string | null;
   pendingBuyQueueDepth: number;
   lastPollAttempted: number;

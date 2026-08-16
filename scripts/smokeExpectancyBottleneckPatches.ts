@@ -9,6 +9,7 @@ import {
   getMcHandoffContinuity,
   getTradeProfileDefinition,
   isSwingLaneMustKnowMc,
+  remapPreferredToMcBandOwner,
   resolveMcBandOwner,
   resolveTop10SoftAllow,
   resolveTradeProfileDefinition,
@@ -25,6 +26,7 @@ import { evaluateMigrationEventExit } from '../src/shortTermStrategies';
 import { resolveExitPolicy } from '../src/profileTradeIntelligence';
 import { shouldThrottleMigrationAdmit } from '../src/profileAttention';
 import { isScannerSetupWatchHandoff } from '../src/marketScanner';
+import { normalizeSkipDiagReason, normalizeSkipReason } from '../src/soakMetrics';
 import {
   considerTrendWatchSetup,
   getTrendFunnelCounters,
@@ -648,6 +650,41 @@ check(
   'HWR age_unknown without substitutes → age_unknown_fallback deny',
   hwrDeny.allow === false && hwrDeny.rejectKey === 'age_unknown_fallback',
   hwrDeny.detail
+);
+
+const owner45 = resolveMcBandOwner(4_500_000);
+const remap45 = remapPreferredToMcBandOwner('scalper', 4_500_000);
+check(
+  '$4.5M + preferred scalper remaps off Scalper to Dip owner',
+  owner45.primary === 'dip_buyer' && remap45 === 'dip_buyer',
+  `owner=${owner45.primary} remap=${remap45}`
+);
+check(
+  '$4.5M remapped id is not scalper',
+  remap45 !== 'scalper'
+);
+
+const owner234 = resolveMcBandOwner(234_000_000);
+const remap234 = remapPreferredToMcBandOwner('scalper', 234_000_000);
+check(
+  '$234M + specialty scalper remaps to band owner (not rejected_by_all_mc_bands)',
+  owner234.primary !== 'scalper' &&
+    owner234.primary !== 'none' &&
+    remap234 !== 'scalper' &&
+    remap234 === owner234.primary,
+  `owner=${owner234.primary} remap=${remap234}`
+);
+
+check(
+  'ms_setup_stage_low skip-diag key stays itself',
+  normalizeSkipDiagReason(
+    'ms_setup_stage_low: tagged graduating — watching, no live curve yet'
+  ) === 'ms_setup_stage_low'
+);
+check(
+  'soak still aliases ms_setup_stage_low for old buckets',
+  normalizeSkipReason('ms_setup_stage_low: tagged graduating') ===
+    'migration_not_setup'
 );
 
 if (failed) {
