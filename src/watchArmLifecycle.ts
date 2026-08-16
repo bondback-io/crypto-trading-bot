@@ -29,6 +29,8 @@ export type ArmLifecycleRow = {
   armClockPausedAt?: number | null;
   armClockPausedMs?: number;
   preferredProfileId?: string | null;
+  lastArmEvalAt?: number | null;
+  fightDipDna?: boolean;
 };
 
 export function isWatchersIsolate(): boolean {
@@ -51,9 +53,9 @@ export function isTradingEntryPaused(): boolean {
   }
 }
 
-/** Pause arm/trigger timeout clocks during Watchers isolate or Trading entry pause. */
+/** Armed trigger clocks pause only while new entries are containment-paused. */
 export function shouldPauseArmClocks(): boolean {
-  return isWatchersIsolate() || isTradingEntryPaused();
+  return isTradingEntryPaused();
 }
 
 export function watchHasLevelEvidence(w: ArmLifecycleRow): boolean {
@@ -90,9 +92,12 @@ function slugHold(raw: string): string {
   const s = String(raw || '')
     .trim()
     .replace(/^waiting_arm:\s*/i, '')
-    .slice(0, 48);
+    .slice(0, 64);
   if (/skipped_low_score/i.test(s)) return 'skipped_low_score';
-  if (/need \d+\s*TA|confluence/i.test(s)) return 'confluence_0';
+  const have = s.match(/have\s+(\d+)/i);
+  if (/need \d+\s*TA|confluence/i.test(s)) {
+    return have ? `confluence_${have[1]}` : 'confluence';
+  }
   if (/waiting_open_containment|containment_pause/i.test(s)) {
     return 'containment_pause';
   }
@@ -104,14 +109,16 @@ function slugHold(raw: string): string {
 }
 
 export function inferWaitingArmHoldReason(w: ArmLifecycleRow): string {
-  if (isWatchersIsolate()) return 'watchers_isolate';
   if (isTradingEntryPaused() && String(w.status || '') === 'armed') {
     return 'containment_pause';
   }
   const lr = String(w.lastReason || '');
   if (/skipped_low_score/i.test(lr)) return 'skipped_low_score';
   if (/waiting_open_containment/i.test(lr)) return 'containment_pause';
-  if (/need \d+\s*TA|confluence/i.test(lr)) return 'confluence_0';
+  const have = lr.match(/have\s+(\d+)/i);
+  if (/need \d+\s*TA|confluence/i.test(lr)) {
+    return have ? `confluence_${have[1]}` : 'confluence';
+  }
   if (String(w.status || '') === 'watching' && !watchHasLevelEvidence(w)) {
     return 'not_near_level';
   }
@@ -129,6 +136,12 @@ export function stampWatchingHoldReason(w: ArmLifecycleRow): void {
   w.lastReason = 'waiting_arm: ' + inferWaitingArmHoldReason(w);
 }
 
+export function stampCheapArmEval(w: ArmLifecycleRow, now = Date.now()): void {
+  w.lastArmEvalAt = now;
+  stampWatchVolumeOk(w);
+  if (String(w.status || '') === 'watching') stampWatchingHoldReason(w);
+}
+
 export function resetArmClockOnArm(w: ArmLifecycleRow): void {
   w.armClockPausedAt = null;
   w.armClockPausedMs = 0;
@@ -138,7 +151,8 @@ export function applyArmLifecycleTimeout(
   w: ArmLifecycleRow,
   now: number
 ): 'arm_timeout' | 'trigger_timeout' | null {
-  if (shouldPauseArmClocks()) {
+  const status = String(w.status || '');
+  if (status === 'armed' && isTradingEntryPaused()) {
     if (w.armClockPausedAt == null) w.armClockPausedAt = now;
     return null;
   }
@@ -147,10 +161,9 @@ export function applyArmLifecycleTimeout(
     w.armClockPausedAt = null;
   }
   const paused = Number(w.armClockPausedMs) || 0;
-  const status = String(w.status || '');
   if (status === 'watching') {
     const t0 = Number(w.createdAt) || now;
-    if (now - t0 - paused >= WAITING_ARM_TIMEOUT_MS) return 'arm_timeout';
+    if (now - t0 >= WAITING_ARM_TIMEOUT_MS) return 'arm_timeout';
   }
   if (status === 'armed') {
     const t0 = Number(w.armedAt) || Number(w.createdAt) || now;
@@ -176,4 +189,19 @@ export function recomputeNearSupportFromPrice(w: {
   if (!(px > 0) || !(s > 0)) return;
   const d = (px - s) / s;
   if (d >= -0.02 && d <= 0.035) w.nearSupport = true;
+}
+
+export function hasDipFightDna(
+  reasons?: string[] | string | null,
+  flags?: { nearKeyFib?: boolean; nearSupport?: boolean; nearMultiTfSupport?: boolean }
+): boolean {
+  const bits = Array.isArray(reasons)
+    ? reasons.join(' ')
+    : String(reasons || '');
+  if (/support_dip_reclaim/i.test(bits)) return true;
+  return (
+    flags?.nearKeyFib === true ||
+    flags?.nearSupport === true ||
+    flags?.nearMultiTfSupport === true
+  );
 }

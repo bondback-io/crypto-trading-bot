@@ -120,6 +120,8 @@ export interface ConversionDiagnosticsSnapshot {
 export interface WatchPipelineSnapshot {
   scanner_candidates_per_min: number;
   watch_insert_attempts: number;
+  watch_insert_ok: number;
+  watch_insert_ok_last_15m: number;
   watch_insert_rejected_by_reason: Record<string, number>;
   watch_active_count_by_profile: Record<string, number>;
   arm_count_by_profile: Record<string, number>;
@@ -154,6 +156,15 @@ export interface WatchPipelineSnapshot {
   conversion_by_source: Record<string, ConversionRateRow>;
   conversion_by_profile: Record<string, ConversionRateRow>;
   conversion_diagnostics?: ConversionDiagnosticsSnapshot;
+  arm_lifecycle?: Record<string, import('./profileWatchRegistry').WatchArmLifecycleCounts>;
+  waiting_arm_stuck?: Array<{
+    mint: string;
+    symbol?: string;
+    profileId?: string;
+    ageMs: number;
+    hold: string;
+    lastArmEvalAt: number | null;
+  }>;
 }
 
 const WINDOW_MS = 60_000;
@@ -475,6 +486,24 @@ export function noteScannerCandidate(n = 1): void {
 
 export function noteWatchInsertAttempt(n = 1): void {
   insertAttempts += Math.max(1, Math.floor(n));
+}
+
+const INSERT_OK_WINDOW_MS = 15 * 60_000;
+const insertOkAt: number[] = [];
+let insertOkCount = 0;
+
+export function noteWatchInsertOk(info?: {
+  mint?: string;
+  symbol?: string;
+  profile?: string;
+}): void {
+  insertOkCount += 1;
+  insertOkAt.push(Date.now());
+  const now = Date.now();
+  while (insertOkAt.length && now - insertOkAt[0] > INSERT_OK_WINDOW_MS) {
+    insertOkAt.shift();
+  }
+  void info;
 }
 
 export function noteWatchInsertReject(reason: string, n = 1): void {
@@ -924,6 +953,10 @@ export function getWatchPipelineSnapshot(opts?: {
   return {
     scanner_candidates_per_min: candidateAt.length,
     watch_insert_attempts: insertAttempts,
+    watch_insert_ok: insertOkCount,
+    watch_insert_ok_last_15m: insertOkAt.filter(
+      (t) => now - t <= INSERT_OK_WINDOW_MS
+    ).length,
     watch_insert_rejected_by_reason: { ...rejectedByReason },
     watch_active_count_by_profile: { ...(opts?.activeByProfile || {}) },
     arm_count_by_profile: { ...(opts?.armedByProfile || {}) },
@@ -1002,5 +1035,49 @@ export function getWatchPipelineSnapshot(opts?: {
     conversion_by_source,
     conversion_by_profile,
     conversion_diagnostics: getConversionDiagnostics(),
+    arm_lifecycle: (() => {
+      try {
+        const { getWatchArmLifecycleSnapshot } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        return getWatchArmLifecycleSnapshot();
+      } catch {
+        return {};
+      }
+    })(),
+    waiting_arm_stuck: (() => {
+      try {
+        const { getProfileWatchInventory } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        const { inferWaitingArmHoldReason } =
+          require('./watchArmLifecycle') as typeof import('./watchArmLifecycle');
+        const inv = getProfileWatchInventory();
+        const out: Array<{
+          mint: string;
+          symbol?: string;
+          profileId?: string;
+          ageMs: number;
+          hold: string;
+          lastArmEvalAt: number | null;
+        }> = [];
+        for (const [pid, bucket] of Object.entries(inv)) {
+          for (const e of bucket?.entries || []) {
+            if (String(e.status || '') !== 'watching') continue;
+            const created = Number((e as { createdAt?: number }).createdAt) || now;
+            out.push({
+              mint: String(e.mint || ''),
+              symbol: e.symbol,
+              profileId: pid,
+              ageMs: Math.max(0, now - created),
+              hold: inferWaitingArmHoldReason(e),
+              lastArmEvalAt:
+                Number((e as { lastArmEvalAt?: number }).lastArmEvalAt) || null,
+            });
+          }
+        }
+        return out.slice(0, 24);
+      } catch {
+        return [];
+      }
+    })(),
   };
 }

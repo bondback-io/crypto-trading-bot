@@ -44,6 +44,8 @@ export interface ProfileWatchRow {
   preferredProfileId?: string | null;
   eligibleProfileIds: string[];
   armedAt?: number | null;
+  createdAt?: number;
+  lastArmEvalAt?: number | null;
   expiresAt?: number;
   lastReason?: string;
   confluenceCount?: number | null;
@@ -433,6 +435,11 @@ function rowFromFamily(
       raw.preferredProfileId != null ? String(raw.preferredProfileId) : null,
     eligibleProfileIds: eligible,
     armedAt: (raw.armedAt as number | null | undefined) ?? null,
+    createdAt: Number(raw.createdAt) || undefined,
+    lastArmEvalAt:
+      raw.lastArmEvalAt != null && Number.isFinite(Number(raw.lastArmEvalAt))
+        ? Number(raw.lastArmEvalAt)
+        : undefined,
     expiresAt: Number(raw.expiresAt) || undefined,
     lastReason: raw.lastReason != null ? String(raw.lastReason) : undefined,
     confluenceCount:
@@ -1132,6 +1139,8 @@ export function parkSignalOnProfileWatch(opts: {
   fib05PriceSol?: number | null;
   fib618PriceSol?: number | null;
   volumeState?: string | null;
+  priceChangeH1Pct?: number | null;
+  scannerReasons?: string[] | string | null;
 }): boolean {
   const pid = String(opts.profileId || '').trim();
   const mint = String(opts.mint || '').trim();
@@ -1175,12 +1184,14 @@ export function parkSignalOnProfileWatch(opts: {
         nearKeyFib: opts.nearKeyFib,
         nearSupport: opts.nearSupport,
         dropFromPeakPct: opts.dropFromPeakPct,
+        priceChangeH1Pct: opts.priceChangeH1Pct ?? undefined,
         preferredProfileId: pid,
         lastPriceSol: opts.lastPriceSol ?? undefined,
         supportPriceSol: opts.supportPriceSol ?? undefined,
         fib05PriceSol: opts.fib05PriceSol ?? undefined,
         fib618PriceSol: opts.fib618PriceSol ?? undefined,
         specialtyFeed,
+        scannerReasons: opts.scannerReasons,
       });
       if (!ok) {
         try {
@@ -1251,4 +1262,41 @@ export function parkSignalOnProfileWatch(opts: {
     return false;
   }
   return false;
+}
+
+/** Cheap proximity / vol-ok / hold-reason refresh. Does not expire or disarm. */
+export function reevaluateWatchArmsCheap(): {
+  ok: true;
+  rows: number;
+} {
+  let rows = 0;
+  try {
+    const { reevaluateDipWatchArmsCheap } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    rows += reevaluateDipWatchArmsCheap();
+  } catch {
+    /* */
+  }
+  try {
+    const { reevaluateScalperWatchArmsCheap } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    rows += reevaluateScalperWatchArmsCheap();
+  } catch {
+    /* */
+  }
+  try {
+    const { reevaluateTrendWatchArmsCheap } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    rows += reevaluateTrendWatchArmsCheap();
+  } catch {
+    /* */
+  }
+  try {
+    const { reevaluateGradWatchArmsCheap } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    rows += reevaluateGradWatchArmsCheap();
+  } catch {
+    /* */
+  }
+  return { ok: true, rows };
 }

@@ -40,8 +40,8 @@ import {
 import {
   applyArmLifecycleTimeout,
   resetArmClockOnArm,
+  stampCheapArmEval,
   stampWatchVolumeOk,
-  stampWatchingHoldReason,
 } from './watchArmLifecycle';
 
 export function coerceTokenLabel(raw: unknown, fallback: string): string {
@@ -849,7 +849,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
     }
 
     if (progress == null || !Number.isFinite(progress)) {
-      if (w.status === 'watching') stampWatchingHoldReason(w);
+      if (w.status === 'watching') stampCheapArmEval(w, now);
       continue;
     }
 
@@ -963,7 +963,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
       }
     }
 
-    if (w.status === 'watching') stampWatchingHoldReason(w);
+    if (w.status === 'watching') stampCheapArmEval(w, now);
 
     // Fire: ≥ fireMin while still on curve (no upper-band miss before complete)
     const inFire = progress >= fMin;
@@ -1091,6 +1091,18 @@ export async function tickMigrationGradWatches(): Promise<number> {
   return handed;
 }
 
+/** Cheap arm eval only — no TTL/stagnant expire, no clock reset. */
+export function reevaluateGradWatchArmsCheap(): number {
+  const now = Date.now();
+  let n = 0;
+  for (const w of watches.values()) {
+    if (w.status !== 'watching' && w.status !== 'armed') continue;
+    stampCheapArmEval(w, now);
+    n += 1;
+  }
+  return n;
+}
+
 export function stopFastPoll(): void {
   if (pollTimer) {
     clearInterval(pollTimer);
@@ -1140,6 +1152,15 @@ export function unwatchMigrationGrad(mint: string): {
     `[grad-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
   );
   return { ok: true, cooldownMs: UNWATCH_COOLDOWN_MS };
+}
+
+/** Active counts only — no entry serialization (settings/status payloads). */
+export function getMigrationGradWatchCounts(): { active: number } {
+  let active = 0;
+  for (const e of watches.values()) {
+    if (e.status === 'watching' || e.status === 'armed') active += 1;
+  }
+  return { active };
 }
 
 export function getMigrationGradWatchStatus(limit = 20): {

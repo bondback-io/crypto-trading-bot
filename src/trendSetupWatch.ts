@@ -29,8 +29,8 @@ import {
   applyArmLifecycleTimeout,
   recomputeNearSupportFromPrice,
   resetArmClockOnArm,
+  stampCheapArmEval,
   stampWatchVolumeOk,
-  stampWatchingHoldReason,
 } from './watchArmLifecycle';
 
 export type TrendWatchStatus =
@@ -846,7 +846,7 @@ export async function tickTrendSetupWatches(opts?: {
       }
     }
 
-    if (w.status === 'watching') stampWatchingHoldReason(w);
+    if (w.status === 'watching') stampCheapArmEval(w, now);
 
     if (w.status === 'armed') {
       let reclaim = false;
@@ -939,6 +939,19 @@ export async function tickTrendSetupWatches(opts?: {
     }
   }
   return handed;
+}
+
+/** Cheap arm eval only — no TTL/stagnant expire, no clock reset. */
+export function reevaluateTrendWatchArmsCheap(): number {
+  const now = Date.now();
+  let n = 0;
+  for (const w of watches.values()) {
+    if (w.status !== 'watching' && w.status !== 'armed') continue;
+    recomputeNearSupportFromPrice(w);
+    stampCheapArmEval(w, now);
+    n += 1;
+  }
+  return n;
 }
 
 export function getTrendSetupWatchStatus(limit = 16): {

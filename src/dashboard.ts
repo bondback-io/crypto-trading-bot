@@ -8556,6 +8556,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="section-title !text-sm mb-0">Watchlist <span class="tip" tabindex="0" data-tip="Setup watches, market scanner / AlphaScan, and activity feeds — split into tabs so the page stays scannable. Readiness strip above stays observe-only."></span></div>
             <p class="text-xs text-slate-400 mb-0">Setups are the armed watch inventory. Scanner configures the live universe. Activity shows Pump / signals / re-entry.</p>
           </div>
+          <div class="flex flex-wrap gap-2 items-center" style="flex-shrink:0">
+            <button type="button" class="btn btn-secondary text-xs" id="btn-watch-refresh-all" onclick="refreshSetupWatches(true)">Refresh all watchlists</button>
+            <button type="button" class="btn btn-secondary text-xs" id="btn-watch-reeval-arms" onclick="reevaluateWatchArmsNow()" title="Cheap proximity / hold-reason refresh. Does not expire rows or cancel opens.">Re-evaluate arms now</button>
+            <span class="mint text-xs" id="watch-last-updated" style="color:#94a3b8">Updated —</span>
+          </div>
         </div>
         <div class="watchlist-subtabs closed-filter" role="tablist" aria-label="Watchlist sections">
           <button type="button" role="tab" class="closed-filter-btn is-active" id="watchlist-tab-setups" data-watchlist-tab="setups" aria-selected="true" aria-controls="watchlist-panel-setups" onclick="setWatchlistTab('setups')">Setups</button>
@@ -8587,6 +8592,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p class="setup-watch-sub mb-0" id="dip-watch-rules">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M (Mode B owns below $1M). Min TA confluence 2. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="dip-watch-list" class="setup-watch-list text-slate-400">No active dip setups</div>
@@ -8601,6 +8607,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p class="setup-watch-sub mb-0" id="steady-watch-rules">Own list + quality-structure playbook. MC $50k–$150M. May overlap Dip’s $1M–$500M band. Watch → arm → trigger. Unwatch cools 15m.</p>
               <p id="steady-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="steady-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="steady-watch-list" class="setup-watch-list text-slate-400">No active Steady setups</div>
@@ -8615,6 +8622,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p class="setup-watch-sub mb-0" id="hwr-watch-rules">Own list + HWR quality playbook. MC $500k–$500M. May overlap Dip’s $1M–$500M band. Watch → arm → trigger. Unwatch cools 15m.</p>
               <p id="hwr-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="hwr-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="hwr-watch-list" class="setup-watch-list text-slate-400">No active HWR setups</div>
@@ -8630,6 +8638,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p id="scalper-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
               <p id="setup-watch-diag-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Armed — · open rate —</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="scalper-watch-list" class="setup-watch-list text-slate-400">No active scalper-family setups</div>
@@ -8644,6 +8653,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p class="setup-watch-sub mb-0" id="momentum-watch-rules">Mode B family tokens eligible for MB. MC ≤$400k. Faster triggers, tighter invalidation. Unwatch cools 15m.</p>
               <p id="momentum-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="momentum-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="momentum-watch-list" class="setup-watch-list text-slate-400">No active MB setups</div>
@@ -8658,6 +8668,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p class="setup-watch-sub mb-0" id="reversal-watch-rules">Mode B / microcap tokens eligible for Reversal. MC ≤$150k. Unwatch cools 15m.</p>
               <p id="reversal-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="reversal-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="reversal-watch-list" class="setup-watch-list text-slate-400">No active Reversal setups</div>
@@ -8672,6 +8683,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p class="setup-watch-sub mb-0" id="trend-watch-rules">Watch → arm on pullback/support or continuation · fire on reclaim/hold + live tape not collapsed. MC ≥$75k. Soft prefer ≥$5–10M. Unwatch cools 15m.</p>
               <p id="trend-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="trend-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="trend-watch-list" class="setup-watch-list text-slate-400">No active Trend Rider setups</div>
@@ -8686,6 +8698,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <p class="setup-watch-sub mb-0" id="grad-watch-rules">Watch ~80% · quality arm · reclaim/hold · min 1 TA confluence at trigger. Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if &lt;$8k for 5m). Unwatch cools 15m.</p>
               <p id="grad-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
+            <button type="button" class="btn btn-secondary text-xs watch-refresh-btn" onclick="refreshSetupWatches(true)">Refresh</button>
             <span id="grad-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="mig-sniper-funnel" class="mint text-[11px] text-slate-400 mb-1">MS funnel: —</div>
@@ -13972,6 +13985,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         el.textContent =
           'Pipeline: inserts ' +
           (wp.watch_insert_attempts || 0) +
+          ' ok ' +
+          (wp.watch_insert_ok_last_15m != null
+            ? wp.watch_insert_ok_last_15m
+            : wp.watch_insert_ok || 0) +
+          '/15m' +
           ' · conv ' +
           convTxt +
           ' · orphan MC ' +
@@ -14048,7 +14066,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               .join(' ');
             return bits ? ' · src in/watch/arm ' + bits : '';
           })() +
-          (srcConvBits ? ' · src→watch ' + srcConvBits : '');
+          (srcConvBits ? ' · src→watch ' + srcConvBits : '') +
+          (function () {
+            const stuck = Array.isArray(wp.waiting_arm_stuck)
+              ? wp.waiting_arm_stuck
+              : [];
+            if (!stuck.length) return '';
+            const s0 = stuck[0] || {};
+            const ageM = Math.round((Number(s0.ageMs) || 0) / 60000);
+            const evalAgo =
+              s0.lastArmEvalAt != null
+                ? Math.round((Date.now() - Number(s0.lastArmEvalAt)) / 1000) + 's ago'
+                : 'never';
+            return (
+              ' · waiting_arm ' +
+              stuck.length +
+              ' e.g. ' +
+              (s0.symbol || String(s0.mint || '').slice(0, 6)) +
+              ' ' +
+              ageM +
+              'm ' +
+              (s0.hold || '') +
+              ' eval ' +
+              evalAgo
+            );
+          })();
       })();
       } catch (e) {
         const strip = document.getElementById('watch-pipeline-strip');
@@ -15075,15 +15117,36 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.renderSetupWatchLists = renderSetupWatchLists;
 
-    async function refreshSetupWatches() {
+    async function refreshSetupWatches(force) {
+      const strip = document.getElementById('watch-pipeline-strip');
+      const prevStrip = strip ? strip.textContent : '';
+      const btns = document.querySelectorAll('#btn-watch-refresh-all, .watch-refresh-btn, #btn-watch-reeval-arms');
       try {
-        if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
+        if (!force && window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
+        btns.forEach(function (b) { b.disabled = true; });
+        if (strip && force) strip.textContent = 'Refreshing…';
         const data = await fetchJSON('/api/setup-watches');
         if (data) {
           window._lastSetupWatches = data;
+          window._setupWatchesFetchedAt = Date.now();
           renderSetupWatchLists(data);
+          const stamp = document.getElementById('watch-last-updated');
+          if (stamp) {
+            stamp.textContent = 'Updated ' + new Date().toLocaleTimeString();
+          }
+        } else if (strip && prevStrip) {
+          strip.textContent = prevStrip;
         }
-      } catch (_) {}
+      } catch (err) {
+        if (strip && prevStrip) strip.textContent = prevStrip;
+        else if (window._lastSetupWatches) renderSetupWatchLists(window._lastSetupWatches);
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Watchlist refresh failed: ' + msg, 'error');
+        const stamp = document.getElementById('watch-last-updated');
+        if (stamp) stamp.textContent = 'Refresh failed';
+      } finally {
+        btns.forEach(function (b) { b.disabled = false; });
+      }
       const skipsPanel = document.querySelector('[data-watch-setup-panel="skips"]');
       if (
         typeof refreshEntrySkipDiag === 'function' &&
@@ -15097,6 +15160,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.refreshSetupWatches = refreshSetupWatches;
+
+    async function reevaluateWatchArmsNow() {
+      const btn = document.getElementById('btn-watch-reeval-arms');
+      try {
+        if (btn) btn.disabled = true;
+        await fetchJSON('/api/setup-watches/reevaluate', { method: 'POST' });
+        await refreshSetupWatches(true);
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') {
+          showToast('Re-evaluate arms failed: ' + msg, 'error');
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+    window.reevaluateWatchArmsNow = reevaluateWatchArmsNow;
 
     async function refreshEntrySkipDiag() {
       const el = document.getElementById('entry-skip-diag');
@@ -15248,7 +15328,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (typeof populateSptProfileSelect === 'function') {
         try { populateSptProfileSelect(); } catch (_) {}
       }
-      renderSetupWatchLists(tp);
+      const lastWatches = window._lastSetupWatches || {};
+      const hasWatchLists =
+        (tp.byProfile && tp.byProfile.inventory) ||
+        (tp.dipWatch && Array.isArray(tp.dipWatch.entries) && tp.dipWatch.entries.length) ||
+        (tp.scalperWatch && Array.isArray(tp.scalperWatch.entries) && tp.scalperWatch.entries.length);
+      renderSetupWatchLists(
+        hasWatchLists
+          ? tp
+          : Object.assign({}, lastWatches, tp, {
+              dipWatch: lastWatches.dipWatch || tp.dipWatch,
+              gradWatch: lastWatches.gradWatch || tp.gradWatch,
+              scalperWatch: lastWatches.scalperWatch || tp.scalperWatch,
+              trendWatch: lastWatches.trendWatch || tp.trendWatch,
+              byProfile: lastWatches.byProfile || tp.byProfile,
+              diagnostics: lastWatches.diagnostics || tp.diagnostics,
+              watchPipeline: lastWatches.watchPipeline || tp.watchPipeline,
+              watchReadiness: tp.watchReadiness || lastWatches.watchReadiness,
+              effectiveBand: tp.effectiveBand || lastWatches.effectiveBand,
+              minTaPlaybookConfluences:
+                tp.minTaPlaybookConfluences || lastWatches.minTaPlaybookConfluences,
+            })
+      );
       if (master) master.checked = tp.enabled !== false;
       if (smartBot) smartBot.checked = tp.smartBotProfiles === true;
       if (statusEl) {
@@ -22383,6 +22484,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
     });
 
+    function showToast(msg, kind) {
+      let el = document.getElementById('dash-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'dash-toast';
+        el.style.cssText =
+          'position:fixed;bottom:1.25rem;right:1.25rem;z-index:80;max-width:22rem;padding:0.55rem 0.75rem;border-radius:0.5rem;font-size:0.8rem;line-height:1.35;box-shadow:0 8px 24px rgba(0,0,0,0.35)';
+        document.body.appendChild(el);
+      }
+      el.style.background = kind === 'error' ? 'rgba(127,29,29,0.95)' : 'rgba(15,23,42,0.95)';
+      el.style.color = kind === 'error' ? '#fecaca' : '#e2e8f0';
+      el.style.border = '1px solid rgba(148,163,184,0.35)';
+      el.textContent = String(msg || '');
+      el.style.display = 'block';
+      clearTimeout(el._hide);
+      el._hide = setTimeout(function () {
+        el.style.display = 'none';
+      }, 4200);
+    }
+    window.showToast = showToast;
+
     async function fetchJSON(url, opts) {
       const timeoutMs = (opts && opts.timeoutMs) || 20000;
       const fetchOpts = Object.assign({}, opts || {});
@@ -22392,39 +22514,59 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const inflight = window._dashInflightGets || (window._dashInflightGets = {});
         if (inflight[url]) return inflight[url];
       }
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       const run = (async function () {
-        try {
-          const r = await fetch(url, Object.assign({}, fetchOpts, { signal: ctrl.signal }));
-          let data = null;
-          try { data = await r.json(); } catch (_) { data = null; }
-          if (r.status === 429 || r.status === 503) {
-            const ra = r.headers && r.headers.get ? Number(r.headers.get('Retry-After')) : NaN;
-            const waitMs = Number.isFinite(ra) && ra > 0
-              ? Math.max(8000, Math.min(15000, ra * 1000))
-              : 10000;
-            window._dashBackoffUntil = Date.now() + waitMs;
+        async function attempt(isRetry) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+          try {
+            const r = await fetch(url, Object.assign({}, fetchOpts, { signal: ctrl.signal }));
+            let data = null;
+            try { data = await r.json(); } catch (_) { data = null; }
+            if (r.status === 429 || r.status === 503) {
+              const ra = r.headers && r.headers.get ? Number(r.headers.get('Retry-After')) : NaN;
+              const waitMs = Number.isFinite(ra) && ra > 0
+                ? Math.max(8000, Math.min(15000, ra * 1000))
+                : 10000;
+              window._dashBackoffUntil = Date.now() + waitMs;
+            }
+            if (!r.ok) {
+              const gateway = r.status === 502 || r.status === 504;
+              if (gateway && !isRetry) {
+                await new Promise(function (resolve) {
+                  setTimeout(resolve, method === 'GET' ? 400 : 700);
+                });
+                return attempt(true);
+              }
+              if (gateway) {
+                window._dashBackoffUntil = Date.now() + 2500;
+                throw new Error(
+                  'HTTP ' + r.status + ' — proxy/gateway; settings may still have saved. Retry.'
+                );
+              }
+              const msg = (data && data.error) || ('HTTP ' + r.status);
+              throw new Error(msg);
+            }
+            return data;
+          } catch (err) {
+            const msg = err && err.message ? err.message : String(err);
+            if (err && err.name === 'AbortError') {
+              throw new Error(
+                'Request timed out — bot slow or upstream blocked; retry (Discover auto-falls back to curated)'
+              );
+            }
+            if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+              if (!isRetry) {
+                await new Promise(function (resolve) { setTimeout(resolve, 500); });
+                return attempt(true);
+              }
+              throw new Error('Cannot reach bot server — is it running on this port?');
+            }
+            throw err instanceof Error ? err : new Error(msg);
+          } finally {
+            clearTimeout(timer);
           }
-          if (!r.ok) {
-            const msg = (data && data.error) || ('HTTP ' + r.status);
-            throw new Error(msg);
-          }
-          return data;
-        } catch (err) {
-          const msg = err && err.message ? err.message : String(err);
-          if (err && err.name === 'AbortError') {
-            throw new Error(
-              'Request timed out — bot slow or upstream blocked; retry (Discover auto-falls back to curated)'
-            );
-          }
-          if (/failed to fetch|networkerror|load failed/i.test(msg)) {
-            throw new Error('Cannot reach bot server — is it running on this port?');
-          }
-          throw err instanceof Error ? err : new Error(msg);
-        } finally {
-          clearTimeout(timer);
         }
+        return attempt(false);
       })();
       if (method === 'GET') {
         const inflight = window._dashInflightGets || (window._dashInflightGets = {});
@@ -29451,16 +29593,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function saveTradeConfig(silent) {
+      try {
       const body = {};
       ['tradeAmountSol','maxAllowedTradeSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent'].forEach(k => {
-        body[k] = Number(document.getElementById(k).value);
+        const el = document.getElementById(k);
+        if (el) body[k] = Number(el.value);
       });
       body.baseTradeAmountSol = body.tradeAmountSol;
       await fetchJSON('/api/config/trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!silent) alert('Trade settings saved');
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Trade settings failed: ' + msg, 'error');
+        else alert('Trade settings failed: ' + msg);
+      }
     }
 
     async function saveFilterConfig(silent) {
+      try {
       const checked = (id, fallback) => {
         const el = document.getElementById(id);
         return el ? el.checked : fallback;
@@ -29568,9 +29718,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       body.minHolderCount = body.minHolders;
       await fetchJSON('/api/config/filters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!silent) alert('Filters saved');
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Filters save failed: ' + msg, 'error');
+        else alert('Filters save failed: ' + msg);
+      }
     }
 
     async function saveSelectiveConfig(silent) {
+      try {
       // Keep Settings ↔ Config Max/hr + cooldown fields in sync when either is saved.
       const maxEl = document.getElementById('sel-max-per-hour');
       const cdEl = document.getElementById('sel-cooldown-sec');
@@ -29605,6 +29761,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const st = document.getElementById('settings-trade-caps-status');
       if (st) st.textContent = 'Saved · max ' + maxHr + '/hr · cooldown ' + coolSec + 's';
       if (!silent) alert('Selective trading settings saved');
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Selective settings failed: ' + msg, 'error');
+        else alert('Selective settings failed: ' + msg);
+      }
     }
 
     async function saveTradeCapsFromSettings() {
@@ -31163,6 +31324,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function saveStrategyConfig(silent) {
+      try {
       await fetchJSON('/api/config/strategy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -31190,9 +31352,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }),
       });
       if (!silent) alert('Strategy saved');
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Strategy save failed: ' + msg, 'error');
+        else alert('Strategy save failed: ' + msg);
+      }
     }
 
     async function saveRiskConfig(silent) {
+      try {
       const dailyEl =
         document.getElementById('riskDailyLossLimitSol') ||
         document.getElementById('dailyLossLimitSol');
@@ -31239,6 +31407,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (!silent) alert('Risk settings saved');
       refresh();
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Risk settings failed: ' + msg, 'error');
+        else alert('Risk settings failed: ' + msg);
+      }
     }
 
     function updateRiskLevelUI(cfg) {
@@ -36837,6 +37010,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
 
     async function saveTechnicalLevelsConfig(silent) {
+      try {
       const fibRaw = document.getElementById('tl-priority-fibs')?.value || '0.5,0.618';
       const secRaw = document.getElementById('tl-secondary-fibs')?.value || '0.382,0.786';
       const prioritizeFibLevels = String(fibRaw)
@@ -36892,9 +37066,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       if (!silent) alert('Technical Levels settings saved');
       refresh();
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Technical Levels save failed: ' + msg, 'error');
+        else alert('Technical Levels save failed: ' + msg);
+      }
     }
 
     async function saveChartPatternsConfig(silent) {
+      try {
       const patIds = [
         'ascending_triangle', 'descending_triangle', 'trendline_break',
         'holder_distribution', 'capitulation',
@@ -36934,6 +37114,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       if (!silent) alert('Chart Patterns settings saved');
       refresh();
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (typeof showToast === 'function') showToast('Chart Patterns save failed: ' + msg, 'error');
+        else alert('Chart Patterns save failed: ' + msg);
+      }
     }
 
     async function saveScalperSuiteSettings() {

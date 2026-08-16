@@ -3370,8 +3370,11 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
 export function persistUserSettings(): boolean {
   const ok = savePersistedSettings(buildPersistedSettingsSnapshot());
   try {
-    const { serializeTradeProfilesForPersist } =
-      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const {
+      serializeTradeProfilesForPersist,
+      invalidateTradeProfilesStatusCache,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+    invalidateTradeProfilesStatusCache();
     const { saveTradeProfilesUserState } =
       require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
     saveTradeProfilesUserState(serializeTradeProfilesForPersist());
@@ -6678,7 +6681,15 @@ export function getConfigSnapshot() {
     },
     marketScanner: { ...config.marketScanner },
     alphaScan: { ...config.alphaScan },
-    zion: cloneJson(config.zion as unknown as Record<string, unknown>),
+    zion: (() => {
+      try {
+        return cloneJson(config.zion as unknown as Record<string, unknown>);
+      } catch {
+        return {
+          enabled: config.zion?.enabled === true,
+        };
+      }
+    })(),
     trading: {
       activeId: config.activeTradingWalletId,
       wallets: config.tradingWallets.map((w) => ({

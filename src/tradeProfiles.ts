@@ -2792,7 +2792,17 @@ function learningAdjustedMatchMins(
   return { minConviction, minWalletQuality };
 }
 
-export function getTradeProfilesStatus(): {
+let tradeProfilesStatusCache: {
+  at: number;
+  body: ReturnType<typeof buildTradeProfilesStatus>;
+} | null = null;
+const TRADE_PROFILES_STATUS_TTL_MS = 1500;
+
+export function invalidateTradeProfilesStatusCache(): void {
+  tradeProfilesStatusCache = null;
+}
+
+function buildTradeProfilesStatus(): {
   enabled: boolean;
   smartBotProfiles: boolean;
   globalTakeProfit: GlobalMicroBotTakeProfit;
@@ -2868,11 +2878,14 @@ export function getTradeProfilesStatus(): {
     enabled: state.enabled,
     smartBotProfiles: state.smartBotProfiles === true,
     globalTakeProfit: normalizeGlobalMicroBotTakeProfit(state.globalTakeProfit),
+    // Counts only — full watch rows live on GET /api/setup-watches.
+    // Embedding 200 Dip entries here OOMs/timeouts Render → HTTP 502 on settings save.
     dipWatch: (() => {
       try {
-        const { getDipSetupWatchStatus } =
+        const { getDipSetupWatchCounts } =
           require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-        return getDipSetupWatchStatus(200);
+        const c = getDipSetupWatchCounts();
+        return { ...c, entries: [], recentTerminal: [] };
       } catch {
         return {
           active: 0,
@@ -2883,9 +2896,10 @@ export function getTradeProfilesStatus(): {
     })(),
     gradWatch: (() => {
       try {
-        const { getMigrationGradWatchStatus } =
+        const { getMigrationGradWatchCounts } =
           require('./migrationGradWatch') as typeof import('./migrationGradWatch');
-        return getMigrationGradWatchStatus(16);
+        const c = getMigrationGradWatchCounts();
+        return { ...c, entries: [], recentTerminal: [] };
       } catch {
         return { active: 0, entries: [], recentTerminal: [] };
       }
@@ -2906,6 +2920,19 @@ export function getTradeProfilesStatus(): {
     recentDecisions: getRecentTradeProfileDecisions(),
     effectiveBand: getWatcherEffectiveMcBands(),
   };
+}
+
+export function getTradeProfilesStatus(): ReturnType<typeof buildTradeProfilesStatus> {
+  const now = Date.now();
+  if (
+    tradeProfilesStatusCache &&
+    now - tradeProfilesStatusCache.at < TRADE_PROFILES_STATUS_TTL_MS
+  ) {
+    return tradeProfilesStatusCache.body;
+  }
+  const body = buildTradeProfilesStatus();
+  tradeProfilesStatusCache = { at: now, body };
+  return body;
 }
 
 export interface TradeProfileDecisionLog {

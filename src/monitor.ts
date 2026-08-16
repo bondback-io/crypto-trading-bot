@@ -1278,6 +1278,12 @@ function maybeParkArmingOpen(
       supportTfHits: signal.supportTfHits,
       curveProgressPct: signal.bondingCurve?.progressPct ?? null,
       dropFromPeakPct: signal.dropFromPeakPct,
+      lastPriceSol: signal.lastPriceSol ?? signal.priceSol,
+      supportPriceSol: signal.supportPriceSol,
+      fib05PriceSol: signal.fib05PriceSol,
+      fib618PriceSol: signal.fib618PriceSol,
+      priceChangeH1Pct: signal.metrics?.priceChangeH1Pct,
+      scannerReasons: signal.scannerReasons,
     });
     noteProfileWatchFunnel(
       String(profileId || ''),
@@ -1333,6 +1339,8 @@ function parkOwnedWatchFromFight(
       supportPriceSol: signal.supportPriceSol,
       fib05PriceSol: signal.fib05PriceSol,
       fib618PriceSol: signal.fib618PriceSol,
+      priceChangeH1Pct: signal.metrics?.priceChangeH1Pct,
+      scannerReasons: signal.scannerReasons,
     });
     if (!ok) return null;
     const { formatOwnedWatchWaitingArm } =
@@ -8489,6 +8497,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         );
       const attFails: string[] = [];
       const attAdmitted: typeof lanePassers = [];
+      let discParked: string | null = null;
       for (const passer of lanePassers) {
         const conc = shouldLimitScalperConcurrent({
           profileId: passer.profileId,
@@ -8561,12 +8570,59 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           attFails.push(
             `${passer.name}: ${habit.reason || 'scalper_discretionary_skipped'}`
           );
+          if (!discParked && passer.profileId === 'scalper') {
+            const mcPark =
+              Number(
+                signal.metrics?.marketCapUsd ??
+                  (signal as { sourceEntryMcUsd?: number }).sourceEntryMcUsd
+              ) || 0;
+            let bandMin = 150_000;
+            let bandMax = 1_000_000;
+            try {
+              const { getEffectiveMcBand } =
+                require('./tradeProfiles') as typeof import('./tradeProfiles');
+              const band = getEffectiveMcBand('scalper');
+              if (band.min > 0) bandMin = band.min;
+              if (band.max > 0) bandMax = band.max;
+            } catch {
+              /* catalog */
+            }
+            const inBand = mcPark > 0 && mcPark >= bandMin && mcPark <= bandMax;
+            const srOk =
+              ctx.nearSupport === true ||
+              ctx.nearMultiTfSupport === true ||
+              signal.nearKeyFib === true ||
+              Number(signal.supportPriceSol) > 0;
+            if (inBand && srOk) {
+              const modeB = tryParkModeBFromFight(
+                signal,
+                {
+                  volumeH1Usd: signal.metrics?.volumeH1Usd,
+                  volumeM5Usd: signal.metrics?.volumeM5Usd,
+                  holderCount: signal.metrics?.holderCountEstimate,
+                  nearKeyFib: signal.nearKeyFib === true,
+                  nearSupport: ctx.nearSupport === true,
+                  nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+                  srConfluenceScore: signal.srConfluenceScore,
+                  priceSol: signal.priceSol ?? signal.lastPriceSol,
+                  supportPriceSol: signal.supportPriceSol,
+                  resistancePriceSol: signal.resistancePriceSol,
+                },
+                mcPark,
+                'scalper'
+              );
+              if (modeB.ok) discParked = modeB.reason;
+            }
+          }
           continue;
         }
         attAdmitted.push(passer);
       }
       if (!attAdmitted.length) {
-        const why = attFails[0] || 'Scalper attention blocked all lane passers';
+        const why =
+          discParked ||
+          attFails[0] ||
+          'Scalper attention blocked all lane passers';
         recordRejectedSignal(signal, why);
         markLaneFightCascadeResult(signal.mint, false, why);
         console.log(

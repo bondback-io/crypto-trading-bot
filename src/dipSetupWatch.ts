@@ -29,14 +29,18 @@ import {
   demoteArmedBeyondCap,
   watchLifecycleAction,
   WATCH_ARM_SCORE_FLOOR,
+  WATCH_SCORE_FLOOR,
+  FLOOR_EXPIRE_MS,
 } from './watchPriorityScore';
 
 import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
 import {
   applyArmLifecycleTimeout,
+  hasDipFightDna,
   resetArmClockOnArm,
+  stampCheapArmEval,
   stampWatchVolumeOk,
-  stampWatchingHoldReason,
+  watchHasLevelEvidence,
 } from './watchArmLifecycle';
 
 function stampDipPriority(w: DipWatchEntry, now: number): void {
@@ -147,6 +151,10 @@ export interface DipWatchEntry {
   volOk?: boolean;
   armClockPausedAt?: number | null;
   armClockPausedMs?: number;
+  lastArmEvalAt?: number | null;
+  fightDipDna?: boolean;
+  hasLevel?: boolean;
+  volumeM5Usd?: number;
 }
 
 /** Unified Dip-family inventory (1M–500M + above-max Steady/HWR parks). */
@@ -704,10 +712,35 @@ function reserveAdmitSlot(
   incoming?: { mint?: string; volumeH1Usd?: number }
 ): boolean {
   const active = allActiveWatches();
-  if (active.length < MAX_DIP_WATCHES) return true;
-
   const now = Date.now();
-  const ranked = [...active]
+  const watching = active.filter((w) => w.status === 'watching');
+  if (
+    watching.length > 0 &&
+    watching.length <= 2 &&
+    active.length < MAX_DIP_WATCHES
+  ) {
+    const inMint = String(incoming?.mint || '').trim();
+    for (const w of watching) {
+      if (inMint && w.mint === inMint) continue;
+      const floor = (w.watchScore ?? 100) <= WATCH_SCORE_FLOOR;
+      const stagnant =
+        w.scoreAtFloorSince != null &&
+        now - w.scoreAtFloorSince >= FLOOR_EXPIRE_MS;
+      if (!floor && !stagnant) continue;
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = 'expire_stagnant_rotate';
+      console.log(
+        `[watch_insert_ok] rotated stagnant ${w.symbol} for incoming ${inMint.slice(0, 8)}`
+      );
+    }
+  }
+  if (active.filter((w) => w.status === 'watching' || w.status === 'armed').length <
+    MAX_DIP_WATCHES) {
+    return true;
+  }
+
+  const ranked = [...allActiveWatches()]
     .map((w) => ({ w, score: qualityWatchScore(w) }))
     .sort((a, b) => a.score - b.score);
   const weakest = ranked[0];
@@ -715,7 +748,14 @@ function reserveAdmitSlot(
 
   const inVol = Math.max(0, Number(incoming?.volumeH1Usd) || 0);
   const weakVol = Math.max(1, Number(weakest.w.volumeH1Usd) || 0);
-  if (!(inVol >= weakVol * ROTATION_VOL_EDGE)) {
+  const watchingN = allActiveWatches().filter((w) => w.status === 'watching')
+    .length;
+  const stagnantWeak =
+    (weakest.w.watchScore ?? 100) <= WATCH_SCORE_FLOOR ||
+    (weakest.w.scoreAtFloorSince != null &&
+      now - weakest.w.scoreAtFloorSince >= FLOOR_EXPIRE_MS);
+  const skipVolBar = watchingN <= 2 && stagnantWeak;
+  if (!skipVolBar && !(inVol >= weakVol * ROTATION_VOL_EDGE)) {
     return false;
   }
 
@@ -1189,7 +1229,12 @@ function scheduleEagerLevelSeed(w: DipWatchEntry): void {
         return;
       }
       // Minors: arm only when near Fib/S after seed (no Steady soft-arm).
-      const nearTa = w.nearKeyFib === true || w.nearSupport === true;
+      const nearTa =
+        w.nearKeyFib === true ||
+        w.nearSupport === true ||
+        (w.fightDipDna === true &&
+          watchHasLevelEvidence(w) &&
+          w.volOk === true);
       if (w.status === 'watching' && nearTa) {
         const now = Date.now();
         if (
@@ -1617,6 +1662,8 @@ export function considerDipWatchSetup(input: {
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
   isPumpFun?: boolean;
+  scannerReasons?: string[] | string | null;
+  volumeM5Usd?: number;
 }): DipWatchEntry | null {
   lastDipAdmitReject = '';
   if (!isDipProfileEnabled()) {
@@ -1643,6 +1690,13 @@ export function considerDipWatchSetup(input: {
   const isMedium = isMediumSource(input.source);
   const isQuality = isMajors || isMedium;
   const bucket = watchBucket(input.source);
+  const fightDna = hasDipFightDna(input.scannerReasons, {
+    nearKeyFib: input.nearKeyFib,
+    nearSupport: input.nearSupport,
+  });
+  if (fightDna && input.nearSupport !== true && input.nearKeyFib !== true) {
+    input.nearSupport = true;
+  }
   const nearTaEarly =
     input.nearKeyFib === true || input.nearSupport === true;
   const dropEarly = input.dropFromPeakPct;
@@ -1861,11 +1915,14 @@ export function considerDipWatchSetup(input: {
   const drop = input.dropFromPeakPct;
   const nearTa = nearTaEarly;
   const dropStarted = drop != null && drop >= Math.min(5, minDrop);
+  const h1Dip =
+    input.priceChangeH1Pct != null && input.priceChangeH1Pct < -1;
   // Medium/Majors: admit to watching without force-buy when S/R thin (arm later).
-  // Memecoins: need early dip signal OR Fib/S proximity.
-  if (!isQuality && !dropStarted && !nearTa) {
+  // Memecoins: need early dip signal OR Fib/S proximity OR fight DNA / H1 dip.
+  if (!isQuality && !dropStarted && !nearTa && !fightDna && !h1Dip) {
     noteDipFunnel('no_setup');
     noteDipFunnel('vol_liq_mc');
+    lastDipAdmitReject = 'no_setup';
     return null;
   }
   if (drop != null && drop > maxDrop) {
@@ -1980,6 +2037,10 @@ export function considerDipWatchSetup(input: {
         : isMedium
           ? 'medium watch'
           : 'watching for setup',
+    fightDipDna: fightDna,
+    hasLevel: fightDna || nearTa,
+    volumeM5Usd: input.volumeM5Usd,
+    lastArmEvalAt: now,
   };
   entry.targetDipEntries = buildTargetDipEntries(entry);
   if (armed) stampWatchPlan(entry);
@@ -2294,6 +2355,7 @@ export async function tickDipSetupWatches(opts?: {
     if (px != null) w.lastPriceSol = px;
     recomputeProximityFromLevels(w);
     stampWatchVolumeOk(w);
+    stampCheapArmEval(w, now);
     w.targetDipEntries = buildTargetDipEntries(w);
     stampDipPriority(w, now);
     const life = watchLifecycleAction(
@@ -2392,7 +2454,12 @@ export async function tickDipSetupWatches(opts?: {
       continue;
     }
 
-    const nearTa = w.nearKeyFib === true || w.nearSupport === true;
+    const nearTa =
+      w.nearKeyFib === true ||
+      w.nearSupport === true ||
+      (w.fightDipDna === true &&
+        watchHasLevelEvidence(w) &&
+        w.volOk === true);
     const dropOk =
       w.dropFromPeakPct != null &&
       w.dropFromPeakPct >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
@@ -2485,7 +2552,7 @@ export async function tickDipSetupWatches(opts?: {
       }
     }
 
-    if (w.status === 'watching') stampWatchingHoldReason(w);
+    if (w.status === 'watching') stampCheapArmEval(w, now);
 
     if (w.status === 'armed') {
       // Stronger confirm: touch/undercut → reclaim; reject touch-and-fail
@@ -2740,6 +2807,19 @@ export async function tickDipSetupWatches(opts?: {
   return handed;
 }
 
+/** Cheap arm eval only — no TTL/stagnant expire, no clock reset. */
+export function reevaluateDipWatchArmsCheap(): number {
+  const now = Date.now();
+  let n = 0;
+  for (const w of watches.values()) {
+    if (w.status !== 'watching' && w.status !== 'armed') continue;
+    recomputeProximityFromLevels(w);
+    stampCheapArmEval(w, now);
+    n += 1;
+  }
+  return n;
+}
+
 /**
  * Manual unwatch — removes active watch and blocks bot re-add for 15 minutes.
  */
@@ -2771,6 +2851,25 @@ export function unwatchDipSetup(mint: string): {
     `[dip-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
   );
   return { ok: true, cooldownMs: UNWATCH_COOLDOWN_MS };
+}
+
+/** Active counts only — no entry serialization (settings/status payloads). */
+export function getDipSetupWatchCounts(): {
+  active: number;
+  activeMajors: number;
+  activeMedium: number;
+  activeMinors: number;
+} {
+  const allActive = allActiveWatches();
+  return {
+    active: allActive.length,
+    activeMajors: allActive.filter((e) => watchBucket(e.source) === 'majors')
+      .length,
+    activeMedium: allActive.filter((e) => watchBucket(e.source) === 'medium')
+      .length,
+    activeMinors: allActive.filter((e) => watchBucket(e.source) === 'minors')
+      .length,
+  };
 }
 
 export function getDipSetupWatchStatus(limit = 200): {
@@ -2854,6 +2953,7 @@ export function offerDipWatchFromCandidate(c: {
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
   isPumpFun?: boolean;
+  scannerReasons?: string[] | string | null;
 }): boolean {
   try {
     const { noteWatchInsertAttempt, noteWatchInsertReject } =
@@ -2862,6 +2962,9 @@ export function offerDipWatchFromCandidate(c: {
     if (!isRpcWorkloadEnabled('dip_setup_watch')) {
       lastDipAdmitReject = 'rpc_workload_off';
       noteWatchInsertReject('rpc_workload_off');
+      console.warn(
+        `[watch_insert_denied] reason=rpc_workload_off mint=${c.mint} symbol=${c.symbol}`
+      );
       return false;
     }
   } catch {
@@ -2912,17 +3015,37 @@ export function offerDipWatchFromCandidate(c: {
     pairCreatedAtMs: c.pairCreatedAtMs,
     tokenAgeHours: c.tokenAgeHours,
     isPumpFun: c.isPumpFun,
+    priceChangeH1Pct: c.priceChangeH1Pct ?? null,
+    scannerReasons: c.scannerReasons,
   });
   if (!entry) {
+    const why = lastDipAdmitReject || 'admit_failed';
     try {
       const { noteWatchInsertReject } =
         require('./watchPipeline') as typeof import('./watchPipeline');
-      noteWatchInsertReject(lastDipAdmitReject || 'admit_failed');
+      noteWatchInsertReject(why);
     } catch {
       /* optional */
     }
+    console.warn(
+      `[watch_insert_denied] reason=${why} mint=${c.mint} symbol=${c.symbol} profile=${c.preferredProfileId || 'dip_buyer'}`
+    );
     return false;
   }
+  try {
+    const { noteWatchInsertOk } =
+      require('./watchPipeline') as typeof import('./watchPipeline');
+    noteWatchInsertOk({
+      mint: entry.mint,
+      symbol: entry.symbol,
+      profile: entry.preferredProfileId || 'dip_buyer',
+    });
+  } catch {
+    /* optional */
+  }
+  console.log(
+    `[watch_insert_ok] mint=${entry.mint} symbol=${entry.symbol} profile=${entry.preferredProfileId || 'dip_buyer'} status=${entry.status}`
+  );
   if (entry && (src === 'medium' || src === 'majors')) {
     if (c.priceChangeH1Pct != null) entry.priceChangeH1Pct = c.priceChangeH1Pct;
     if (c.priceChangeH6Pct != null) entry.priceChangeH6Pct = c.priceChangeH6Pct;

@@ -43,6 +43,24 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.391',
+    title: 'Settings saves no longer 502 on Render',
+    sections: ['knobs', 'microbots', 'overview'],
+    items: [
+      'Micro Bot / Settings / Config saves return a slim OK instead of serializing full watchlists. A proxy 502/504 retries once; Knobs, Risk, Trade, Filters, and Strategy saves surface a real error instead of hanging.',
+      'GET /api/config, /api/strategies, and /api/trade-profiles catch serialize failures. Dashboard watchlists stay put after a params save (they no longer wipe from a settings payload).',
+    ],
+  },
+  {
+    version: '1.2.390',
+    title: 'Unstick watchlists: complete arms and restore Dip inserts',
+    sections: ['microbots', 'scanners', 'execution'],
+    items: [
+      'Waiting-arm rows re-eval every tick and expire after 20m even during a Watchers isolate. Fight DNA (support_dip_reclaim / near Fib/S) plus vol-ok can arm without extra RPC. Confluence skip text shows the real have-count. Containment still retries opens without dropping ownership.',
+      'Dip parks pass price and H1 drop so eligible wins insert instead of no_setup; watch_insert_ok / denied reasons are logged. Scalper disc-skip in-band parks Mode B (no discretionary open). Watchlist has per-tab Refresh, Refresh all, and Re-evaluate arms now.',
+    ],
+  },
+  {
     version: '1.2.389',
     title: 'Sticky RPC recover + capped entry pause',
     sections: ['knobs', 'execution'],

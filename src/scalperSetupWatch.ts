@@ -35,8 +35,8 @@ import {
   applyArmLifecycleTimeout,
   recomputeNearSupportFromPrice,
   resetArmClockOnArm,
+  stampCheapArmEval,
   stampWatchVolumeOk,
-  stampWatchingHoldReason,
 } from './watchArmLifecycle';
 
 export type ScalperWatchStatus =
@@ -1246,7 +1246,7 @@ export async function tickScalperSetupWatches(opts?: {
       }
     }
 
-    if (w.status === 'watching') stampWatchingHoldReason(w);
+    if (w.status === 'watching') stampCheapArmEval(w, now);
 
     if (w.status === 'armed') {
       // Stronger confirm: touch/undercut → reclaim; reject touch-and-fail
@@ -1458,6 +1458,19 @@ export async function tickScalperSetupWatches(opts?: {
   }
 
   return handed;
+}
+
+/** Cheap arm eval only — no TTL/stagnant expire, no clock reset. */
+export function reevaluateScalperWatchArmsCheap(): number {
+  const now = Date.now();
+  let n = 0;
+  for (const w of watches.values()) {
+    if (w.status !== 'watching' && w.status !== 'armed') continue;
+    recomputeNearSupportFromPrice(w);
+    stampCheapArmEval(w, now);
+    n += 1;
+  }
+  return n;
 }
 
 export function unwatchScalperSetup(mint: string): {

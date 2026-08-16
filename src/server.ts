@@ -4,7 +4,7 @@
 
 import path from 'node:path';
 import zlib from 'node:zlib';
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import {
   config,
   addSmartWallet,
@@ -210,6 +210,14 @@ function corsMiddleware(
     return;
   }
   next();
+}
+
+function sendApiError(res: Response, err: unknown, status = 500): void {
+  if (res.headersSent) return;
+  res.status(status).json({
+    ok: false,
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
 export function createServer(): express.Application {
@@ -2348,6 +2356,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/risk', (req: Request, res: Response) => {
+    try {
     const body = req.body as Record<string, unknown>;
     const partial: Parameters<typeof updateRiskConfig>[0] = {};
 
@@ -2425,6 +2434,9 @@ export function createServer(): express.Application {
       risk,
       filters: { dailyLossLimitSol: config.filters.dailyLossLimitSol },
     });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/profit-strategy', (_req: Request, res: Response) => {
@@ -2432,6 +2444,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/profit-strategy', (req: Request, res: Response) => {
+    try {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const partial: Partial<typeof config.profitStrategy> = {};
     if (body.enabled !== undefined) partial.enabled = Boolean(body.enabled);
@@ -2451,6 +2464,9 @@ export function createServer(): express.Application {
     }
     const profitStrategy = updateProfitStrategyConfig(partial);
     res.json({ ok: true, profitStrategy });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/quick-scalper', (_req: Request, res: Response) => {
@@ -2559,6 +2575,7 @@ export function createServer(): express.Application {
   // --- Positions & logs ---
 
   app.get('/api/positions', (req: Request, res: Response) => {
+    try {
     const fast =
       req.query.fast === '1' ||
       req.query.fast === 'true' ||
@@ -2627,6 +2644,9 @@ export function createServer(): express.Application {
         candidates: getReBuyCandidates().slice(0, 20),
       },
     });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/technicals/:mint', (req: Request, res: Response) => {
@@ -2765,14 +2785,19 @@ export function createServer(): express.Application {
   });
 
   app.get('/api/market-scanner', (_req: Request, res: Response) => {
-    res.json({
-      status: getScannerStatus(),
-      candidates: getScannerFeed(40),
-      config: { ...(config.marketScanner || {}) },
-    });
+    try {
+      res.json({
+        status: getScannerStatus(),
+        candidates: getScannerFeed(40),
+        config: { ...(config.marketScanner || {}) },
+      });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.post('/api/config/market-scanner', (req: Request, res: Response) => {
+    try {
     const body = (req.body ?? {}) as Record<string, unknown>;
     if (!config.marketScanner) {
       config.marketScanner = {
@@ -2989,6 +3014,9 @@ export function createServer(): express.Application {
       config: { ...ms },
       status: getScannerStatus(),
     });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   // ——— AlphaScan (additive New/Soon/Bonded; default OFF) ———
@@ -3408,13 +3436,17 @@ export function createServer(): express.Application {
   // --- Config ---
 
   app.get('/api/config', (_req: Request, res: Response) => {
-    const snap = getConfigSnapshot();
     try {
-      const { emailDeliveryStatus } =
-        require('./emailNotifications') as typeof import('./emailNotifications');
-      res.json({ ...snap, emailDelivery: emailDeliveryStatus() });
-    } catch {
-      res.json(snap);
+      const snap = getConfigSnapshot();
+      try {
+        const { emailDeliveryStatus } =
+          require('./emailNotifications') as typeof import('./emailNotifications');
+        res.json({ ...snap, emailDelivery: emailDeliveryStatus() });
+      } catch {
+        res.json(snap);
+      }
+    } catch (err) {
+      sendApiError(res, err);
     }
   });
 
@@ -4870,22 +4902,30 @@ export function createServer(): express.Application {
   );
 
   app.get('/api/strategies', (_req: Request, res: Response) => {
-    const { getStrategiesStatus, ensureStrategyToggles } = require('./strategies') as typeof import('./strategies');
-    ensureStrategyToggles();
-    const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
-      require('./tradeProfiles') as typeof import('./tradeProfiles');
-    ensureTradeProfilesInitialized();
-    res.json({
-      ...getStrategiesStatus(),
-      tradeProfiles: getTradeProfilesStatus(),
-    });
+    try {
+      const { getStrategiesStatus, ensureStrategyToggles } = require('./strategies') as typeof import('./strategies');
+      ensureStrategyToggles();
+      const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      ensureTradeProfilesInitialized();
+      res.json({
+        ...getStrategiesStatus(),
+        tradeProfiles: getTradeProfilesStatus(),
+      });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/trade-profiles', (_req: Request, res: Response) => {
-    const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
-      require('./tradeProfiles') as typeof import('./tradeProfiles');
-    ensureTradeProfilesInitialized();
-    res.json(getTradeProfilesStatus());
+    try {
+      const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      ensureTradeProfilesInitialized();
+      res.json(getTradeProfilesStatus());
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   /** Lightweight dip + graduation + scalper-family watchlist status for Micro Bots UI. */
@@ -5025,6 +5065,20 @@ export function createServer(): express.Application {
       const { getSetupWatchDiagnostics } =
         require('./profileAttention') as typeof import('./profileAttention');
       res.json({ ok: true, ...getSetupWatchDiagnostics() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /** Cheap arm re-eval — does not expire, disarm, or cancel opens. */
+  app.post('/api/setup-watches/reevaluate', (_req: Request, res: Response) => {
+    try {
+      const { reevaluateWatchArmsCheap } =
+        require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+      res.json(reevaluateWatchArmsCheap());
     } catch (err) {
       res.status(500).json({
         ok: false,
@@ -5345,75 +5399,80 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/trade-profiles', (req: Request, res: Response) => {
-    const {
-      updateTradeProfilesConfig,
-      setTradeProfileEnabled,
-      updateTradeProfileParams,
-      resetTradeProfileParams,
-      updateAutoScoringConfig,
-      getTradeProfilesStatus,
-      ensureTradeProfilesInitialized,
-    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
-    ensureTradeProfilesInitialized();
-    const body = (req.body ?? {}) as {
-      enabled?: boolean;
-      smartBotProfiles?: boolean;
-      profiles?: Record<string, boolean>;
-      globalTakeProfit?: { enabled?: boolean; takeProfitPct?: number };
-      id?: string;
-      profileEnabled?: boolean;
-      params?: {
-        exitRules?: Record<string, unknown>;
-        match?: Record<string, unknown>;
-        modules?: Record<string, boolean>;
+    try {
+      const {
+        updateTradeProfilesConfig,
+        setTradeProfileEnabled,
+        updateTradeProfileParams,
+        resetTradeProfileParams,
+        updateAutoScoringConfig,
+        getTradeProfilesStatus,
+        ensureTradeProfilesInitialized,
+      } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+      ensureTradeProfilesInitialized();
+      const body = (req.body ?? {}) as {
+        enabled?: boolean;
+        smartBotProfiles?: boolean;
+        profiles?: Record<string, boolean>;
+        globalTakeProfit?: { enabled?: boolean; takeProfitPct?: number };
+        id?: string;
+        profileEnabled?: boolean;
+        params?: {
+          exitRules?: Record<string, unknown>;
+          match?: Record<string, unknown>;
+          modules?: Record<string, boolean>;
+        };
+        resetParams?: boolean | 'all';
+        autoScoring?: Record<string, unknown>;
       };
-      resetParams?: boolean | 'all';
-      autoScoring?: Record<string, unknown>;
-    };
-    if (body.autoScoring && typeof body.autoScoring === 'object') {
-      updateAutoScoringConfig(
-        body.autoScoring as unknown as import('./tradeProfiles').AutoScoringConfig
-      );
-    } else if (body.resetParams === 'all') {
-      resetTradeProfileParams('all');
-    } else if (body.id != null && body.resetParams === true) {
-      resetTradeProfileParams(
-        body.id as import('./tradeProfiles').TradeProfileId
-      );
-    } else if (body.id != null && body.params && typeof body.params === 'object') {
-      updateTradeProfileParams(
-        body.id as import('./tradeProfiles').TradeProfileId,
-        {
-          exitRules: body.params.exitRules as
-            | import('./tradeProfiles').TradeProfileExitRules
+      if (body.autoScoring && typeof body.autoScoring === 'object') {
+        updateAutoScoringConfig(
+          body.autoScoring as unknown as import('./tradeProfiles').AutoScoringConfig
+        );
+      } else if (body.resetParams === 'all') {
+        resetTradeProfileParams('all');
+      } else if (body.id != null && body.resetParams === true) {
+        resetTradeProfileParams(
+          body.id as import('./tradeProfiles').TradeProfileId
+        );
+      } else if (body.id != null && body.params && typeof body.params === 'object') {
+        updateTradeProfileParams(
+          body.id as import('./tradeProfiles').TradeProfileId,
+          {
+            exitRules: body.params.exitRules as
+              | import('./tradeProfiles').TradeProfileExitRules
+              | undefined,
+            match: body.params.match as
+              | import('./tradeProfiles').TradeProfileMatchRules
+              | undefined,
+            modules: body.params.modules as
+              | import('./tradeProfiles').TradeProfileModules
+              | undefined,
+          }
+        );
+      } else if (body.id != null && typeof body.profileEnabled === 'boolean') {
+        setTradeProfileEnabled(
+          body.id as import('./tradeProfiles').TradeProfileId,
+          body.profileEnabled
+        );
+      } else {
+        updateTradeProfilesConfig({
+          enabled: body.enabled,
+          smartBotProfiles: body.smartBotProfiles,
+          profiles: body.profiles as
+            | Partial<Record<import('./tradeProfiles').TradeProfileId, boolean>>
             | undefined,
-          match: body.params.match as
-            | import('./tradeProfiles').TradeProfileMatchRules
-            | undefined,
-          modules: body.params.modules as
-            | import('./tradeProfiles').TradeProfileModules
-            | undefined,
-        }
-      );
-    } else if (body.id != null && typeof body.profileEnabled === 'boolean') {
-      setTradeProfileEnabled(
-        body.id as import('./tradeProfiles').TradeProfileId,
-        body.profileEnabled
-      );
-    } else {
-      updateTradeProfilesConfig({
-        enabled: body.enabled,
-        smartBotProfiles: body.smartBotProfiles,
-        profiles: body.profiles as
-          | Partial<Record<import('./tradeProfiles').TradeProfileId, boolean>>
-          | undefined,
-        globalTakeProfit: body.globalTakeProfit,
-      });
+          globalTakeProfit: body.globalTakeProfit,
+        });
+      }
+      res.json({ ok: true, ...getTradeProfilesStatus() });
+    } catch (err) {
+      sendApiError(res, err);
     }
-    res.json({ ok: true, ...getTradeProfilesStatus() });
   });
 
   app.post('/api/strategies', (req: Request, res: Response) => {
+    try {
     const {
       updateStrategyToggles,
       setAllStrategyToggles,
@@ -5534,6 +5593,9 @@ export function createServer(): express.Application {
     }
     updateStrategyToggles(partial);
     res.json({ ok: true, ...getStrategiesStatus() });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   /** Download Strategy Control Center toggles + internal settings as JSON. */
@@ -5646,6 +5708,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/mode', (req: Request, res: Response) => {
+    try {
     const { mode } = req.body as { mode: TradingMode };
     if (!isTradingMode(mode)) {
       res.status(400).json({
@@ -5687,6 +5750,9 @@ export function createServer(): express.Application {
           }
         : null,
     });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   /** Live Simulation (paper ledger) vs last Backtest — side-by-side metrics + charts */
@@ -5864,6 +5930,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/trade', (req: Request, res: Response) => {
+    try {
     const {
       tradeAmountSol,
       baseTradeAmountSol,
@@ -5903,9 +5970,13 @@ export function createServer(): express.Application {
     });
 
     res.json(config.trade);
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.post('/api/config/notifications', (req: Request, res: Response) => {
+    try {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const n = config.notifications;
     if (typeof body.enabled === 'boolean') n.enabled = body.enabled;
@@ -5991,6 +6062,9 @@ export function createServer(): express.Application {
       return;
     }
     res.json({ ok: true, notifications: { ...config.notifications } });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/dashboard-notifications', (req: Request, res: Response) => {
@@ -6090,6 +6164,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/technical-levels', (req: Request, res: Response) => {
+    try {
     if (!config.technicalLevels) {
       const { DEFAULT_TECHNICAL_LEVELS } = require('./config') as typeof import('./config');
       config.technicalLevels = { ...DEFAULT_TECHNICAL_LEVELS };
@@ -6296,6 +6371,9 @@ export function createServer(): express.Application {
     }
     persistUserSettings();
     res.json({ ok: true, technicalLevels: { ...config.technicalLevels } });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/config/technical-levels', (_req: Request, res: Response) => {
@@ -6303,6 +6381,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/chart-patterns', (req: Request, res: Response) => {
+    try {
     const { DEFAULT_CHART_PATTERNS } = require('./config') as typeof import('./config');
     if (!config.chartPatterns) {
       config.chartPatterns = {
@@ -6405,6 +6484,9 @@ export function createServer(): express.Application {
         patterns: { ...config.chartPatterns.patterns },
       },
     });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/config/chart-patterns', (_req: Request, res: Response) => {
@@ -6417,6 +6499,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/filters', (req: Request, res: Response) => {
+    try {
     const keys = [
       'minWinRate',
       'minLiquidity',
@@ -6777,6 +6860,9 @@ export function createServer(): express.Application {
       buyPumpFunOnly: config.filters.buyPumpFunOnly === true,
       bondingCurve: { ...config.bondingCurve },
     });
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.get('/api/token-metrics/:mint', async (req: Request, res: Response) => {
@@ -6915,6 +7001,7 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/strategy', (req: Request, res: Response) => {
+    try {
     const {
       enableConvergence,
       enableMigrationOnly,
@@ -7053,9 +7140,13 @@ export function createServer(): express.Application {
     });
 
     res.json(config.strategy);
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   app.post('/api/config/selective', (req: Request, res: Response) => {
+    try {
     const body = req.body as Record<string, unknown>;
     const partial: Parameters<typeof updateSelectiveConfig>[0] = {};
     const boolKeys = [
@@ -7096,6 +7187,9 @@ export function createServer(): express.Application {
       /* optional */
     }
     res.json(selective);
+    } catch (err) {
+      sendApiError(res, err);
+    }
   });
 
   // --- GMGN smart wallet suggestions ---
@@ -8482,6 +8576,16 @@ export function createServer(): express.Application {
 
   app.get('/', (_req: Request, res: Response) => {
     res.redirect('/dashboard');
+  });
+
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    console.warn(
+      '[api]',
+      req.method,
+      req.path,
+      err instanceof Error ? err.message : err
+    );
+    sendApiError(res, err);
   });
 
   return app;
