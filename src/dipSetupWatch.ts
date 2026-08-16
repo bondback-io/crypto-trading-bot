@@ -326,7 +326,9 @@ function noteDipFunnel(key: keyof typeof dipFunnel, n = 1): void {
     key === 'unwatch_cd' ||
     key === 'mutual_exclude' ||
     key === 'mx_scalper' ||
-    key === 'mx_trend'
+    key === 'mx_trend' ||
+    key === 'quality_excluded_stock' ||
+    key === 'quality_excluded_proxy'
   ) {
     lastDipAdmitReject = String(key);
   }
@@ -1605,8 +1607,14 @@ export function considerDipWatchSetup(input: {
   isPumpFun?: boolean;
 }): DipWatchEntry | null {
   lastDipAdmitReject = '';
-  if (!isDipProfileEnabled()) return null;
-  if (!input.mint) return null;
+  if (!isDipProfileEnabled()) {
+    lastDipAdmitReject = 'profile_off';
+    return null;
+  }
+  if (!input.mint) {
+    lastDipAdmitReject = 'no_mint';
+    return null;
+  }
   if (isManualUnwatchCooldown(input.mint)) {
     noteDipFunnel('unwatch_cd');
     return null;
@@ -2379,6 +2387,13 @@ export async function tickDipSetupWatches(opts?: {
     }
     if (inDipBand && nearTa && (!isQualityBandSource(w.source) || dumpReclaim)) {
       w.preferredProfileId = 'dip_buyer';
+      stampDipWatchEligibility(w);
+      const ids = Array.isArray(w.eligibleProfileIds)
+        ? w.eligibleProfileIds.slice()
+        : [];
+      if (!ids.includes('dip_buyer')) {
+        w.eligibleProfileIds = ['dip_buyer', ...ids];
+      }
     }
     if (w.status === 'watching' && nearTa) {
       if (!isQualityBandSource(w.source) || dumpReclaim) {
@@ -2545,6 +2560,16 @@ export async function tickDipSetupWatches(opts?: {
       let preferPid = inDipBandTrig
         ? 'dip_buyer'
         : w.preferredProfileId || 'dip_buyer';
+      if (preferPid === 'dip_buyer') {
+        w.preferredProfileId = 'dip_buyer';
+        stampDipWatchEligibility(w);
+        const ids = Array.isArray(w.eligibleProfileIds)
+          ? w.eligibleProfileIds.slice()
+          : [];
+        if (!ids.includes('dip_buyer')) {
+          w.eligibleProfileIds = ['dip_buyer', ...ids];
+        }
+      }
       try {
         const { prepareArmedWatchOpen } =
           require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');

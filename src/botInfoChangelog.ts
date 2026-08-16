@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.379',
+    title: 'Same-mint lock, live TA min copy, quieter dashboard polls',
+    sections: ['execution', 'scanners', 'knobs'],
+    items: [
+      'Overlapping buys on the same mint are locked while a fill is in flight. Stop-reentry after a real close is unchanged. Closed trades keep their TA confluence badge.',
+      'Watchlist headers show the live Micro Bots min TA confluence. Dip dump-reclaim rows restamp onto the Dip tab. Migration amber means no live graduation watches; token names no longer show [object Object].',
+      'Dashboard refresh skips a hidden tab, backs off on 429/503, and no longer crashes when status.monitor is missing.',
+    ],
+  },
+  {
     version: '1.2.378',
     title: 'RPC Spike Inspector + on-screen Cursor diagnosis',
     sections: ['knobs', 'execution'],

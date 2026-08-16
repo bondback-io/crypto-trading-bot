@@ -375,6 +375,11 @@ function mutualExclusionBlocked(mint: string): string | null {
 /**
  * Consider a candidate for the Trend Rider watchlist.
  */
+let lastTrendAdmitReject = '';
+export function getLastTrendAdmitReject(): string {
+  return lastTrendAdmitReject;
+}
+
 export function considerTrendWatchSetup(input: {
   mint: string;
   symbol: string;
@@ -397,25 +402,38 @@ export function considerTrendWatchSetup(input: {
   chartPatternIds?: string[];
   volumeDecayState?: string | null;
 }): TrendWatchEntry | null {
-  if (!isTrendProfileEnabled()) return null;
-  if (!input.mint) return null;
-  if (isManualUnwatchCooldown(input.mint)) return null;
+  lastTrendAdmitReject = '';
+  if (!isTrendProfileEnabled()) {
+    lastTrendAdmitReject = 'profile_off';
+    return null;
+  }
+  if (!input.mint) {
+    lastTrendAdmitReject = 'no_mint';
+    return null;
+  }
+  if (isManualUnwatchCooldown(input.mint)) {
+    lastTrendAdmitReject = 'unwatch_cd';
+    return null;
+  }
 
   try {
     const { config } = require('./config') as typeof import('./config');
     if (isDeniedCopyMint(input.mint, config.solMint)) {
       noteTrendFunnel('blocked');
+      lastTrendAdmitReject = 'denied_mint';
       return null;
     }
   } catch {
     if (isDeniedCopyMint(input.mint)) {
       noteTrendFunnel('blocked');
+      lastTrendAdmitReject = 'denied_mint';
       return null;
     }
   }
 
   const mc = Number(input.marketCapUsd ?? 0);
   if (!(mc >= TREND_WATCH_MIN_MC_USD)) {
+    lastTrendAdmitReject = 'mc';
     return null;
   }
   // Hard exclude Mode B band (Scalper owns up to Dip catalog min $1M)
@@ -426,6 +444,7 @@ export function considerTrendWatchSetup(input: {
   const block = mutualExclusionBlocked(input.mint);
   if (block) {
     noteTrendFunnel('blocked');
+    lastTrendAdmitReject = 'mutual_exclude';
     return null;
   }
 
@@ -433,6 +452,7 @@ export function considerTrendWatchSetup(input: {
   const minHits = trendWatchMinDnaHits(input);
   if (dna.hits < minHits) {
     noteTrendFunnel('blocked');
+    lastTrendAdmitReject = 'dna_hits';
     return null;
   }
 
@@ -1058,7 +1078,7 @@ export function offerTrendWatchFromCandidate(c: {
     try {
       const { noteWatchInsertReject } =
         require('./watchPipeline') as typeof import('./watchPipeline');
-      noteWatchInsertReject('admit_failed');
+      noteWatchInsertReject(lastTrendAdmitReject || 'admit_failed');
     } catch {
       /* optional */
     }

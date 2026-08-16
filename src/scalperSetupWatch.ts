@@ -133,6 +133,14 @@ function noteModeBFunnel(
   n = 1
 ): void {
   modeBFunnel[key] = (modeBFunnel[key] || 0) + n;
+  if (String(key).startsWith('rejected')) {
+    lastScalperAdmitReject = String(key);
+  }
+}
+
+let lastScalperAdmitReject = '';
+export function getLastScalperAdmitReject(): string {
+  return lastScalperAdmitReject;
 }
 
 function stampScalperWatchEligibility(
@@ -1485,7 +1493,7 @@ export function offerScalperWatchFromCandidate(c: {
     try {
       const { noteWatchInsertReject } =
         require('./watchPipeline') as typeof import('./watchPipeline');
-      noteWatchInsertReject('admit_failed');
+      noteWatchInsertReject(lastScalperAdmitReject || 'admit_failed');
     } catch {
       /* optional */
     }

@@ -52,6 +52,19 @@ function pushEvent(ev: PumpStreamEvent): void {
   while (queue.length > MAX_QUEUE) queue.shift();
 }
 
+function coercePumpLabel(raw: unknown, fallback: string): string {
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (s && !/^\[object /i.test(s)) return s;
+  }
+  if (raw && typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    const nested = o.symbol || o.name || o.ticker;
+    if (typeof nested === 'string' && nested.trim()) return nested.trim();
+  }
+  return fallback;
+}
+
 function parseMsg(raw: unknown): PumpStreamEvent | null {
   if (!raw || typeof raw !== 'object') return null;
   const row = raw as Record<string, unknown>;
@@ -74,8 +87,8 @@ function parseMsg(raw: unknown): PumpStreamEvent | null {
   ) {
     category = 'graduated';
   }
-  const symbol = String(row.symbol || row.ticker || mint.slice(0, 6)).slice(0, 24);
-  const name = String(row.name || row.symbol || 'Pump').slice(0, 64);
+  const symbol = coercePumpLabel(row.symbol || row.ticker, mint.slice(0, 6)).slice(0, 24);
+  const name = coercePumpLabel(row.name || row.symbol, 'Pump').slice(0, 64);
   const mc = Number(row.marketCapSol ?? row.usd_market_cap ?? row.marketCap);
   const px = Number(row.vSolInBondingCurve ?? row.priceSol ?? row.lastPrice);
   return {

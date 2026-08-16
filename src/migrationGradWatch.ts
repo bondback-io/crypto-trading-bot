@@ -38,6 +38,28 @@ import {
   WATCH_ARM_SCORE_FLOOR,
 } from './watchPriorityScore';
 
+export function coerceTokenLabel(raw: unknown, fallback: string): string {
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (s && !/^\[object /i.test(s)) return s.slice(0, 64);
+  }
+  if (raw && typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    const nested = o.symbol || o.name || o.ticker;
+    if (typeof nested === 'string' && nested.trim()) {
+      return nested.trim().slice(0, 64);
+    }
+  }
+  return fallback;
+}
+
+let lastMigAdmitReject = '';
+export function getLastMigAdmitReject(): string {
+  return lastMigAdmitReject;
+}
+
+const triggerNotArmedNoted = new Set<string>();
+
 export type GradWatchStatus =
   | 'watching'
   | 'armed'
@@ -380,9 +402,19 @@ export function considerMigrationGradWatch(input: {
   isPumpFun?: boolean;
   preferredProfileId?: string;
 }): GradWatchEntry | null {
-  if (!isMigProfileEnabled()) return null;
-  if (!input.mint) return null;
-  if (isManualUnwatchCooldown(input.mint)) return null;
+  lastMigAdmitReject = '';
+  if (!isMigProfileEnabled()) {
+    lastMigAdmitReject = 'profile_off';
+    return null;
+  }
+  if (!input.mint) {
+    lastMigAdmitReject = 'no_mint';
+    return null;
+  }
+  if (isManualUnwatchCooldown(input.mint)) {
+    lastMigAdmitReject = 'unwatch_cd';
+    return null;
+  }
   const tagged =
     input.nearMigration === true ||
     input.preferredProfileId === 'migration_sniper' ||
@@ -400,6 +432,7 @@ export function considerMigrationGradWatch(input: {
     );
   // Pump.fun mint heuristic — tagged graduating names may not end with pump
   if (!String(input.mint).toLowerCase().endsWith('pump') && !tagged) {
+    lastMigAdmitReject = 'not_pump_untagged';
     return null;
   }
 
@@ -408,7 +441,10 @@ export function considerMigrationGradWatch(input: {
       ? Number(input.curveProgressPct)
       : null;
   if (progress == null || progress < watchPct()) {
-    if (!tagged) return null;
+    if (!tagged) {
+      lastMigAdmitReject = 'curve_below_watch';
+      return null;
+    }
     // Tagged graduating: admit as watching until live curve enrich.
   }
 
@@ -420,6 +456,7 @@ export function considerMigrationGradWatch(input: {
     input.marketCapUsd > 0 &&
     input.marketCapUsd > maxMc
   ) {
+    lastMigAdmitReject = 'mc_above_max';
     return null;
   }
 
@@ -456,10 +493,12 @@ export function considerMigrationGradWatch(input: {
     progress != null && progress >= fireMin() && progress <= fireMax();
   const curveLabel =
     progress != null ? `${progress.toFixed(0)}%` : 'no live curve';
+  const mintKey = String(input.mint || '').trim();
+  const fallbackSym = mintKey.slice(0, 6) || 'token';
   const entry: GradWatchEntry = {
-    mint: input.mint,
-    symbol: input.symbol || input.mint.slice(0, 6),
-    name: input.name || input.symbol || 'Grad watch',
+    mint: mintKey,
+    symbol: coerceTokenLabel(input.symbol, fallbackSym),
+    name: coerceTokenLabel(input.name, coerceTokenLabel(input.symbol, 'Grad watch')),
     status: quality && progress != null ? 'armed' : 'watching',
     createdAt: now,
     updatedAt: now,
@@ -587,15 +626,25 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
   if (w.status !== 'armed') {
     w.lastReason = 'post-grad not armed';
     w.updatedAt = now;
-    try {
-      const { noteProfileWatchFunnel } =
-        require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-      noteProfileWatchFunnel('migration_sniper', 'blocked', 'trigger_not_armed');
-      const { noteTriggerOpenBlocked } =
-        require('./watchPipeline') as typeof import('./watchPipeline');
-      noteTriggerOpenBlocked('trigger_not_armed');
-    } catch {
-      /* optional */
+    const mintKey = String(w.mint || '').trim();
+    if (!triggerNotArmedNoted.has(mintKey)) {
+      triggerNotArmedNoted.add(mintKey);
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchFunnel(
+          'migration_sniper',
+          'blocked',
+          'trigger_not_armed',
+          undefined,
+          mintKey
+        );
+        const { noteTriggerOpenBlocked } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        noteTriggerOpenBlocked('trigger_not_armed');
+      } catch {
+        /* optional */
+      }
     }
     return false;
   }
@@ -1141,7 +1190,7 @@ export function offerMigrationGradWatchFromCandidate(c: {
     try {
       const { noteWatchInsertReject } =
         require('./watchPipeline') as typeof import('./watchPipeline');
-      noteWatchInsertReject('admit_failed');
+      noteWatchInsertReject(lastMigAdmitReject || 'admit_failed');
     } catch {
       /* optional */
     }

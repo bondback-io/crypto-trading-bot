@@ -618,6 +618,26 @@ export async function resolveSourceEntryMcUsd(
   return undefined;
 }
 
+const inflightExecuteBuyMints = new Set<string>();
+
+export function tryAcquireExecuteBuyMint(mint: string): boolean {
+  const key = String(mint || '').trim();
+  if (!key) return false;
+  if (inflightExecuteBuyMints.has(key) || paperTrader.hasOpenMint(key)) {
+    return false;
+  }
+  inflightExecuteBuyMints.add(key);
+  return true;
+}
+
+export function releaseExecuteBuyMint(mint: string): void {
+  inflightExecuteBuyMints.delete(String(mint || '').trim());
+}
+
+export function __resetExecuteBuyMintLockForTests(): void {
+  inflightExecuteBuyMints.clear();
+}
+
 export async function executeBuy(
   mint: string,
   symbol: string,
@@ -643,6 +663,16 @@ export async function executeBuy(
       'trade_entry'
     );
   }
+  if (!tryAcquireExecuteBuyMint(mint)) {
+    return {
+      success: false,
+      mode: config.mode,
+      error: paperTrader.hasOpenMint(mint)
+        ? `Already holding open position on ${mint.slice(0, 8)}…`
+        : `Buy already in flight for ${mint.slice(0, 8)}…`,
+    };
+  }
+  try {
   if (isDeniedCopyMint(mint, config.solMint)) {
     return {
       success: false,
@@ -1145,6 +1175,13 @@ export async function executeBuy(
           `slip=${slippageBps}bps profile=${meta?.tradeProfileId || '?'} — no bundle sent`
       );
     }
+    if (paperTrader.hasOpenMint(mint)) {
+      return {
+        success: false,
+        mode: config.mode,
+        error: `Already holding open position on ${mint.slice(0, 8)}…`,
+      };
+    }
     const position = paperTrader.simulateBuy(
       mint,
       symbol,
@@ -1300,6 +1337,13 @@ export async function executeBuy(
         `MEV=${isMevProtectionEnabled() ? 'ON' : 'OFF'}` +
         (turboOn ? ' · TURBO' : '')
     );
+    if (paperTrader.hasOpenMint(mint)) {
+      return {
+        success: false,
+        mode: 'live',
+        error: `Already holding open position on ${mint.slice(0, 8)}…`,
+      };
+    }
     const live = await executeLiveSwap(quote, keypair, mint, {
       turboMode: turboOn,
       turboPriorityFeeMultiplier: meta?.turboPriorityFeeMultiplier,
@@ -1432,6 +1476,9 @@ export async function executeBuy(
     const message = err instanceof Error ? err.message : String(err);
     console.error('[trade] Live buy failed:', message);
     return { success: false, mode: 'live', error: message };
+  }
+  } finally {
+    releaseExecuteBuyMint(mint);
   }
 }
 

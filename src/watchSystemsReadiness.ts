@@ -248,7 +248,7 @@ export function getWatchSystemsReadiness(): WatchSystemsReadiness {
     migDetail = 'Migration Sniper off';
   } else if (migActive === 0) {
     migColor = 'amber';
-    migDetail = 'No graduation watches yet';
+    migDetail = 'No live graduation watches';
   }
   systems.push({
     id: 'migration',

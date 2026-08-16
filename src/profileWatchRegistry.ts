@@ -125,17 +125,34 @@ function funnelFor(profileId: string): ProfileWatchFunnel {
   return row;
 }
 
+const BLOCKED_DEBOUNCE_MS = 60_000;
+const blockedFunnelSeen = new Map<string, number>();
+
 export function noteProfileWatchFunnel(
   profileId: string | null | undefined,
   kind: ProfileWatchFunnelKind,
   blockedReason?: string,
-  source?: string | string[] | null
+  source?: string | string[] | null,
+  mint?: string | null
 ): void {
   const id = String(profileId || '').trim();
   if (!id) return;
   const row = funnelFor(id);
   if (kind === 'blocked') {
     const reason = String(blockedReason || 'blocked').slice(0, 80);
+    const mintKey = String(mint || '').trim();
+    if (mintKey) {
+      const seenKey = `${id}|${mintKey}|${reason}`;
+      const now = Date.now();
+      const prev = blockedFunnelSeen.get(seenKey) || 0;
+      if (now - prev < BLOCKED_DEBOUNCE_MS) return;
+      blockedFunnelSeen.set(seenKey, now);
+      if (blockedFunnelSeen.size > 400) {
+        for (const [k, ts] of blockedFunnelSeen) {
+          if (now - ts > BLOCKED_DEBOUNCE_MS * 2) blockedFunnelSeen.delete(k);
+        }
+      }
+    }
     row.blocked[reason] = (row.blocked[reason] || 0) + 1;
     return;
   }
@@ -740,7 +757,7 @@ export function applyTriggerConfluenceToWatch(
     if (!gate.ok) {
       entry.triggerBlockReason = gate.reason;
       entry.lastReason = gate.reason;
-      noteProfileWatchFunnel(pid, 'blocked', gate.reason);
+      noteProfileWatchFunnel(pid, 'blocked', gate.reason, undefined, watch.mint);
       try {
         const { noteTriggerOpenBlocked } =
           require('./watchPipeline') as typeof import('./watchPipeline');
@@ -761,8 +778,10 @@ export function applyTriggerConfluenceToWatch(
     }
     return true;
   } catch {
-    /* fail-open on confluence eval throw */
-    return true;
+    /* fail-closed on confluence eval throw */
+    entry.triggerBlockReason = 'confluence_eval_error';
+    noteProfileWatchFunnel(pid, 'blocked', 'confluence_eval_error', undefined, entry.mint);
+    return false;
   }
 }
 
@@ -775,8 +794,8 @@ export function isExtensionLateChase(
   return Number.isFinite(ext) && ext >= DEFAULT_LATE_CHASE_EXT_PCT;
 }
 
-function noteTriggerBlock(profileId: string, reason: string): void {
-  noteProfileWatchFunnel(profileId, 'blocked', reason);
+function noteTriggerBlock(profileId: string, reason: string, mint?: string | null): void {
+  noteProfileWatchFunnel(profileId, 'blocked', reason, undefined, mint);
   try {
     const { noteTriggerOpenBlocked } =
       require('./watchPipeline') as typeof import('./watchPipeline');
@@ -789,7 +808,7 @@ function noteTriggerBlock(profileId: string, reason: string): void {
 /**
  * Last-step gate before armed handoff/open: still armed, not late-chase,
  * live MC remap (MS-over-max → Scalper), then TA confluence.
- * Confluence eval throw fail-opens; a real min-TA miss still blocks.
+ * Confluence eval throw fail-closes; a real min-TA miss still blocks.
  */
 export function prepareArmedWatchOpen(opts: {
   profileId: string;
@@ -808,7 +827,11 @@ export function prepareArmedWatchOpen(opts: {
   let pid = remapPreferredToMcBandOwner(opts.profileId, opts.marketCapUsd);
   const status = String(opts.status || '').toLowerCase();
   if (status && status !== 'armed') {
-    noteTriggerBlock(pid, 'trigger_not_armed');
+    noteTriggerBlock(
+      pid,
+      'trigger_not_armed',
+      (opts.entry as { mint?: string }).mint
+    );
     return { ok: false, profileId: pid, reason: 'trigger_not_armed' };
   }
   if (isExtensionLateChase(opts.lateChase, opts.extensionFromLevelPct)) {
@@ -838,7 +861,12 @@ export function prepareArmedWatchOpen(opts: {
       };
     }
   } catch {
-    /* fail-open on confluence eval throw */
+    /* fail-closed on confluence eval throw */
+    return {
+      ok: false,
+      profileId: pid,
+      reason: 'confluence_eval_error',
+    };
   }
   return { ok: true, profileId: pid };
 }

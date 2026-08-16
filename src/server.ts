@@ -1277,6 +1277,9 @@ export function createServer(): express.Application {
       tradeProfileScore: p.tradeProfileScore,
       tradeProfileReason: p.tradeProfileReason,
       scannerPlaybook: p.scannerPlaybook,
+      confluenceCountAtTrigger: p.confluenceCountAtTrigger,
+      playbookPassed: p.playbookPassed,
+      taToolsPassedAtEntry: p.taToolsPassedAtEntry,
       realizedPnlSol: p.realizedPnlSol,
       maxRunupPct: p.maxRunupPct,
       maxDrawdownPct: p.maxDrawdownPct,
@@ -4955,6 +4958,23 @@ export function createServer(): express.Application {
         diagnostics,
         byProfile,
         watchPipeline,
+        minTaPlaybookConfluences: (() => {
+          try {
+            const { getMinTaPlaybookConfluences } =
+              require('./tradeProfiles') as typeof import('./tradeProfiles');
+            return {
+              dip_buyer: getMinTaPlaybookConfluences('dip_buyer'),
+              migration_sniper: getMinTaPlaybookConfluences('migration_sniper'),
+              steady_compounder: getMinTaPlaybookConfluences('steady_compounder'),
+              high_win_rate: getMinTaPlaybookConfluences('high_win_rate'),
+              scalper: getMinTaPlaybookConfluences('scalper'),
+              momentum_burst: getMinTaPlaybookConfluences('momentum_burst'),
+              trend_rider: getMinTaPlaybookConfluences('trend_rider'),
+            };
+          } catch {
+            return null;
+          }
+        })(),
         conversionDiagnostics: (() => {
           try {
             const { getConversionDiagnostics } =

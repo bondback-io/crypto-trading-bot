@@ -8560,7 +8560,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip Buyer setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence 2. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0" id="dip-watch-rules">Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence 2. Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
@@ -8659,7 +8659,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Migration Sniper</span>
               <span class="setup-watch-title">Graduation watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch ~80% · quality arm · reclaim/hold · min 1 TA confluence at trigger. Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if &lt;$8k for 5m). Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0" id="grad-watch-rules">Watch ~80% · quality arm · reclaim/hold · min 1 TA confluence at trigger. Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if &lt;$8k for 5m). Unwatch cools 15m.</p>
               <p id="grad-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: watch 0 → arm 0 → ready 0 → open 0 · exp 0</p>
             </div>
             <span id="grad-watch-count" class="setup-watch-count mint">—</span>
@@ -13751,6 +13751,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       renderWatchReadinessStrip(data);
       try {
+        const mins = data.minTaPlaybookConfluences || {};
+        const dipRules = document.getElementById('dip-watch-rules');
+        if (dipRules) {
+          const n = mins.dip_buyer != null && isFinite(Number(mins.dip_buyer))
+            ? Math.round(Number(mins.dip_buyer))
+            : 2;
+          dipRules.textContent =
+            'Watch → arm near Fib/S · trigger on reclaim. MC $1M–$500M. Min TA confluence ' +
+            n +
+            '. Unwatch cools 15m.';
+        }
+        const gradRules = document.getElementById('grad-watch-rules');
+        if (gradRules) {
+          const n = mins.migration_sniper != null && isFinite(Number(mins.migration_sniper))
+            ? Math.round(Number(mins.migration_sniper))
+            : 1;
+          gradRules.textContent =
+            'Watch ~80% · quality arm · reclaim/hold · min ' +
+            n +
+            ' TA confluence at trigger. Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if <$8k for 5m). Unwatch cools 15m.';
+        }
+      } catch (_minTa) {}
+      try {
       (function paintWatchPipeline() {
         const el = document.getElementById('watch-pipeline-strip');
         if (!el) return;
@@ -14923,13 +14946,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     async function refreshSetupWatches() {
       try {
+        if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
         const data = await fetchJSON('/api/setup-watches');
         if (data) {
           window._lastSetupWatches = data;
           renderSetupWatchLists(data);
         }
       } catch (_) {}
-      if (typeof refreshEntrySkipDiag === 'function') {
+      const skipsPanel = document.querySelector('[data-watch-setup-panel="skips"]');
+      if (
+        typeof refreshEntrySkipDiag === 'function' &&
+        skipsPanel &&
+        skipsPanel.classList.contains('is-active')
+      ) {
         refreshEntrySkipDiag().catch(function () {});
       }
       if (typeof refreshSmartMirrorWatchlist === 'function') {
@@ -22080,31 +22109,53 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const timeoutMs = (opts && opts.timeoutMs) || 20000;
       const fetchOpts = Object.assign({}, opts || {});
       delete fetchOpts.timeoutMs;
+      const method = String((fetchOpts.method || 'GET')).toUpperCase();
+      if (method === 'GET') {
+        const inflight = window._dashInflightGets || (window._dashInflightGets = {});
+        if (inflight[url]) return inflight[url];
+      }
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      try {
-        const r = await fetch(url, Object.assign({}, fetchOpts, { signal: ctrl.signal }));
-        let data = null;
-        try { data = await r.json(); } catch (_) { data = null; }
-        if (!r.ok) {
-          const msg = (data && data.error) || ('HTTP ' + r.status);
-          throw new Error(msg);
+      const run = (async function () {
+        try {
+          const r = await fetch(url, Object.assign({}, fetchOpts, { signal: ctrl.signal }));
+          let data = null;
+          try { data = await r.json(); } catch (_) { data = null; }
+          if (r.status === 429 || r.status === 503) {
+            const ra = r.headers && r.headers.get ? Number(r.headers.get('Retry-After')) : NaN;
+            const waitMs = Number.isFinite(ra) && ra > 0
+              ? Math.max(8000, Math.min(15000, ra * 1000))
+              : 10000;
+            window._dashBackoffUntil = Date.now() + waitMs;
+          }
+          if (!r.ok) {
+            const msg = (data && data.error) || ('HTTP ' + r.status);
+            throw new Error(msg);
+          }
+          return data;
+        } catch (err) {
+          const msg = err && err.message ? err.message : String(err);
+          if (err && err.name === 'AbortError') {
+            throw new Error(
+              'Request timed out — bot slow or upstream blocked; retry (Discover auto-falls back to curated)'
+            );
+          }
+          if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+            throw new Error('Cannot reach bot server — is it running on this port?');
+          }
+          throw err instanceof Error ? err : new Error(msg);
+        } finally {
+          clearTimeout(timer);
         }
-        return data;
-      } catch (err) {
-        const msg = err && err.message ? err.message : String(err);
-        if (err && err.name === 'AbortError') {
-          throw new Error(
-            'Request timed out — bot slow or upstream blocked; retry (Discover auto-falls back to curated)'
-          );
-        }
-        if (/failed to fetch|networkerror|load failed/i.test(msg)) {
-          throw new Error('Cannot reach bot server — is it running on this port?');
-        }
-        throw err instanceof Error ? err : new Error(msg);
-      } finally {
-        clearTimeout(timer);
+      })();
+      if (method === 'GET') {
+        const inflight = window._dashInflightGets || (window._dashInflightGets = {});
+        inflight[url] = run;
+        run.then(function () {}, function () {}).then(function () {
+          if (inflight[url] === run) delete inflight[url];
+        });
       }
+      return run;
     }
 
     function fmtAgo(ts) {
@@ -23315,6 +23366,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.refreshClosedPositions = refreshClosedPositions;
 
     async function refreshOpenPositionsFast(opts) {
+      if (document.hidden) return;
+      if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
+      if (window._openPosFastInFlight) return;
+      window._openPosFastInFlight = true;
       const fromFill = opts && opts.fromFill === true;
       const genAtStart = window._openPositionsGen || 0;
       try {
@@ -23344,6 +23399,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           });
         }
       } catch (_) {}
+      finally {
+        window._openPosFastInFlight = false;
+      }
     }
     window.refreshOpenPositionsFast = refreshOpenPositionsFast;
     window.applyOpenPositionsList = applyOpenPositionsList;
@@ -26985,14 +27043,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function refresh() {
+      if (document.hidden) return;
+      if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
       if (window._refreshInFlight) return;
       window._refreshInFlight = true;
       const positionsGenAtStart = window._openPositionsGen || 0;
       try {
       const lastSnap = window._lastRefreshSnap || {};
+      const posReq = window._openPosFastInFlight
+        ? Promise.resolve(lastSnap.positions || { open: [], closed: [] })
+        : fetchJSON('/api/positions').catch(function () { return lastSnap.positions || { open: [], closed: [] }; });
       const [statusRes, positions, logs, activity, cfgRes, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
         fetchJSON('/api/status', { timeoutMs: 45000 }).then(function (d) { return { ok: true, d: d }; }).catch(function (e) { return { ok: false, e: e, d: lastSnap.status || null }; }),
-        fetchJSON('/api/positions').catch(function () { return lastSnap.positions || { open: [], closed: [] }; }),
+        posReq,
         fetchJSON('/api/logs?limit=50').catch(function () { return lastSnap.logs || []; }),
         fetchJSON('/api/activity').catch(function () { return lastSnap.activity || []; }),
         fetchJSON('/api/config').catch(function () { return lastSnap.cfg || null; }),
@@ -27019,6 +27082,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       };
       try { if (zionData) handleZionRefresh(zionData); } catch (_) {}
       try { refreshDashboardNotifications(); } catch (_) {}
+      try {
+        const backupPanel = document.querySelector('[data-tab-panel="backup"]');
+        if (backupPanel && !backupPanel.classList.contains('hidden')) {
+          refreshSiteBackupStatus();
+        }
+      } catch (_) {}
+      try {
+        const microPanel = document.querySelector('[data-tab-panel="microbots"]');
+        if (microPanel && !microPanel.classList.contains('hidden')) {
+          refreshLearningHealth({ statusOnly: true });
+        }
+      } catch (_) {}
       try {
         if (status && status.fastProfileRecovery) {
           applyFastRecoveryHints(status.fastProfileRecovery);
@@ -27095,8 +27170,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<br>Last saved: ' + last;
         }
       }
-      try { refreshSiteBackupStatus(); } catch (_) {}
-      try { refreshLearningHealth({ statusOnly: true }); } catch (_) {}
 
       const runWrap = document.getElementById('run-status');
       const dot = document.getElementById('status-dot');
@@ -27642,29 +27715,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (sand ? ' · last check: ' + (sand.safe ? 'safe' : 'RISK') + ' (' + sand.suspiciousBuys + ' buyers)' : '');
       }
 
-      document.getElementById('watched').textContent =
-        (status.monitor.watchedWallets ?? 0) + ' / ' + (status.monitor.trackedWallets ?? status.monitor.watchedWallets ?? 0);
+      const watchedEl = document.getElementById('watched');
+      if (watchedEl) {
+        watchedEl.textContent =
+          (mon.watchedWallets ?? 0) + ' / ' + (mon.trackedWallets ?? mon.watchedWallets ?? 0);
+      }
       const watchedSub = document.getElementById('watched-sub');
       if (watchedSub) {
         watchedSub.textContent =
-          status.monitor.watchingLabel ||
-          ('Watching ' + (status.monitor.watchedWallets ?? 0) + ' wallets');
+          mon.watchingLabel ||
+          ('Watching ' + (mon.watchedWallets ?? 0) + ' wallets');
       }
       const watchStatus = document.getElementById('watching-status');
       if (watchStatus) {
         watchStatus.textContent =
-          (status.monitor.watchingLabel ||
-            ('Watching ' + (status.monitor.watchedWallets ?? 0) + ' of ' +
-              (status.monitor.trackedWallets ?? 0) + ' wallets')) +
-          (status.monitor.running
-            ? status.monitor.paused
+          (mon.watchingLabel ||
+            ('Watching ' + (mon.watchedWallets ?? 0) + ' of ' +
+              (mon.trackedWallets ?? 0) + ' wallets')) +
+          (mon.running
+            ? mon.paused
               ? ' · paused'
               : ' · polling'
             : ' · monitor stopped');
       }
       const watchListEl = document.getElementById('watching-list');
       if (watchListEl) {
-        const list = status.monitor.watchingList || [];
+        const list = mon.watchingList || [];
         const maxShow = 40;
         const shown = list.slice(0, maxShow);
         watchListEl.textContent = list.length
@@ -27674,16 +27750,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (list.length > maxShow ? ' · … +' + (list.length - maxShow) + ' more' : '')
           : 'No wallets currently on the poll list — import wallets or Force Refresh Monitoring.';
       }
-      document.getElementById('open-count').textContent = status.monitor.openPositions;
+      const openCountEl2 = document.getElementById('open-count');
+      if (openCountEl2) openCountEl2.textContent = mon.openPositions;
       updateOpenTradesBadge(
-        status.monitor.openPositions != null
-          ? status.monitor.openPositions
+        mon.openPositions != null
+          ? mon.openPositions
           : status.stats?.openTrades
       );
-      document.getElementById('signals').textContent = status.monitor.recentSignals;
+      const signalsEl = document.getElementById('signals');
+      if (signalsEl) signalsEl.textContent = mon.recentSignals;
       (function updateSignalLight() {
-        const light = status.monitor.signalLight || {};
-        const state = light.state || ((!status.monitor.running || status.monitor.paused) ? (status.monitor.paused ? 'paused' : 'off') : 'quiet');
+        const light = mon.signalLight || {};
+        const state = light.state || ((!mon.running || mon.paused) ? (mon.paused ? 'paused' : 'off') : 'quiet');
         const label = light.label || (
           state === 'live' ? 'Signals: LIVE' :
           state === 'paused' ? 'Signals: paused' :
@@ -27708,12 +27786,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             'Green = wallet-buy seen in last 15m (monitor running + wallets watched). ' +
             'Amber = running but quiet (or paused). ' +
             'Red = stopped, no wallets, or RPC unhealthy. ' +
-            'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? status.monitor.recentSignals ?? 0);
+            'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? mon.recentSignals ?? 0);
         }
       })();
       (function updateEntryPathLight() {
-        const light = status.monitor.entryPathLight || {};
-        const state = light.state || ((!status.monitor.running || status.monitor.paused) ? (status.monitor.paused ? 'paused' : 'off') : 'live');
+        const light = mon.entryPathLight || {};
+        const state = light.state || ((!mon.running || mon.paused) ? (mon.paused ? 'paused' : 'off') : 'live');
         const label = light.label || (
           state === 'live' ? 'Entries: clear' :
           state === 'paused' ? 'Entries: paused' :
@@ -28653,8 +28731,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (ps.migrations || 0) + ' mig' +
           (ps.enableEarlyCurvePriority === false ? ' · early OFF' : '');
       }
-      refreshPumpActivity().catch(() => {});
-      if (typeof refreshAlphaScanFeed === 'function') {
+      const scannerPanel = document.querySelector('[data-tab-panel="scanner"]');
+      const overviewPanelForExtras = document.querySelector('[data-tab-panel="overview"]');
+      if (
+        (scannerPanel && !scannerPanel.classList.contains('hidden')) ||
+        (overviewPanelForExtras && !overviewPanelForExtras.classList.contains('hidden'))
+      ) {
+        refreshPumpActivity().catch(() => {});
+      }
+      if (
+        typeof refreshAlphaScanFeed === 'function' &&
+        scannerPanel &&
+        !scannerPanel.classList.contains('hidden')
+      ) {
         // Status/table only — do not overwrite toggles mid-edit
         refreshAlphaScanFeed({ hydrateForm: false }).catch(() => {});
       }
@@ -38375,12 +38464,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     wireStrategiesOnPopover();
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
-    setInterval(refresh, 5000);
+    setInterval(function () {
+      try {
+        if (document.hidden) return;
+        if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
+        refresh();
+      } catch (_) {}
+    }, 5000);
     // Closed list is omitted from fast polls — refresh the full closed slice periodically.
     void refreshClosedPositions({ force: true });
     setInterval(function () {
       try {
         if (document.hidden) return;
+        if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
         void refreshClosedPositions({ force: false });
       } catch (_) {}
     }, 20000);
@@ -38389,6 +38485,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     setInterval(function () {
       try {
         if (document.hidden) return;
+        if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
         void refreshOpenPositionsFast({ fromFill: false });
       } catch (_) {}
     }, 2000);
@@ -38396,6 +38493,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     setInterval(function () {
       try {
         if (document.hidden) return;
+        if (window._dashBackoffUntil && Date.now() < window._dashBackoffUntil) return;
         const panel = document.querySelector('[data-tab-panel="scanner"]');
         if (!panel || panel.classList.contains('hidden')) return;
         void refreshSetupWatches();
