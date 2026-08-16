@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.375',
+    title: 'Conversion force-fix: proof harness, Scalper-band park, MS watch vs buy',
+    sections: ['scanners', 'microbots', 'tradecraft'],
+    items: [
+      'Stats → Conversion proof plus Watchlist source in/watch/arm on every refresh. Fight-none examples, tagged-not-buy, Dip pattern, and Steady/HWR block reasons are session counters — not a new feed.',
+      '$150k–$1M none is Scalper Mode B waiting arm (disc-skip), not an MC hole. Neighbor retry prefers MB/Reversal quality only; Dip/Trend bands stay put. Orphan MC counts only when no owner covers the mint.',
+      'Tagged graduating maps to Grad watch (ms_setup_stage_low) instead of fight none. Buy still needs live fire-band or armed ultra-fresh post-grad. pump_stream and MIG_FRESH count as tags.',
+      'Armed Dip / support_dip_reclaim no longer dies on pattern-only conviction. Steady armed reclaim eases holders; HWR age_unknown grants on liq+vol+holders or TF structure, else fails as age_unknown_fallback.',
+    ],
+  },
+  {
     version: '1.2.374',
     title: 'Scanner conversion: source funnel, Migration tags, MC seams',
     sections: ['scanners', 'microbots', 'tradecraft'],

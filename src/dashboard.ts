@@ -10412,6 +10412,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" class="botperf-tab-arrow" id="botperf-tab-arrow-left" aria-label="Scroll Stats tabs to start" title="Jump to start of tabs" onclick="scrollBotPerfTabs('start')">‹</button>
           <div class="botperf-subtabs closed-filter" id="botperf-subtabs" role="tablist" aria-label="Stats sections">
             <button type="button" role="tab" class="closed-filter-btn is-active" id="botperf-tab-performance" data-botperf-tab="performance" aria-selected="true" aria-controls="botperf-panel-performance" onclick="setBotPerfTab('performance')">Performance</button>
+            <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-conversion" data-botperf-tab="conversion" aria-selected="false" aria-controls="botperf-panel-conversion" onclick="setBotPerfTab('conversion')">Conversion</button>
             <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-expectancy" data-botperf-tab="expectancy" aria-selected="false" aria-controls="botperf-panel-expectancy" onclick="setBotPerfTab('expectancy')">Expectancy Lift</button>
             <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-tradecraft" data-botperf-tab="tradecraft" aria-selected="false" aria-controls="botperf-panel-tradecraft" onclick="setBotPerfTab('tradecraft')">Trade Craft</button>
             <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
@@ -10501,6 +10502,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="chart-wrap" style="height:180px"><canvas id="chart-scalper-trend"></canvas></div>
         <div id="spt-breakdown" class="text-xs text-slate-400 mt-2"></div>
       </div>
+      </div>
+
+      <div class="botperf-panel space-y-4" id="botperf-panel-conversion" data-botperf-panel="conversion" role="tabpanel" aria-labelledby="botperf-tab-conversion">
+        <div class="card" id="conversion-proof-card">
+          <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+            <div style="min-width:0;flex:1">
+              <div class="section-title">Conversion proof <span class="tip" tabindex="0" data-tip="Session diagnostics: source funnel, MC-band ownership, Migration watch vs buy, Dip pattern soft-pass, Steady/HWR block reasons. Read-only — does not change admits."></span></div>
+              <p class="text-xs text-slate-400 mb-0" id="conv-proof-summary">Open this tab to load conversion diagnostics…</p>
+            </div>
+            <button type="button" class="btn btn-secondary text-xs" onclick="loadConversionProof()">Refresh</button>
+          </div>
+          <div id="conv-proof-body" class="text-xs" style="line-height:1.45"></div>
+        </div>
       </div>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-expectancy" data-botperf-panel="expectancy" role="tabpanel" aria-labelledby="botperf-tab-expectancy">
@@ -13843,6 +13857,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               .join(' ');
             return bits ? ' · route ' + bits : '';
           })() +
+          (function () {
+            const funnel = Array.isArray(wp.source_funnel)
+              ? wp.source_funnel
+              : [];
+            const bits = funnel
+              .slice(0, 8)
+              .map(function (r) {
+                if (!r || typeof r !== 'object') return '';
+                const name = String(r.source || '').replace(/_.*/, '').slice(0, 6);
+                return (
+                  name +
+                  ' ' +
+                  (Number(r.candidates_in) || 0) +
+                  '/' +
+                  (Number(r.watch_inserted) || 0) +
+                  '/' +
+                  (Number(r.armed) || 0)
+                );
+              })
+              .filter(Boolean)
+              .join(' ');
+            return bits ? ' · src in/watch/arm ' + bits : '';
+          })() +
           (srcConvBits ? ' · src→watch ' + srcConvBits : '');
       })();
       } catch (e) {
@@ -16967,6 +17004,136 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.loadLearningMetrics = loadLearningMetrics;
+
+    async function loadConversionProof() {
+      const sum = document.getElementById('conv-proof-summary');
+      const body = document.getElementById('conv-proof-body');
+      try {
+        const data = await fetchJSON('/api/conversion-diagnostics');
+        const d = data && typeof data === 'object' ? data : {};
+        const src = d.source_counts && typeof d.source_counts === 'object' ? d.source_counts : {};
+        const srcBits = Object.keys(src)
+          .slice(0, 10)
+          .map(function (k) {
+            return k + '=' + (Number(src[k]) || 0);
+          })
+          .join(' · ');
+        if (sum) {
+          sum.textContent =
+            'Orphans ' +
+            (Number(d.mc_gap_orphan_count) || 0) +
+            ' · tagged-not-buy ' +
+            (Number(d.migration_tagged_but_not_setup_count) || 0) +
+            ' · dip pattern armed ' +
+            (Number(d.dip_pattern_fail_on_armed_reclaim) || 0) +
+            (d.dip_win_then_pattern_fail_count
+              ? ' · dip win→pattern ' + d.dip_win_then_pattern_fail_count
+              : '');
+        }
+        const fmtMap = function (obj) {
+          const m = obj && typeof obj === 'object' ? obj : {};
+          const keys = Object.keys(m);
+          if (!keys.length) return '—';
+          return keys
+            .slice(0, 8)
+            .map(function (k) {
+              return escHtml(String(k).slice(0, 48)) + '×' + m[k];
+            })
+            .join('<br>');
+        };
+        const examples = Array.isArray(d.mc_orphan_examples) ? d.mc_orphan_examples : [];
+        const migEx = Array.isArray(d.migration_tagged_examples)
+          ? d.migration_tagged_examples
+          : [];
+        const holders = d.resolved_min_holders && typeof d.resolved_min_holders === 'object'
+          ? d.resolved_min_holders
+          : {};
+        if (body) {
+          body.innerHTML =
+            '<p class="mint mb-2">Sources: ' +
+            escHtml(srcBits || 'waiting for first poll') +
+            '</p>' +
+            '<p class="mb-1"><strong>Resolved min holders</strong> Steady ' +
+            (holders.steady_compounder || '—') +
+            ' · HWR ' +
+            (holders.high_win_rate || '—') +
+            '</p>' +
+            '<p class="mb-1"><strong>MC fight none (last)</strong></p>' +
+            (examples.length
+              ? '<ul class="mb-2">' +
+                examples
+                  .slice(0, 6)
+                  .map(function (ex) {
+                    if (!ex || typeof ex !== 'object') return '';
+                    const rej = Array.isArray(ex.rejects)
+                      ? ex.rejects
+                          .slice(0, 4)
+                          .map(function (r) {
+                            return (
+                              escHtml(String(r.profileId || '')) +
+                              ':' +
+                              escHtml(String(r.reason || '').slice(0, 40))
+                            );
+                          })
+                          .join('; ')
+                      : '';
+                    return (
+                      '<li>' +
+                      escHtml(String(ex.mint || '')) +
+                      ' $' +
+                      Math.round(Number(ex.mc) || 0).toLocaleString() +
+                      (ex.classifier
+                        ? ' · ' + escHtml(String(ex.classifier))
+                        : '') +
+                      (rej ? ' — ' + rej : '') +
+                      '</li>'
+                    );
+                  })
+                  .join('') +
+                '</ul>'
+              : '<p class="mint mb-2">No fight-none examples yet.</p>') +
+            '<p class="mb-1"><strong>Tagged Migration not buy</strong></p>' +
+            (migEx.length
+              ? '<ul class="mb-2">' +
+                migEx
+                  .slice(0, 6)
+                  .map(function (ex) {
+                    if (!ex || typeof ex !== 'object') return '';
+                    return (
+                      '<li>' +
+                      escHtml(String(ex.mint || '')) +
+                      ' — ' +
+                      escHtml(String(ex.reason || '').slice(0, 80)) +
+                      '</li>'
+                    );
+                  })
+                  .join('') +
+                '</ul>'
+              : '<p class="mint mb-2">None this session.</p>') +
+            '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' +
+            '<div><strong>Steady blocks</strong><div class="mint">' +
+            fmtMap(d.steady_block_reasons) +
+            '</div></div>' +
+            '<div><strong>HWR blocks</strong><div class="mint">' +
+            fmtMap(d.hwr_block_reasons) +
+            '</div></div></div>';
+        }
+        try {
+          if (typeof window.paintMsSourceFunnel === 'function') {
+            window.paintMsSourceFunnel({ sourceFunnel: d.source_funnel || [] });
+          }
+        } catch (_) {}
+      } catch (err) {
+        if (sum) {
+          sum.textContent =
+            'Conversion diagnostics unavailable: ' + (err.message || String(err));
+        }
+        if (body) {
+          body.innerHTML = '<p class="mint">Could not load conversion proof.</p>';
+        }
+      }
+    }
+    window.loadConversionProof = loadConversionProof;
 
     let chartScalperTrend = null;
 
@@ -20304,6 +20471,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function setBotPerfTab(tab, opts) {
       const allowed = [
         'performance',
+        'conversion',
         'expectancy',
         'tradecraft',
         'learning',
@@ -20344,6 +20512,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (next === 'performance') {
           try { loadMicroBotPerformance(); } catch (_) {}
           try { loadScalperPerformanceTrend(); } catch (_) {}
+        } else if (next === 'conversion') {
+          try { loadConversionProof(); } catch (_) {}
         } else if (next === 'expectancy') {
           try { loadExpectancyLift(); } catch (_) {}
         } else if (next === 'tradecraft') {
@@ -28279,6 +28449,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         scanStEls.forEach(function (scanSt) {
           scanSt.textContent = statusText;
         });
+        try {
+          if (typeof window.paintMsSourceFunnel === 'function') {
+            window.paintMsSourceFunnel(ss);
+          }
+        } catch (_) {}
         const feedHtml = cands.length === 0
           ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on Watchlist or Settings → Market Scanner (TA).</div>'
           : cands.slice(0, 25).map(function (c) {
@@ -31098,6 +31273,102 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       refresh();
     }
 
+    function paintMsSourceFunnel(status) {
+      const funnelEl = document.getElementById('ms-source-funnel');
+      if (!funnelEl) return;
+      try {
+        const rows = Array.isArray(status && status.sourceFunnel)
+          ? status.sourceFunnel
+          : [];
+        if (!rows.length) {
+          funnelEl.textContent = 'Source funnel: waiting for first poll';
+          return;
+        }
+        const pct = function (n) {
+          const v = Number(n);
+          if (!Number.isFinite(v) || v <= 0) return '0%';
+          return Math.round(v * 1000) / 10 + '%';
+        };
+        const topDrop = function (obj) {
+          const map = obj && typeof obj === 'object' ? obj : {};
+          const keys = Object.keys(map);
+          if (!keys.length) return '—';
+          keys.sort(function (a, b) {
+            return (map[b] || 0) - (map[a] || 0);
+          });
+          return String(keys[0]).slice(0, 24) + '×' + map[keys[0]];
+        };
+        const chip = function (st) {
+          const s = String(st || 'zero').replace(/[^a-z0-9_-]/gi, '');
+          return (
+            '<span class="src-chip src-chip-' +
+            s +
+            '">' +
+            escHtml(s || 'zero') +
+            '</span>'
+          );
+        };
+        funnelEl.innerHTML =
+          '<table class="src-funnel-table"><thead><tr>' +
+          '<th>source</th><th></th><th>in</th><th>dedup</th><th>GK</th><th>watch</th><th>arm</th><th>open</th>' +
+          '<th>to watch</th><th>to arm</th><th>to open</th><th>drop</th></tr></thead><tbody>' +
+          rows
+            .map(function (r) {
+              if (!r || typeof r !== 'object') return '';
+              const zero = (r.candidates_in || 0) === 0;
+              const tone =
+                zero && r.status !== 'off' ? 'color:#fbbf24' : '';
+              return (
+                '<tr>' +
+                '<td>' +
+                escHtml(String(r.source || '')) +
+                '</td>' +
+                '<td>' +
+                chip(r.status) +
+                '</td>' +
+                '<td style="' +
+                tone +
+                '">' +
+                (Number(r.candidates_in) || 0) +
+                '</td>' +
+                '<td>' +
+                (Number(r.deduped) || 0) +
+                '</td>' +
+                '<td>' +
+                (Number(r.passed_gatekeeper) || 0) +
+                '</td>' +
+                '<td>' +
+                (Number(r.watch_inserted) || 0) +
+                '</td>' +
+                '<td>' +
+                (Number(r.armed) || 0) +
+                '</td>' +
+                '<td>' +
+                (Number(r.opened) || 0) +
+                '</td>' +
+                '<td>' +
+                pct(r.source_to_watch_rate) +
+                '</td>' +
+                '<td>' +
+                pct(r.watch_to_arm_rate) +
+                '</td>' +
+                '<td>' +
+                pct(r.arm_to_open_rate) +
+                '</td>' +
+                '<td>' +
+                escHtml(topDrop(r.drop_reasons)) +
+                '</td></tr>'
+              );
+            })
+            .join('') +
+          '</tbody></table>';
+      } catch (err) {
+        funnelEl.textContent =
+          'Source funnel: ' + (err && err.message ? err.message : 'unavailable');
+      }
+    }
+    window.paintMsSourceFunnel = paintMsSourceFunnel;
+
     function fillMarketScannerForm(cfg, status) {
       if (!cfg) return;
       const en = document.getElementById('ms-enabled');
@@ -31199,99 +31470,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           pump +
           grad;
       }
-      const funnelEl = document.getElementById('ms-source-funnel');
-      if (funnelEl) {
-        try {
-          const rows = Array.isArray(status && status.sourceFunnel)
-            ? status.sourceFunnel
-            : [];
-          if (!rows.length) {
-            funnelEl.textContent = 'Source funnel: waiting for first poll';
-          } else {
-            const pct = function (n) {
-              const v = Number(n);
-              if (!Number.isFinite(v) || v <= 0) return '0%';
-              return Math.round(v * 1000) / 10 + '%';
-            };
-            const topDrop = function (obj) {
-              const map = obj && typeof obj === 'object' ? obj : {};
-              const keys = Object.keys(map);
-              if (!keys.length) return '—';
-              keys.sort(function (a, b) {
-                return (map[b] || 0) - (map[a] || 0);
-              });
-              return String(keys[0]).slice(0, 24) + '×' + map[keys[0]];
-            };
-            const chip = function (st) {
-              const s = String(st || 'zero').replace(/[^a-z0-9_-]/gi, '');
-              return (
-                '<span class="src-chip src-chip-' +
-                s +
-                '">' +
-                escHtml(s || 'zero') +
-                '</span>'
-              );
-            };
-            funnelEl.innerHTML =
-              '<table class="src-funnel-table"><thead><tr>' +
-              '<th>source</th><th></th><th>in</th><th>dedup</th><th>GK</th><th>watch</th><th>arm</th><th>open</th>' +
-              '<th>to watch</th><th>to arm</th><th>to open</th><th>drop</th></tr></thead><tbody>' +
-              rows
-                .map(function (r) {
-                  if (!r || typeof r !== 'object') return '';
-                  const zero = (r.candidates_in || 0) === 0;
-                  const tone =
-                    zero && r.status !== 'off' ? 'color:#fbbf24' : '';
-                  return (
-                    '<tr>' +
-                    '<td>' +
-                    escHtml(String(r.source || '')) +
-                    '</td>' +
-                    '<td>' +
-                    chip(r.status) +
-                    '</td>' +
-                    '<td style="' +
-                    tone +
-                    '">' +
-                    (Number(r.candidates_in) || 0) +
-                    '</td>' +
-                    '<td>' +
-                    (Number(r.deduped) || 0) +
-                    '</td>' +
-                    '<td>' +
-                    (Number(r.passed_gatekeeper) || 0) +
-                    '</td>' +
-                    '<td>' +
-                    (Number(r.watch_inserted) || 0) +
-                    '</td>' +
-                    '<td>' +
-                    (Number(r.armed) || 0) +
-                    '</td>' +
-                    '<td>' +
-                    (Number(r.opened) || 0) +
-                    '</td>' +
-                    '<td>' +
-                    pct(r.source_to_watch_rate) +
-                    '</td>' +
-                    '<td>' +
-                    pct(r.watch_to_arm_rate) +
-                    '</td>' +
-                    '<td>' +
-                    pct(r.arm_to_open_rate) +
-                    '</td>' +
-                    '<td>' +
-                    escHtml(topDrop(r.drop_reasons)) +
-                    '</td></tr>'
-                  );
-                })
-                .join('') +
-              '</tbody></table>';
-          }
-        } catch (err) {
-          funnelEl.textContent =
-            'Source funnel: ' + (err && err.message ? err.message : 'unavailable');
-        }
-      }
+      try {
+        paintMsSourceFunnel(status);
+      } catch (_) {}
       const statusEl = document.getElementById('scanner-status-tab');
       if (statusEl && status && status.regime) {
         const r = status.regime;

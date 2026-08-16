@@ -60,6 +60,32 @@ export interface McGapOrphanExample {
   mc: number;
 }
 
+export interface McOrphanFightExample {
+  mint: string;
+  mc: number;
+  classifier?: string | null;
+  rejects: Array<{ profileId: string; reason: string }>;
+}
+
+export interface ConversionDiagExample {
+  mint: string;
+  reason: string;
+}
+
+export interface ConversionDiagnosticsSnapshot {
+  mc_gap_orphan_count: number;
+  mc_orphan_examples: McOrphanFightExample[];
+  migration_tagged_but_not_setup_count: number;
+  migration_tagged_examples: ConversionDiagExample[];
+  source_counts: Record<string, number>;
+  source_funnel: SourceFunnelRow[];
+  dip_win_then_pattern_fail_count: number;
+  dip_pattern_fail_on_armed_reclaim: number;
+  steady_block_reasons: Record<string, number>;
+  hwr_block_reasons: Record<string, number>;
+  resolved_min_holders: Record<string, number>;
+}
+
 export interface WatchPipelineSnapshot {
   scanner_candidates_per_min: number;
   watch_insert_attempts: number;
@@ -95,6 +121,7 @@ export interface WatchPipelineSnapshot {
   source_funnel: SourceFunnelRow[];
   conversion_by_source: Record<string, ConversionRateRow>;
   conversion_by_profile: Record<string, ConversionRateRow>;
+  conversion_diagnostics?: ConversionDiagnosticsSnapshot;
 }
 
 const WINDOW_MS = 60_000;
@@ -116,6 +143,14 @@ let watcherLaneLatency: number | string | null = '—';
 let mcGapOrphanCount = 0;
 let orphanExampleMc: number | null = null;
 const orphanExamples: McGapOrphanExample[] = [];
+const EXAMPLE_CAP = 8;
+const orphanFightExamples: McOrphanFightExample[] = [];
+let migrationTaggedNotSetupCount = 0;
+const migrationTaggedExamples: ConversionDiagExample[] = [];
+let dipWinThenPatternFailCount = 0;
+let dipPatternFailOnArmedReclaimCount = 0;
+const steadyBlockReasons: Record<string, number> = {};
+const hwrBlockReasons: Record<string, number> = {};
 let rejectedByAllMcBands = 0;
 
 interface SourceFunnelState {
@@ -431,7 +466,11 @@ export function setWatcherLaneLatency(ms: number | string | null): void {
 /** ≥3 lanes failed only on MC band and nobody passed. */
 export function noteMcGapOrphan(
   mcUsd?: number | null,
-  mint?: string | null
+  mint?: string | null,
+  extra?: {
+    classifier?: string | null;
+    rejects?: Array<{ profileId: string; reason: string }>;
+  }
 ): void {
   mcGapOrphanCount += 1;
   rejectedByAllMcBands += 1;
@@ -446,6 +485,114 @@ export function noteMcGapOrphan(
       }
     }
   }
+  if (extra && (mint || extra.rejects?.length)) {
+    orphanFightExamples.unshift({
+      mint: String(mint || '').slice(0, 12),
+      mc: Number.isFinite(n) ? n : 0,
+      classifier: extra.classifier ? String(extra.classifier).slice(0, 48) : null,
+      rejects: (extra.rejects || []).slice(0, 8).map((r) => ({
+        profileId: String(r.profileId || '').slice(0, 32),
+        reason: String(r.reason || '').slice(0, 120),
+      })),
+    });
+    if (orphanFightExamples.length > EXAMPLE_CAP) {
+      orphanFightExamples.length = EXAMPLE_CAP;
+    }
+  }
+}
+
+function pushExample(
+  list: ConversionDiagExample[],
+  mint: string | null | undefined,
+  reason: string
+): void {
+  const id = String(mint || '').trim();
+  if (!id) return;
+  list.unshift({ mint: id.slice(0, 12), reason: String(reason || '').slice(0, 140) });
+  if (list.length > EXAMPLE_CAP) list.length = EXAMPLE_CAP;
+}
+
+export function noteMcFightNone(input: {
+  mint?: string | null;
+  mc?: number | null;
+  classifier?: string | null;
+  rejects: Array<{ profileId: string; reason: string }>;
+}): void {
+  const n = Number(input.mc);
+  orphanFightExamples.unshift({
+    mint: String(input.mint || '').slice(0, 12),
+    mc: Number.isFinite(n) ? n : 0,
+    classifier: input.classifier ? String(input.classifier).slice(0, 48) : null,
+    rejects: (input.rejects || []).slice(0, 8).map((r) => ({
+      profileId: String(r.profileId || '').slice(0, 32),
+      reason: String(r.reason || '').slice(0, 120),
+    })),
+  });
+  if (orphanFightExamples.length > EXAMPLE_CAP) {
+    orphanFightExamples.length = EXAMPLE_CAP;
+  }
+}
+
+export function noteMigrationTaggedNotSetup(
+  mint?: string | null,
+  reason?: string | null
+): void {
+  migrationTaggedNotSetupCount += 1;
+  pushExample(migrationTaggedExamples, mint, reason || 'ms_setup_stage_low');
+}
+
+export function noteDipWinThenPatternFail(n = 1): void {
+  dipWinThenPatternFailCount += Math.max(1, Math.floor(n));
+}
+
+export function noteDipPatternFailOnArmedReclaim(n = 1): void {
+  dipPatternFailOnArmedReclaimCount += Math.max(1, Math.floor(n));
+}
+
+export function noteSteadyBlockReason(reason: string): void {
+  bump(steadyBlockReasons, reason);
+}
+
+export function noteHwrBlockReason(reason: string): void {
+  bump(hwrBlockReasons, reason);
+}
+
+function topReasons(map: Record<string, number>, cap = 8): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, cap)
+  );
+}
+
+export function getConversionDiagnostics(): ConversionDiagnosticsSnapshot {
+  let resolvedMinHolders: Record<string, number> = {};
+  try {
+    const { resolveTradeProfileDefinition } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    for (const pid of ['steady_compounder', 'high_win_rate'] as const) {
+      const n = Number(resolveTradeProfileDefinition(pid).match.minHolders);
+      if (Number.isFinite(n) && n > 0) resolvedMinHolders[pid] = n;
+    }
+  } catch {
+    resolvedMinHolders = {};
+  }
+  const sourceRows = buildSourceFunnelRows();
+  const source_counts: Record<string, number> = {};
+  for (const row of sourceRows) source_counts[row.source] = row.candidates_in;
+  return {
+    mc_gap_orphan_count: mcGapOrphanCount,
+    mc_orphan_examples: orphanFightExamples.slice(0, EXAMPLE_CAP),
+    migration_tagged_but_not_setup_count: migrationTaggedNotSetupCount,
+    migration_tagged_examples: migrationTaggedExamples.slice(0, EXAMPLE_CAP),
+    source_counts,
+    source_funnel: sourceRows,
+    dip_win_then_pattern_fail_count: dipWinThenPatternFailCount,
+    dip_pattern_fail_on_armed_reclaim: dipPatternFailOnArmedReclaimCount,
+    steady_block_reasons: topReasons(steadyBlockReasons),
+    hwr_block_reasons: topReasons(hwrBlockReasons),
+    resolved_min_holders: resolvedMinHolders,
+  };
 }
 
 export function noteWatchScoreDiagnostics(input: {
@@ -650,5 +797,6 @@ export function getWatchPipelineSnapshot(opts?: {
     source_funnel: sourceRows,
     conversion_by_source,
     conversion_by_profile,
+    conversion_diagnostics: getConversionDiagnostics(),
   };
 }

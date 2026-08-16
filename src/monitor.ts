@@ -334,6 +334,9 @@ function buildTradeProfileMatchContext(
     specialtyFeed: signal.specialtyFeed ?? null,
     scannerSources: signal.scannerSources ?? null,
     scannerCategories: signal.scannerCategories ?? null,
+    scannerReasons: Array.isArray(signal.scannerReasons)
+      ? signal.scannerReasons
+      : null,
     curveProgressSeeded: signal.curveProgressSeeded === true,
     armedWatch:
       signal.armedWatch === true ||
@@ -7750,7 +7753,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         const mcN =
           mc != null && Number.isFinite(Number(mc)) ? Number(mc) : null;
         const mcBandRe =
-          /MC \$\d+ (<|>) (?:lane )?min|MC \$\d+ > max|too mature for Migration Sniper|migration_mc_band/i;
+          /MC \$\d+ (<|>) (?:lane )?min|MC \$\d+ > max|too mature for Migration Sniper|migration_mc_band|ms_mc_band/i;
         const isMcBandOnly = (reason?: string | null) =>
           mcBandRe.test(String(reason || ''));
 
@@ -7809,11 +7812,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         }
 
         // Neighbor hand-off: MC-only miss on the intended lane → covering neighbor
+        // Also: Scalper disc-skip in Scalper band → retry MB/Reversal quality only
+        // (never force a Scalper discretionary buy).
         if (!lanePassers.length && mcN != null && mcN > 0) {
           const intendedMc =
             (preferId
               ? lanes.find((l) => l.profileId === preferId)
               : null) || lanes.find((l) => !l.passed && isMcBandOnly(l.failReason));
+          const scalperLane = lanes.find((l) => l.profileId === 'scalper');
+          const discSkip = /scalper_discretionary_skipped/i.test(
+            String(scalperLane?.failReason || intendedMc?.failReason || '')
+          );
           if (intendedMc && isMcBandOnly(intendedMc.failReason)) {
             let retryPref: string[] | null = null;
             try {
@@ -7872,6 +7881,44 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
                 lanePassers = retryPassers;
               }
             }
+          } else if (discSkip) {
+            let inScalperBand = false;
+            try {
+              const { getScalperMcBand } =
+                require('./tradeProfiles') as typeof import('./tradeProfiles');
+              const band = getScalperMcBand();
+              inScalperBand = mcN >= band.min && mcN <= band.max;
+            } catch {
+              inScalperBand = mcN >= 150_000 && mcN <= 1_000_000;
+            }
+            if (inScalperBand) {
+              const retryPref = ['momentum_burst', 'reversal_scalper'];
+              const retry = evaluateTradeProfileLanes(ctx, {
+                silent: false,
+                eligibleProfileIds: softLaneMode
+                  ? null
+                  : classifierEligibleIds || lanes.map((l) => l.profileId),
+                preferredProfileIds: retryPref,
+                softEligibility: true,
+              });
+              logLaneFightDecisions(
+                signal,
+                retry,
+                lastHmcGate,
+                lastHmcClassifier
+              );
+              const retryPassers = retry.filter(
+                (l) =>
+                  l.passed &&
+                  l.assignment &&
+                  (l.profileId === 'momentum_burst' ||
+                    l.profileId === 'reversal_scalper')
+              );
+              if (retryPassers.length) {
+                lanes = retry;
+                lanePassers = retryPassers;
+              }
+            }
           }
         }
 
@@ -7888,11 +7935,159 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           const mcOnlyFails = lanes.filter(
             (l) => !l.passed && isMcBandOnly(l.failReason)
           );
-          if (mcOnlyFails.length >= 3) {
+          const rejects = lanes
+            .filter((l) => !l.passed && l.failReason !== 'not_applicable')
+            .map((l) => ({
+              profileId: l.profileId,
+              reason: String(l.failReason || ''),
+            }));
+          try {
+            const { noteMcFightNone } =
+              require('./watchPipeline') as typeof import('./watchPipeline');
+            noteMcFightNone({
+              mint: signal.mint,
+              mc: mcN,
+              classifier: lastHmcClassifier
+                ? String(
+                    (lastHmcClassifier as { setup?: string }).setup ||
+                      preferId ||
+                      ''
+                  )
+                : preferId,
+              rejects,
+            });
+          } catch {
+            /* optional */
+          }
+
+          const msLane = lanes.find((l) => l.profileId === 'migration_sniper');
+          const scalperLane = lanes.find((l) => l.profileId === 'scalper');
+          let ownerPrimary: string = 'none';
+          try {
+            const { resolveMcBandOwner, evaluateMsSetup } =
+              require('./tradeProfiles') as typeof import('./tradeProfiles');
+            if (mcN != null && mcN > 0) {
+              ownerPrimary = resolveMcBandOwner(mcN, ctx).primary;
+            }
+            const msSetup = evaluateMsSetup(ctx);
+            if (msSetup.watchOk && !msSetup.buyOk) {
+              try {
+                const { considerMigrationGradWatch } =
+                  require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+                considerMigrationGradWatch({
+                  mint: signal.mint,
+                  symbol: signal.symbol,
+                  name: signal.name,
+                  curveProgressPct: ctx.curveProgressPct ?? null,
+                  marketCapUsd: mcN ?? undefined,
+                  nearMigration: ctx.nearMigration === true,
+                  scannerSources: ctx.scannerSources ?? undefined,
+                  scannerCategories: ctx.scannerCategories ?? undefined,
+                  source: 'lane-fight-ms-watch',
+                  preferredProfileId: 'migration_sniper',
+                });
+              } catch {
+                /* optional */
+              }
+              try {
+                const { noteMigrationTaggedNotSetup } =
+                  require('./watchPipeline') as typeof import('./watchPipeline');
+                noteMigrationTaggedNotSetup(signal.mint, msSetup.reason);
+              } catch {
+                /* optional */
+              }
+              const watchReason = `${msSetup.reason}`;
+              recordRejectedSignal(signal, watchReason);
+              console.log(
+                `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                  `reason=smart-bot lane fight: ${watchReason}`
+              );
+              return false;
+            }
+          } catch {
+            /* optional */
+          }
+          if (
+            /ms_setup_stage_low/i.test(String(msLane?.failReason || '')) &&
+            !/ms_mc_band/i.test(String(msLane?.failReason || ''))
+          ) {
+            try {
+              const { considerMigrationGradWatch } =
+                require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+              considerMigrationGradWatch({
+                mint: signal.mint,
+                symbol: signal.symbol,
+                name: signal.name,
+                curveProgressPct: ctx.curveProgressPct ?? null,
+                marketCapUsd: mcN ?? undefined,
+                nearMigration: ctx.nearMigration === true,
+                scannerSources: ctx.scannerSources ?? undefined,
+                scannerCategories: ctx.scannerCategories ?? undefined,
+                source: 'lane-fight-ms-watch',
+                preferredProfileId: 'migration_sniper',
+              });
+            } catch {
+              /* optional */
+            }
+            const watchReason = String(
+              msLane?.failReason || 'ms_setup_stage_low'
+            );
+            recordRejectedSignal(signal, watchReason);
+            console.log(
+              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                `reason=smart-bot lane fight: ${watchReason}`
+            );
+            return false;
+          }
+
+          const discSkip = /scalper_discretionary_skipped/i.test(
+            String(scalperLane?.failReason || '')
+          );
+          if (discSkip && ownerPrimary === 'scalper') {
+            try {
+              const {
+                isMintOnActiveScalperWatch,
+                offerScalperWatchFromCandidate,
+              } = require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+              if (!isMintOnActiveScalperWatch(signal.mint)) {
+                offerScalperWatchFromCandidate({
+                  mint: signal.mint,
+                  symbol: signal.symbol,
+                  name: signal.name,
+                  marketCapUsd: mcN ?? undefined,
+                  volumeH1Usd: ctx.volumeH1Usd ?? undefined,
+                  volumeM5Usd: ctx.volumeM5Usd ?? undefined,
+                  holderCount: ctx.holderCount ?? undefined,
+                  nearKeyFib: ctx.nearKeyFib === true,
+                  nearSupport: ctx.nearSupport === true,
+                  nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+                  srConfluenceScore: ctx.srConfluenceScore ?? undefined,
+                  lastPriceSol: ctx.priceSol ?? undefined,
+                  supportPriceSol: ctx.supportPriceSol ?? undefined,
+                  resistancePriceSol: ctx.resistancePriceSol ?? undefined,
+                  preferredProfileId: 'scalper',
+                });
+              }
+            } catch {
+              /* optional */
+            }
+            const parkReason = 'owned_scalper_watch: waiting arm';
+            recordRejectedSignal(signal, parkReason);
+            console.log(
+              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                `reason=smart-bot lane fight: ${parkReason}`
+            );
+            return false;
+          }
+
+          if (mcOnlyFails.length >= 3 && ownerPrimary === 'none') {
             try {
               const { noteMcGapOrphan } =
                 require('./watchPipeline') as typeof import('./watchPipeline');
-              noteMcGapOrphan(mcN, signal.mint);
+              noteMcGapOrphan(mcN, signal.mint, {
+                classifier: preferId,
+                rejects,
+              });
             } catch {
               /* optional */
             }
@@ -8793,6 +8988,35 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         `[monitor] Setup-watch soft-pass conviction${migEventHandoff ? ' (MS event)' : ' chart/vol'} for ${signal.symbol}: ${detail}`
       );
     } else {
+    let dipPatternSoft = false;
+    try {
+      const { shouldSoftPassArmedDipPatternFail } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const dipPass = shouldSoftPassArmedDipPatternFail({
+        profileId: signal.candidateTradeProfileId,
+        setupWatchFamily: signal.setupWatchFamily,
+        detectedEntryStyle: signal.entryStyleHint,
+        scannerReasons: signal.scannerReasons,
+        convictionReasons: conviction.reasons,
+      });
+      dipPatternSoft = dipPass.softPass;
+      if (dipPatternSoft) {
+        const { noteDipPatternFailOnArmedReclaim, noteDipWinThenPatternFail } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        noteDipPatternFailOnArmedReclaim();
+        if (signal.candidateTradeProfileId === 'dip_buyer') {
+          noteDipWinThenPatternFail();
+        }
+        console.log(
+          `[monitor] Armed Dip pattern soft-pass conviction for ${signal.symbol}: ${detail}`
+        );
+      }
+    } catch {
+      dipPatternSoft = false;
+    }
+    if (dipPatternSoft) {
+      /* observe then continue — do not hard-skip */
+    } else {
     logStrategyDecision(
       postDipHit
         ? 'post_run_dip'
@@ -8822,6 +9046,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `conviction ${conviction.score}/${conviction.minRequired}: ${detail}`
     );
     return false;
+    }
     }
   }
   if (

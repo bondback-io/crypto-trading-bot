@@ -5,9 +5,14 @@
 import {
   evaluateFreshMigrationEligibility,
   evaluateLaneEntryFloors,
+  evaluateMsSetup,
   getMcHandoffContinuity,
   getTradeProfileDefinition,
   isSwingLaneMustKnowMc,
+  resolveMcBandOwner,
+  resolveTop10SoftAllow,
+  resolveTradeProfileDefinition,
+  shouldSoftPassArmedDipPatternFail,
   swingLaneFillMinMarketCapUsd,
 } from '../src/tradeProfiles';
 import {
@@ -58,8 +63,8 @@ check(
   armedCont.reason
 );
 check(
-  'post-grad deny uses migration_quality_reject',
-  /migration_quality_reject/i.test(cold.reason)
+  'post-grad deny uses ms_quality (alias migration_quality_reject)',
+  /^ms_quality/i.test(cold.reason)
 );
 
 const taggedFire = evaluateFreshMigrationEligibility({
@@ -75,25 +80,35 @@ check(
   taggedFire.reason
 );
 
-const taggedNoCurve = evaluateFreshMigrationEligibility({
+const taggedNoCurve = evaluateMsSetup({
   nearMigration: true,
   scannerCategories: ['graduating'],
   scannerSources: ['graduating_feed'],
   marketCapUsd: 50_000,
 });
 check(
-  'tagged graduating no curve is migration_not_setup',
-  taggedNoCurve.ok === false &&
-    taggedNoCurve.reason.startsWith('migration_not_setup'),
+  'tagged soon + MC in MS band + no live fire → watchOk, ms_setup_stage_low',
+  taggedNoCurve.watchOk === true &&
+    taggedNoCurve.buyOk === false &&
+    taggedNoCurve.reason.startsWith('ms_setup_stage_low'),
   taggedNoCurve.reason
+);
+check(
+  'tagged graduating no curve is not a buy',
+  evaluateFreshMigrationEligibility({
+    nearMigration: true,
+    scannerCategories: ['graduating'],
+    scannerSources: ['graduating_feed'],
+    marketCapUsd: 50_000,
+  }).ok === false
 );
 
 const genericGone = evaluateFreshMigrationEligibility({
   marketCapUsd: 40_000,
 });
 check(
-  'untagged fallthrough is migration_not_setup not generic string',
-  genericGone.reason === 'migration_not_setup' &&
+  'untagged fallthrough is ms_setup_tag_missing not generic string',
+  genericGone.reason === 'ms_setup_tag_missing' &&
     !/not a migration sniper setup/i.test(genericGone.reason)
 );
 
@@ -106,8 +121,8 @@ const mcBand = evaluateFreshMigrationEligibility(
   { maxMarketCapUsd: 150_000 }
 );
 check(
-  'MC over max is migration_mc_band',
-  mcBand.ok === false && mcBand.reason.startsWith('migration_mc_band'),
+  'MC over max is ms_mc_band',
+  mcBand.ok === false && mcBand.reason.startsWith('ms_mc_band'),
   mcBand.reason
 );
 
@@ -552,6 +567,87 @@ const deny42 = considerTrendWatchSetup({
 check(
   'Trend watch $4.2M without specialty below minHits blocked',
   deny42 == null && getTrendFunnelCounters().blocked === blockedMid + 1
+);
+
+const owner350 = resolveMcBandOwner(350_000);
+check(
+  '$350k unarmed Scalper-band owner is scalper (not MC orphan)',
+  owner350.primary === 'scalper',
+  JSON.stringify(owner350)
+);
+
+const taggedFireSetup = evaluateMsSetup({
+  nearMigration: true,
+  scannerCategories: ['soon'],
+  scannerSources: ['graduating_feed'],
+  curveProgressPct: 93,
+  marketCapUsd: 50_000,
+});
+check(
+  'tagged + fire live curve → buyOk',
+  taggedFireSetup.watchOk === true && taggedFireSetup.buyOk === true,
+  taggedFireSetup.reason
+);
+
+const pumpTag = evaluateMsSetup({
+  scannerSources: ['pump_stream'],
+  scannerReasons: ['MIG_FRESH'],
+  marketCapUsd: 40_000,
+});
+check(
+  'pump_stream + MIG_FRESH tags watchOk (not buy)',
+  pumpTag.watchOk === true && pumpTag.buyOk === false,
+  pumpTag.reason
+);
+
+const dipSoft = shouldSoftPassArmedDipPatternFail({
+  profileId: 'dip_buyer',
+  setupWatchFamily: 'dip',
+  detectedEntryStyle: 'support_dip_reclaim',
+  convictionReasons: ['pattern filter: no bullish setup'],
+});
+check(
+  'armed Dip + no bullish patterns → conviction soft-pass helper',
+  dipSoft.softPass === true && dipSoft.patternOnly === true
+);
+const dipHard = shouldSoftPassArmedDipPatternFail({
+  profileId: 'dip_buyer',
+  setupWatchFamily: 'dip',
+  convictionReasons: ['pattern filter: no bullish setup', 'social sentiment blocked'],
+});
+check(
+  'armed Dip pattern fail still hard on social',
+  dipHard.softPass === false
+);
+
+const hwrDef = resolveTradeProfileDefinition('high_win_rate');
+const hwrAgeUnknown = resolveTop10SoftAllow(
+  hwrDef,
+  {
+    volumeH1Usd: 20_000,
+    liquidityUsd: 35_000,
+    holderCount: 200,
+    marketCapUsd: 90_000_000,
+  },
+  40,
+  32
+);
+check(
+  'HWR age_unknown + known liq/vol/holders → allow',
+  hwrAgeUnknown.allow === true &&
+    hwrAgeUnknown.grantTag === 'top10_soft_allow_age_unknown_quality_pass',
+  hwrAgeUnknown.detail
+);
+const hwrDeny = resolveTop10SoftAllow(
+  hwrDef,
+  { marketCapUsd: 90_000_000 },
+  40,
+  32
+);
+check(
+  'HWR age_unknown without substitutes → age_unknown_fallback deny',
+  hwrDeny.allow === false && hwrDeny.rejectKey === 'age_unknown_fallback',
+  hwrDeny.detail
 );
 
 if (failed) {

@@ -1174,6 +1174,19 @@ export function createServer(): express.Application {
     res.json(paperTrader.getStats());
   });
 
+  app.get('/api/conversion-diagnostics', (_req: Request, res: Response) => {
+    try {
+      const { getConversionDiagnostics } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      res.json({ ok: true, ...getConversionDiagnostics() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   /**
    * Cap + slim closed rows on dashboard polls.
    * Full fat objects (~3–4KB each × 100) were ~275KB every 2–5s and froze the UI.
@@ -4900,6 +4913,15 @@ export function createServer(): express.Application {
         diagnostics,
         byProfile,
         watchPipeline,
+        conversionDiagnostics: (() => {
+          try {
+            const { getConversionDiagnostics } =
+              require('./watchPipeline') as typeof import('./watchPipeline');
+            return getConversionDiagnostics();
+          } catch {
+            return null;
+          }
+        })(),
         watchReadiness: (() => {
           try {
             const { getWatchSystemsReadiness } =

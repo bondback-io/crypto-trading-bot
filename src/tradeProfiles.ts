@@ -1503,6 +1503,8 @@ export interface TradeProfileMatchContext {
   entryStyleHint?: string | null;
   scannerSources?: string[] | null;
   scannerCategories?: string[] | null;
+  /** Classifier / scanner reason codes (e.g. MIG_FRESH) */
+  scannerReasons?: string[] | null;
   /** True when curveProgressPct was seeded from feed tags, not live RPC */
   curveProgressSeeded?: boolean;
 }
@@ -2048,6 +2050,72 @@ export function getMcHandoffContinuity(): McHandoffContinuity {
     scalperMax: scalper.max,
     dipMin: dip.min,
   };
+}
+
+export type McBandOwnerId =
+  | 'migration_sniper'
+  | 'reversal_scalper'
+  | 'momentum_burst'
+  | 'scalper'
+  | 'dip_buyer'
+  | 'trend_rider'
+  | 'steady_compounder'
+  | 'high_win_rate'
+  | 'none';
+
+export interface McBandOwner {
+  primary: McBandOwnerId;
+  overflow?: McBandOwnerId;
+}
+
+/**
+ * Who owns this MC from resolved bands. $150k–Scalper max is Scalper Mode B
+ * (watch/arm), not a catalog hole. Does not reopen discretionary Scalper.
+ */
+export function resolveMcBandOwner(
+  mc: number,
+  ctx?: TradeProfileMatchContext
+): McBandOwner {
+  const n = Number(mc);
+  if (!Number.isFinite(n) || n <= 0) return { primary: 'none' };
+  const cont = getMcHandoffContinuity();
+  const scalper = getScalperMcBand();
+  const dip = getDipBuyerMcBand();
+  const lowerMax = Math.max(cont.msMax, cont.reversalMax ?? 0);
+  if (n <= lowerMax) {
+    if (ctx && hasMigrationLaneSignals(ctx)) {
+      return { primary: 'migration_sniper' };
+    }
+    return { primary: 'reversal_scalper', overflow: 'momentum_burst' };
+  }
+  if (n <= scalper.max) {
+    let mbMax = 400_000;
+    try {
+      const m = resolveTradeProfileDefinition('momentum_burst').match;
+      const x = Number(m.maxMarketCapUsd);
+      if (Number.isFinite(x) && x > 0) mbMax = x;
+    } catch {
+      /* catalog */
+    }
+    const overflow =
+      ctx && hasMomentumLaneSignals(ctx) && n <= mbMax
+        ? ('momentum_burst' as const)
+        : undefined;
+    return { primary: 'scalper', overflow };
+  }
+  if (n >= dip.min && n <= dip.max) {
+    const dipDna =
+      ctx != null &&
+      (ctx.hmcSetup === 'dip' ||
+        String(ctx.detectedEntryStyle || '') === 'support_dip_reclaim' ||
+        String(ctx.setupWatchFamily || '').toLowerCase() === 'dip');
+    if (dipDna || n >= dip.min) {
+      return { primary: 'dip_buyer', overflow: 'trend_rider' };
+    }
+  }
+  if (n >= 80_000_000) return { primary: 'high_win_rate' };
+  if (n >= 20_000_000) return { primary: 'steady_compounder' };
+  return { primary: 'trend_rider' };
 }
 
 /** Resolved lane min after seam continuity (Scalper / Dip only). */
@@ -2946,6 +3014,7 @@ export function hasMigrationSourceTag(ctx: {
   nearMigration?: boolean;
   scannerCategories?: string[] | null;
   scannerSources?: string[] | null;
+  scannerReasons?: string[] | null;
   preferProfileId?: string | null;
 }): boolean {
   if (ctx.nearMigration === true) return true;
@@ -2955,21 +3024,28 @@ export function hasMigrationSourceTag(ctx: {
   }
   for (const s of ctx.scannerSources || []) {
     const k = String(s).toLowerCase();
-    if (k === 'graduating_feed' || k === 'alphascan') return true;
+    if (k === 'graduating_feed' || k === 'alphascan' || k === 'pump_stream') {
+      return true;
+    }
+  }
+  for (const r of ctx.scannerReasons || []) {
+    if (/mig_fresh|MIG_FRESH/i.test(String(r))) return true;
   }
   return false;
 }
 
+export interface MsSetupResult {
+  watchOk: boolean;
+  buyOk: boolean;
+  reason: string;
+}
+
 /**
- * Migration Sniper eligibility — primary: pre-grad curve fire (≥ minCurve, still
- * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 180s)
- * only when this mint already has armed Grad-watch continuity (not a cold chase).
- *
- * Near-curve below fire band stays on the graduation watchlist (not a buy).
- * Mature PumpSwap / stale migrations are rejected.
- * Seeded curve % (feed tags) never naked-buys — watching until live enrich.
+ * Migration Sniper setup: watch vs buy.
+ * watchOk = tag/stage valid + MC in MS band + not late-chase + (live or tagged near-grad)
+ * buyOk   = live fire-band curve OR ultra-fresh post-grad with armed grad continuity
  */
-export function evaluateFreshMigrationEligibility(
+export function evaluateMsSetup(
   ctx: TradeProfileMatchContext,
   rules?: Pick<
     TradeProfileMatchRules,
@@ -2979,7 +3055,7 @@ export function evaluateFreshMigrationEligibility(
     | 'maxCurveProgressPct'
     | 'maxMigrationAgeSec'
   >
-): { ok: boolean; reason: string } {
+): MsSetupResult {
   const minCurve =
     rules?.minCurveProgressPct != null &&
     Number.isFinite(rules.minCurveProgressPct)
@@ -3005,15 +3081,32 @@ export function evaluateFreshMigrationEligibility(
       : null;
   const tagged = hasMigrationSourceTag(ctx);
   const seeded = ctx.curveProgressSeeded === true;
+  const armedGrad =
+    ctx.armedWatch === true &&
+    /grad|mig/i.test(String(ctx.setupWatchFamily || ''));
 
   if (mc != null && mc > maxMc) {
     return {
-      ok: false,
-      reason: `migration_mc_band: MC $${Math.round(mc)} too mature for Migration Sniper (max $${maxMc})`,
+      watchOk: false,
+      buyOk: false,
+      reason: `ms_mc_band: MC $${Math.round(mc)} too mature for Migration Sniper (max $${maxMc})`,
     };
   }
 
-  // Primary: pre-grad fire — live curve only (seeded % is watch, not a buy)
+  if (String(ctx.detectedEntryStyle || '') === 'late_chase') {
+    return {
+      watchOk: false,
+      buyOk: false,
+      reason: 'ms_late_chase',
+    };
+  }
+
+  const liveOrTagged =
+    ctx.nearMigration === true ||
+    tagged ||
+    ctx.isMigration === true ||
+    (progress != null && progress >= 70);
+
   const inFireBand =
     progress != null &&
     progress >= minCurve &&
@@ -3021,50 +3114,21 @@ export function evaluateFreshMigrationEligibility(
     ctx.isMigration !== true &&
     !seeded;
 
-  if (inFireBand && (ctx.nearMigration === true || tagged || progress != null)) {
+  if (inFireBand && liveOrTagged) {
     return {
-      ok: true,
+      watchOk: true,
+      buyOk: true,
       reason: `pre-grad curve ${progress!.toFixed(1)}% (fire ≥${minCurve}%)`,
     };
   }
 
-  // Watching band — not yet a sniper buy
-  if (
-    ctx.isMigration !== true &&
-    (ctx.nearMigration === true ||
-      tagged ||
-      (progress != null && progress >= 70))
-  ) {
-    if (seeded) {
-      return {
-        ok: false,
-        reason: `curve ${progress != null ? progress.toFixed(1) : '?'}% seeded — watching, need live enrich`,
-      };
-    }
-    if (progress != null && progress < minCurve) {
-      return {
-        ok: false,
-        reason: `curve ${progress.toFixed(1)}% — watching, fire at ≥${minCurve}%`,
-      };
-    }
-    if (progress == null) {
-      return {
-        ok: false,
-        reason: 'migration_not_setup: tagged graduating but no curve progress',
-      };
-    }
-  }
-
-  // Fallback: ultra-fresh post-grad — armed Grad-watch continuity only
   if (ctx.isMigration === true && ctx.migrationFresh === true) {
-    const fam = String(ctx.setupWatchFamily || '').toLowerCase();
-    const armedGrad =
-      ctx.armedWatch === true && (fam === 'grad' || fam === 'mig');
     if (!armedGrad) {
       return {
-        ok: false,
+        watchOk: tagged || ctx.nearMigration === true,
+        buyOk: false,
         reason:
-          'migration_quality_reject: post-grad fallback denied — no armed grad-watch continuity',
+          'ms_quality: post-grad fallback denied — no armed grad-watch continuity',
       };
     }
     const ageMs =
@@ -3073,37 +3137,131 @@ export function evaluateFreshMigrationEligibility(
         : null;
     if (ageMs == null) {
       return {
-        ok: false,
-        reason: `post-grad without ≤${maxPostGradSec}s age stamp — not sniper fallback`,
+        watchOk: true,
+        buyOk: false,
+        reason: `ms_setup_stage_low: post-grad without ≤${maxPostGradSec}s age stamp — not sniper fallback`,
       };
     }
     if (ageMs > maxPostGradSec * 1000) {
       return {
-        ok: false,
-        reason: `post-grad ${Math.round(ageMs / 1000)}s > ${maxPostGradSec}s fallback window`,
+        watchOk: tagged || ctx.nearMigration === true,
+        buyOk: false,
+        reason: `ms_setup_stage_low: post-grad ${Math.round(ageMs / 1000)}s > ${maxPostGradSec}s fallback window`,
       };
     }
     return {
-      ok: true,
+      watchOk: true,
+      buyOk: true,
       reason: `ultra-fresh post-grad ${Math.round(ageMs / 1000)}s (armed grad continuity)`,
+    };
+  }
+
+  if (liveOrTagged && ctx.isMigration !== true) {
+    if (seeded) {
+      return {
+        watchOk: true,
+        buyOk: false,
+        reason: `ms_setup_stage_low: curve ${progress != null ? progress.toFixed(1) : '?'}% seeded — watching, need live enrich`,
+      };
+    }
+    if (progress != null && progress < minCurve) {
+      return {
+        watchOk: true,
+        buyOk: false,
+        reason: `ms_setup_stage_low: curve ${progress.toFixed(1)}% — watching, fire at ≥${minCurve}%`,
+      };
+    }
+    if (progress == null) {
+      return {
+        watchOk: true,
+        buyOk: false,
+        reason: 'ms_setup_stage_low: tagged graduating — watching, no live curve yet',
+      };
+    }
+    return {
+      watchOk: true,
+      buyOk: false,
+      reason: 'ms_setup_stage_low',
     };
   }
 
   if (ctx.earlyBuy === true && !inFireBand) {
     return {
-      ok: false,
-      reason: 'migration_not_setup: early curve buy — not in sniper fire band',
+      watchOk: false,
+      buyOk: false,
+      reason: 'ms_setup_stage_low: early curve buy — not in sniper fire band',
     };
   }
 
   if (tagged) {
     return {
-      ok: false,
-      reason: 'migration_not_setup: tagged graduating but not a buy setup',
+      watchOk: true,
+      buyOk: false,
+      reason: 'ms_setup_stage_low',
     };
   }
 
-  return { ok: false, reason: 'migration_not_setup' };
+  return { watchOk: false, buyOk: false, reason: 'ms_setup_tag_missing' };
+}
+
+/**
+ * Armed Dip / support_dip_reclaim: do not hard-fail solely on chart/pattern.
+ * Social, session, and late-chase stay hard.
+ */
+export function shouldSoftPassArmedDipPatternFail(input: {
+  profileId?: string | null;
+  setupWatchFamily?: string | null;
+  detectedEntryStyle?: string | null;
+  scannerReasons?: string[] | string | null;
+  convictionReasons: string[];
+}): { softPass: boolean; patternOnly: boolean } {
+  const reasons = (input.convictionReasons || []).map((r) => String(r || ''));
+  const bits = Array.isArray(input.scannerReasons)
+    ? input.scannerReasons.join(' ')
+    : String(input.scannerReasons || '');
+  const armedDip =
+    input.profileId === 'dip_buyer' ||
+    String(input.setupWatchFamily || '').toLowerCase() === 'dip' ||
+    String(input.detectedEntryStyle || '') === 'support_dip_reclaim' ||
+    /dip-watch:triggered/i.test(bits);
+  const hardKeep = reasons.some((r) =>
+    /social|session blocked|market session|late.?chase/i.test(r)
+  );
+  const patternOrChart = reasons.some((r) =>
+    /pattern filter: no bullish setup|chart|pattern|bull.?flag|fib|technical/i.test(
+      r
+    )
+  );
+  const onlySoft =
+    reasons.length > 0 &&
+    reasons.every((r) =>
+      /pattern filter: no bullish setup|chart|pattern|bull.?flag|fib|technical|volume spike/i.test(
+        r
+      )
+    );
+  return {
+    patternOnly: onlySoft,
+    softPass: armedDip && patternOrChart && onlySoft && !hardKeep,
+  };
+}
+
+/**
+ * Migration Sniper buy eligibility. Watch-only names return ok:false with
+ * ms_setup_stage_low (park Grad watch — not a fight none).
+ */
+export function evaluateFreshMigrationEligibility(
+  ctx: TradeProfileMatchContext,
+  rules?: Pick<
+    TradeProfileMatchRules,
+    | 'maxTokenAgeHours'
+    | 'maxMarketCapUsd'
+    | 'minCurveProgressPct'
+    | 'maxCurveProgressPct'
+    | 'maxMigrationAgeSec'
+  >
+): { ok: boolean; reason: string } {
+  const setup = evaluateMsSetup(ctx, rules);
+  return { ok: setup.buyOk, reason: setup.reason };
 }
 
 /** Soft category: fresh mig only — stale DEX tokens must compete as trend/dip/HWR. */
@@ -3464,7 +3622,8 @@ export type Top10SoftAllowGrantTag =
   | 'top10_soft_allow_age_known'
   /** @deprecated alias — prefer top10_soft_allow_age_known */
   | 'top10_soft_allow'
-  | 'top10_soft_allow_age_unknown_fallback';
+  | 'top10_soft_allow_age_unknown_fallback'
+  | 'top10_soft_allow_age_unknown_quality_pass';
 
 export type LaneEntryFloorsResult = {
   ok: boolean;
@@ -3594,6 +3753,63 @@ export function resolveTop10SoftAllow(
       grantTag: 'top10_soft_allow_age_unknown_fallback',
       sizeMult: TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT,
       detail: `${def.name} top10_soft_allow_age_unknown_fallback ${top10.toFixed(1)}% (hard max ${maxTop10}% · soft ≤${softCeil}% · Steady age-unknown grant)`,
+    };
+  }
+
+  if (def.id === 'high_win_rate' && ageUnknown) {
+    const volH1Hwr =
+      ctx.volumeH1Usd != null && Number.isFinite(ctx.volumeH1Usd)
+        ? Number(ctx.volumeH1Usd)
+        : null;
+    const liqHwr =
+      ctx.liquidityUsd != null && Number.isFinite(ctx.liquidityUsd)
+        ? Number(ctx.liquidityUsd)
+        : null;
+    const holdersHwr =
+      ctx.holderCount != null && Number.isFinite(ctx.holderCount)
+        ? Number(ctx.holderCount)
+        : null;
+    const minVolHwr =
+      def.match.minVolumeH1Usd != null &&
+      Number.isFinite(def.match.minVolumeH1Usd) &&
+      def.match.minVolumeH1Usd > 0
+        ? Number(def.match.minVolumeH1Usd)
+        : 0;
+    const minLiqHwr = TOP10_SOFT_FALLBACK_MIN_LIQ_USD[def.id] ?? 15_000;
+    const minHoldersHwr =
+      def.match.minHolders != null &&
+      Number.isFinite(def.match.minHolders) &&
+      def.match.minHolders > 0
+        ? Number(def.match.minHolders)
+        : 0;
+    const knownQuality =
+      volH1Hwr != null &&
+      volH1Hwr >= minVolHwr &&
+      liqHwr != null &&
+      liqHwr >= minLiqHwr &&
+      (minHoldersHwr <= 0 ||
+        (holdersHwr != null && holdersHwr >= minHoldersHwr));
+    const tfStructure =
+      ctx.nearMultiTfSupport === true ||
+      ctx.nearSupport === true ||
+      (ctx.srConfluenceScore != null &&
+        Number.isFinite(ctx.srConfluenceScore) &&
+        Number(ctx.srConfluenceScore) >= 40) ||
+      (Array.isArray(ctx.supportTfHits) && ctx.supportTfHits.length >= 2);
+    if (knownQuality || tfStructure) {
+      return {
+        allow: true,
+        grantTag: 'top10_soft_allow_age_unknown_quality_pass',
+        sizeMult: TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT,
+        detail: `${def.name} age_unknown_quality_pass ${top10.toFixed(1)}% (${
+          knownQuality ? 'liq+vol+holders' : 'TF structure'
+        } · hard max ${maxTop10}% · soft ≤${softCeil}%)`,
+      };
+    }
+    return {
+      allow: false,
+      rejectKey: 'age_unknown_fallback',
+      detail: `${def.name} age_unknown_fallback: missing liq/vol/holders and TF structure`,
     };
   }
 
@@ -3857,13 +4073,12 @@ export function evaluateLaneEntryFloors(
         const tag = soft.grantTag ?? 'top10_soft_allow_age_known';
         const mult =
           soft.sizeMult ??
-          (tag === 'top10_soft_allow_age_unknown_fallback'
+          (/age_unknown/i.test(tag)
             ? TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT
             : TOP10_SOFT_ALLOW_SIZE_MULT);
-        const via =
-          tag === 'top10_soft_allow_age_unknown_fallback'
-            ? 'via age-unknown fallback'
-            : 'via age known';
+        const via = /age_unknown/i.test(tag)
+          ? 'via age-unknown fallback'
+          : 'via age known';
         console.log(
           `[trade-profiles] top10_soft_allow GRANT ${ctx.symbol || 'token'} · ${via} · ${soft.detail}` +
             ` · size ×${mult}`
@@ -3889,7 +4104,10 @@ export function evaluateLaneEntryFloors(
       }
       return {
         ok: false,
-        reason: soft.detail,
+        reason:
+          soft.rejectKey === 'age_unknown_fallback'
+            ? `age_unknown_fallback: ${soft.detail}`
+            : soft.detail,
       };
     }
   }
@@ -4164,6 +4382,18 @@ export function evaluateTradeProfileLanes(
         passed: false,
         failReason: floors.reason,
       });
+      try {
+        const { noteSteadyBlockReason, noteHwrBlockReason } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        if (def.id === 'steady_compounder' && floors.reason !== 'not_applicable') {
+          noteSteadyBlockReason(floors.reason || 'lane floors');
+        }
+        if (def.id === 'high_win_rate' && floors.reason !== 'not_applicable') {
+          noteHwrBlockReason(floors.reason || 'lane floors');
+        }
+      } catch {
+        /* optional */
+      }
       continue;
     }
     const scored = scoreProfile(def, ctx);
@@ -4179,6 +4409,14 @@ export function evaluateTradeProfileLanes(
         passed: false,
         failReason: scored.reason,
       });
+      try {
+        const { noteSteadyBlockReason, noteHwrBlockReason } =
+          require('./watchPipeline') as typeof import('./watchPipeline');
+        if (def.id === 'steady_compounder') noteSteadyBlockReason(scored.reason);
+        if (def.id === 'high_win_rate') noteHwrBlockReason(scored.reason);
+      } catch {
+        /* optional */
+      }
       continue;
     }
     let laneScore = Math.round(scored.score * 10) / 10;
@@ -5240,7 +5478,16 @@ function scoreProfile(
         : (m.minTokenAgeHours ?? 8);
     // Hard Min token age is in evaluateLaneEntryFloors; keep soft quality below
     if (m.minHolders != null && holders != null && holders < m.minHolders) {
-      return { score: 0, reason: `holders ${holders} < ${m.minHolders}` };
+      const armedQualityReclaim =
+        ctx.armedWatch === true &&
+        (/steady|quality|hwr|dip/i.test(String(ctx.setupWatchFamily || '')) ||
+          /quality_structure_reclaim/i.test(
+            String(ctx.detectedEntryStyle || '')
+          ));
+      if (!armedQualityReclaim) {
+        return { score: 0, reason: `holders ${holders} < ${m.minHolders}` };
+      }
+      bits.push(`holders ${holders} armed ease`);
     }
     if (m.minVolumeH1Usd != null && volH1 != null && volH1 < m.minVolumeH1Usd) {
       return {
@@ -5907,7 +6154,8 @@ function buildAssignmentFromDef(
       floorsHint.top10SoftAllowTag ?? 'top10_soft_allow_age_known';
     const softMult =
       floorsHint.sizeMult ??
-      (softTag === 'top10_soft_allow_age_unknown_fallback'
+      (softTag === 'top10_soft_allow_age_unknown_fallback' ||
+      softTag === 'top10_soft_allow_age_unknown_quality_pass'
         ? TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT
         : TOP10_SOFT_ALLOW_SIZE_MULT);
     exitRules = applyTop10SoftAllowSizeHaircut(exitRules, true, softMult);

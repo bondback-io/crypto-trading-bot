@@ -407,7 +407,10 @@ export function considerMigrationGradWatch(input: {
     input.curveProgressPct != null && Number.isFinite(input.curveProgressPct)
       ? Number(input.curveProgressPct)
       : null;
-  if (progress == null || progress < watchPct()) return null;
+  if (progress == null || progress < watchPct()) {
+    if (!tagged) return null;
+    // Tagged graduating: admit as watching until live curve enrich.
+  }
 
   const maxMc = getMigrationSniperMaxMcUsd();
   // Align soft watch admit with hard buy max so the list does not trigger
@@ -435,7 +438,7 @@ export function considerMigrationGradWatch(input: {
     existing.holderGrowthPct =
       input.holderGrowthPct ?? existing.holderGrowthPct;
     existing.buyPressureUsd = input.buyPressureUsd ?? existing.buyPressureUsd;
-    const peak = Math.max(peakProgress.get(input.mint) ?? 0, progress);
+    const peak = Math.max(peakProgress.get(input.mint) ?? 0, progress ?? 0);
     peakProgress.set(input.mint, peak);
     stampGradWatchEligibility(existing);
     return existing;
@@ -449,15 +452,18 @@ export function considerMigrationGradWatch(input: {
   }
   const now = Date.now();
   const quality = qualitySoftOk(input);
-  const inFire = progress >= fireMin() && progress <= fireMax();
+  const inFire =
+    progress != null && progress >= fireMin() && progress <= fireMax();
+  const curveLabel =
+    progress != null ? `${progress.toFixed(0)}%` : 'no live curve';
   const entry: GradWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
     name: input.name || input.symbol || 'Grad watch',
-    status: quality ? 'armed' : 'watching',
+    status: quality && progress != null ? 'armed' : 'watching',
     createdAt: now,
     updatedAt: now,
-    armedAt: quality ? now : null,
+    armedAt: quality && progress != null ? now : null,
     expiresAt: now + ttlMs(),
     curveProgressPct: progress,
     marketCapUsd: input.marketCapUsd,
@@ -467,21 +473,21 @@ export function considerMigrationGradWatch(input: {
     buyPressureUsd: input.buyPressureUsd ?? null,
     source: input.source,
     belowLowMcSinceMs: null,
-    lastReason: quality
-      ? `armed @ ${progress.toFixed(0)}%`
+    lastReason: quality && progress != null
+      ? `armed @ ${curveLabel}`
       : inFire
-        ? `in fire band ${progress.toFixed(0)}% — waiting quality arm`
-        : `watching @ ${progress.toFixed(0)}%`,
+        ? `in fire band ${curveLabel} — waiting quality arm`
+        : `watching @ ${curveLabel}`,
     preferredProfileId: 'migration_sniper',
   };
   watches.set(input.mint, entry);
   stampGradWatchEligibility(entry, true);
-  peakProgress.set(input.mint, progress);
+  peakProgress.set(input.mint, progress ?? 0);
   funnel.watchAdmit += 1;
   if (entry.status === 'armed') funnel.armed += 1;
   console.log(
     `[grad-watch] ${entry.status.toUpperCase()} ${entry.symbol} ` +
-      `curve=${progress.toFixed(1)}%`
+      `curve=${progress != null ? progress.toFixed(1) + '%' : 'seeded/tag'}`
   );
   ensureFastPoll();
   return entry;
