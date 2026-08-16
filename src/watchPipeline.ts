@@ -111,6 +111,10 @@ export interface ConversionDiagnosticsSnapshot {
   dip_waiting_arm: number;
   dip_arm: number;
   dip_open: number;
+  watchers_isolate: boolean;
+  trading_entry_pause: boolean;
+  arm_timeout_total: number;
+  open_fail_total: number;
 }
 
 export interface WatchPipelineSnapshot {
@@ -749,6 +753,48 @@ export function getConversionDiagnostics(): ConversionDiagnosticsSnapshot {
     dip_waiting_arm,
     dip_arm,
     dip_open,
+    watchers_isolate: (() => {
+      try {
+        const { isWatchersIsolate } =
+          require('./watchArmLifecycle') as typeof import('./watchArmLifecycle');
+        return isWatchersIsolate();
+      } catch {
+        return false;
+      }
+    })(),
+    trading_entry_pause: (() => {
+      try {
+        const { isTradingEntryPaused } =
+          require('./watchArmLifecycle') as typeof import('./watchArmLifecycle');
+        return isTradingEntryPaused();
+      } catch {
+        return false;
+      }
+    })(),
+    arm_timeout_total: (() => {
+      try {
+        const { getWatchArmLifecycleSnapshot } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        return Object.values(getWatchArmLifecycleSnapshot()).reduce(
+          (n, r) => n + (r.arm_timeout_count || 0),
+          0
+        );
+      } catch {
+        return 0;
+      }
+    })(),
+    open_fail_total: (() => {
+      try {
+        const { getWatchArmLifecycleSnapshot } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        return Object.values(getWatchArmLifecycleSnapshot()).reduce(
+          (n, r) => n + (r.open_fail_count || 0),
+          0
+        );
+      } catch {
+        return 0;
+      }
+    })(),
   };
 }
 

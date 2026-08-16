@@ -25,6 +25,13 @@ import {
   watchLifecycleAction,
   WATCH_ARM_SCORE_FLOOR,
 } from './watchPriorityScore';
+import {
+  applyArmLifecycleTimeout,
+  recomputeNearSupportFromPrice,
+  resetArmClockOnArm,
+  stampWatchVolumeOk,
+  stampWatchingHoldReason,
+} from './watchArmLifecycle';
 
 export type TrendWatchStatus =
   | 'watching'
@@ -78,6 +85,9 @@ export interface TrendWatchEntry {
   watchScoreAtArm?: number;
   prevLevelDistancePct?: number | null;
   prevConfluenceCount?: number | null;
+  volOk?: boolean;
+  armClockPausedAt?: number | null;
+  armClockPausedMs?: number;
 }
 
 const MAX_WATCHES = 12;
@@ -630,6 +640,14 @@ function buildHandoff(
 }
 
 async function refreshWatchMarket(w: TrendWatchEntry, now: number): Promise<void> {
+  try {
+    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
+      shouldIdleIsolate?: () => boolean;
+    };
+    if (shouldIdleIsolate?.()) return;
+  } catch {
+    /* fail-open */
+  }
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
   if (now - last < MC_REFRESH_MIN_MS) return;
   lastMcRefreshAt.set(w.mint, now);
@@ -671,17 +689,6 @@ export async function tickTrendSetupWatches(opts?: {
     }
   }
   if (!isTrendProfileEnabled()) return 0;
-  try {
-    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
-      shouldIdleIsolate?: () => boolean;
-    };
-    if (shouldIdleIsolate?.()) {
-      pruneTerminal();
-      return 0;
-    }
-  } catch {
-    /* fail-open */
-  }
   pruneTerminal();
   const now = Date.now();
   let handed = 0;
@@ -730,6 +737,8 @@ export async function tickTrendSetupWatches(opts?: {
     await refreshWatchMarket(w, now);
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
+    recomputeNearSupportFromPrice(w);
+    stampWatchVolumeOk(w);
     stampTrend(w);
     const lifeT = watchLifecycleAction(w, 'trend_rider', now);
     if (lifeT === 'demote' && w.status === 'armed') {
@@ -753,6 +762,22 @@ export async function tickTrendSetupWatches(opts?: {
         require('./watchPipeline').noteStagnantExpired(
           lifeT === 'expire_volume' ? 'volume' : 'stagnant'
         );
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
+
+    const armLife = applyArmLifecycleTimeout(w, now);
+    if (armLife) {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = armLife;
+      noteTrendFunnel('expired');
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchFunnel('trend_rider', armLife);
       } catch {
         /* optional */
       }
@@ -806,6 +831,7 @@ export async function tickTrendSetupWatches(opts?: {
       w.updatedAt = now;
       w.watchScoreAtArm = w.watchScore;
       w.lastImprovementAt = now;
+      resetArmClockOnArm(w);
       w.lastReason = 'armed trend continuation';
       stampWatchPlan(w);
       stampTrendWatchEligibility(w);
@@ -819,6 +845,8 @@ export async function tickTrendSetupWatches(opts?: {
       noteTrendFunnel('armed');
       }
     }
+
+    if (w.status === 'watching') stampWatchingHoldReason(w);
 
     if (w.status === 'armed') {
       let reclaim = false;
@@ -964,6 +992,10 @@ export function isMintOnActiveTrendWatch(mint: string): boolean {
 export function getActiveTrendWatch(mint: string): TrendWatchEntry | undefined {
   const w = watches.get(String(mint || '').trim());
   return w != null && isActiveWatch(w) ? w : undefined;
+}
+
+export function getTrendWatchByMint(mint: string): TrendWatchEntry | undefined {
+  return watches.get(String(mint || '').trim());
 }
 
 /**

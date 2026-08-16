@@ -1,0 +1,179 @@
+/**
+ * Shared waiting-arm clocks, hold reasons, and vol-ok stamping.
+ * Family Maps stay source of truth — this module does not own ticks or RPC.
+ */
+
+import { watchVolumeOkFlag, type WatchConfluenceInput } from './profileTaPlaybook';
+
+export const WAITING_ARM_TIMEOUT_MS = 20 * 60_000;
+export const ARMED_TRIGGER_TIMEOUT_MS = 20 * 60_000;
+export const WAITING_OPEN_CONTAINMENT_PAUSE = 'waiting_open_containment_pause';
+
+export type ArmLifecycleRow = {
+  status?: string;
+  createdAt?: number;
+  armedAt?: number | null;
+  lastReason?: string;
+  nearKeyFib?: boolean;
+  nearSupport?: boolean;
+  nearMultiTfSupport?: boolean;
+  nearLevel?: boolean;
+  hasLevel?: boolean;
+  supportTfHits?: unknown;
+  supportPriceSol?: number | null;
+  volumeState?: string;
+  volumeH1Usd?: number;
+  volumeM5Usd?: number;
+  volOk?: boolean;
+  volumeExpanding?: boolean;
+  armClockPausedAt?: number | null;
+  armClockPausedMs?: number;
+  preferredProfileId?: string | null;
+};
+
+export function isWatchersIsolate(): boolean {
+  try {
+    const { shouldIdleIsolate } =
+      require('./rpcWorkloadControl') as typeof import('./rpcWorkloadControl');
+    return shouldIdleIsolate() === true;
+  } catch {
+    return false;
+  }
+}
+
+export function isTradingEntryPaused(): boolean {
+  try {
+    const { shouldSoftPauseNewEntries } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    return shouldSoftPauseNewEntries() === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Pause arm/trigger timeout clocks during Watchers isolate or Trading entry pause. */
+export function shouldPauseArmClocks(): boolean {
+  return isWatchersIsolate() || isTradingEntryPaused();
+}
+
+export function watchHasLevelEvidence(w: ArmLifecycleRow): boolean {
+  if (
+    w.nearKeyFib === true ||
+    w.nearSupport === true ||
+    w.nearMultiTfSupport === true ||
+    w.nearLevel === true ||
+    w.hasLevel === true
+  ) {
+    return true;
+  }
+  const px = Number(w.supportPriceSol);
+  if (Number.isFinite(px) && px > 0) return true;
+  return Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 1;
+}
+
+export function stampWatchVolumeOk(w: ArmLifecycleRow): void {
+  const asWatch = w as WatchConfluenceInput;
+  if (!watchVolumeOkFlag(asWatch)) return;
+  w.volOk = true;
+  const st = String(w.volumeState || '').toLowerCase();
+  if (
+    st !== 'expanding' &&
+    st !== 'stable' &&
+    st !== 'ok' &&
+    st !== 'weakening'
+  ) {
+    w.volumeState = 'ok';
+  }
+}
+
+function slugHold(raw: string): string {
+  const s = String(raw || '')
+    .trim()
+    .replace(/^waiting_arm:\s*/i, '')
+    .slice(0, 48);
+  if (/skipped_low_score/i.test(s)) return 'skipped_low_score';
+  if (/need \d+\s*TA|confluence/i.test(s)) return 'confluence_0';
+  if (/waiting_open_containment|containment_pause/i.test(s)) {
+    return 'containment_pause';
+  }
+  if (/not_near_level|no level|no_level/i.test(s)) return 'not_near_level';
+  if (/watchers_isolate|rpc_workload/i.test(s)) return 'watchers_isolate';
+  if (/arm_timeout/i.test(s)) return 'arm_timeout';
+  if (/trigger_timeout/i.test(s)) return 'trigger_timeout';
+  return s.replace(/\s+/g, '_').slice(0, 40) || 'waiting_setup';
+}
+
+export function inferWaitingArmHoldReason(w: ArmLifecycleRow): string {
+  if (isWatchersIsolate()) return 'watchers_isolate';
+  if (isTradingEntryPaused() && String(w.status || '') === 'armed') {
+    return 'containment_pause';
+  }
+  const lr = String(w.lastReason || '');
+  if (/skipped_low_score/i.test(lr)) return 'skipped_low_score';
+  if (/waiting_open_containment/i.test(lr)) return 'containment_pause';
+  if (/need \d+\s*TA|confluence/i.test(lr)) return 'confluence_0';
+  if (String(w.status || '') === 'watching' && !watchHasLevelEvidence(w)) {
+    return 'not_near_level';
+  }
+  if (String(w.status || '') === 'watching') {
+    return lr ? slugHold(lr) : 'waiting_setup';
+  }
+  if (String(w.status || '') === 'armed') {
+    return lr ? slugHold(lr) : 'waiting_trigger';
+  }
+  return lr ? slugHold(lr) : 'waiting_arm';
+}
+
+export function stampWatchingHoldReason(w: ArmLifecycleRow): void {
+  if (String(w.status || '') !== 'watching') return;
+  w.lastReason = 'waiting_arm: ' + inferWaitingArmHoldReason(w);
+}
+
+export function resetArmClockOnArm(w: ArmLifecycleRow): void {
+  w.armClockPausedAt = null;
+  w.armClockPausedMs = 0;
+}
+
+export function applyArmLifecycleTimeout(
+  w: ArmLifecycleRow,
+  now: number
+): 'arm_timeout' | 'trigger_timeout' | null {
+  if (shouldPauseArmClocks()) {
+    if (w.armClockPausedAt == null) w.armClockPausedAt = now;
+    return null;
+  }
+  if (w.armClockPausedAt != null) {
+    w.armClockPausedMs = (w.armClockPausedMs || 0) + (now - w.armClockPausedAt);
+    w.armClockPausedAt = null;
+  }
+  const paused = Number(w.armClockPausedMs) || 0;
+  const status = String(w.status || '');
+  if (status === 'watching') {
+    const t0 = Number(w.createdAt) || now;
+    if (now - t0 - paused >= WAITING_ARM_TIMEOUT_MS) return 'arm_timeout';
+  }
+  if (status === 'armed') {
+    const t0 = Number(w.armedAt) || Number(w.createdAt) || now;
+    if (now - t0 - paused >= ARMED_TRIGGER_TIMEOUT_MS) return 'trigger_timeout';
+  }
+  return null;
+}
+
+export function isRetryableOpenFail(err: string | null | undefined): boolean {
+  return /rpc_containment_entry_pause|rpc_workload|429|ETIMEDOUT|ECONNRESET|fetch failed|timeout/i.test(
+    String(err || '')
+  );
+}
+
+/** Near-support from last price vs stored S (Mode B / Trend cheap ticks). */
+export function recomputeNearSupportFromPrice(w: {
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  nearSupport?: boolean;
+}): void {
+  const px = Number(w.lastPriceSol);
+  const s = Number(w.supportPriceSol);
+  if (!(px > 0) || !(s > 0)) return;
+  const d = (px - s) / s;
+  if (d >= -0.02 && d <= 0.035) w.nearSupport = true;
+}

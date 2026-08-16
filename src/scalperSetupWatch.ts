@@ -31,6 +31,13 @@ import {
   watchLifecycleAction,
   WATCH_ARM_SCORE_FLOOR,
 } from './watchPriorityScore';
+import {
+  applyArmLifecycleTimeout,
+  recomputeNearSupportFromPrice,
+  resetArmClockOnArm,
+  stampWatchVolumeOk,
+  stampWatchingHoldReason,
+} from './watchArmLifecycle';
 
 export type ScalperWatchStatus =
   | 'watching'
@@ -96,6 +103,9 @@ export interface ScalperWatchEntry {
   watchScoreAtArm?: number;
   prevLevelDistancePct?: number | null;
   prevConfluenceCount?: number | null;
+  volOk?: boolean;
+  armClockPausedAt?: number | null;
+  armClockPausedMs?: number;
 }
 
 const MAX_WATCHES = 24;
@@ -563,6 +573,14 @@ async function refreshWatchMarket(
   w: ScalperWatchEntry,
   now: number
 ): Promise<void> {
+  try {
+    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
+      shouldIdleIsolate?: () => boolean;
+    };
+    if (shouldIdleIsolate?.()) return;
+  } catch {
+    /* fail-open */
+  }
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
   if (now - last < MC_REFRESH_MIN_MS) return;
   lastMcRefreshAt.set(w.mint, now);
@@ -612,6 +630,10 @@ async function refreshWatchMarket(
 export function isMintOnActiveScalperWatch(mint: string): boolean {
   const w = watches.get(String(mint || '').trim());
   return w != null && (w.status === 'watching' || w.status === 'armed');
+}
+
+export function getScalperWatchByMint(mint: string): ScalperWatchEntry | undefined {
+  return watches.get(String(mint || '').trim());
 }
 
 /**
@@ -948,17 +970,6 @@ export async function tickScalperSetupWatches(opts?: {
     }
   }
   if (!isScalperFamilyEnabled()) return 0;
-  try {
-    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
-      shouldIdleIsolate?: () => boolean;
-    };
-    if (shouldIdleIsolate?.()) {
-      pruneTerminal();
-      return 0;
-    }
-  } catch {
-    /* fail-open */
-  }
   pruneTerminal();
   const now = Date.now();
   let handed = 0;
@@ -1049,6 +1060,8 @@ export async function tickScalperSetupWatches(opts?: {
 
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
+    recomputeNearSupportFromPrice(w);
+    stampWatchVolumeOk(w);
     stampScalper(w);
     const lifeS = watchLifecycleAction(w, w.preferredProfileId, now);
     if (lifeS === 'demote' && w.status === 'armed') {
@@ -1071,6 +1084,21 @@ export async function tickScalperSetupWatches(opts?: {
         require('./watchPipeline').noteStagnantExpired(
           lifeS === 'expire_volume' ? 'volume' : 'stagnant'
         );
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
+
+    const armLife = applyArmLifecycleTimeout(w, now);
+    if (armLife) {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = armLife;
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchFunnel(w.preferredProfileId, armLife);
       } catch {
         /* optional */
       }
@@ -1117,12 +1145,22 @@ export async function tickScalperSetupWatches(opts?: {
     }
 
     // Arm parity with admit: nearSupport || nearMultiTfSupport || hits≥2
+    // Owned MB may arm on burst evidence without waiting forever for S.
     const nearConfluence =
       w.nearSupport === true ||
       w.nearMultiTfSupport === true ||
       (Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 2);
+    const mbBurstArm =
+      w.preferredProfileId === 'momentum_burst' &&
+      isMomentumBurstDominant({
+        volumeM5Usd: w.volumeM5Usd,
+        priceChangeH1Pct: (w as { priceChangeH1Pct?: number }).priceChangeH1Pct,
+        nearSupport: w.nearSupport,
+        nearMultiTfSupport: w.nearMultiTfSupport,
+        supportTfHits: w.supportTfHits,
+      });
 
-    if (w.status === 'watching' && nearConfluence) {
+    if (w.status === 'watching' && (nearConfluence || mbBurstArm)) {
       if (
         shouldSkipArmForCap(
           w.preferredProfileId,
@@ -1142,11 +1180,15 @@ export async function tickScalperSetupWatches(opts?: {
       w.updatedAt = now;
       w.watchScoreAtArm = w.watchScore;
       w.lastImprovementAt = now;
-      w.lastReason = w.nearMultiTfSupport
+      resetArmClockOnArm(w);
+      w.lastReason = mbBurstArm && !nearConfluence
+        ? 'armed MB burst'
+        : w.nearMultiTfSupport
         ? 'armed multi-TF support'
         : Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 2
           ? 'armed multi-TF hits'
           : 'armed near support';
+      if (nearConfluence) {
       // Armed at support → soft-prefer Scalper unless reversal wick / MB expansion dominate
       w.preferredProfileId = pickPreferredProfile({
         marketCapUsd: w.marketCapUsd,
@@ -1171,6 +1213,7 @@ export async function tickScalperSetupWatches(opts?: {
         w.preferredProfileId = isReversalDominant({})
           ? 'reversal_scalper'
           : 'scalper';
+      }
       }
       stampScalperWatchEligibility(w);
       try {
@@ -1202,6 +1245,8 @@ export async function tickScalperSetupWatches(opts?: {
       }
       }
     }
+
+    if (w.status === 'watching') stampWatchingHoldReason(w);
 
     if (w.status === 'armed') {
       // Stronger confirm: touch/undercut → reclaim; reject touch-and-fail
@@ -1306,7 +1351,18 @@ export async function tickScalperSetupWatches(opts?: {
         w.nearSupport !== false &&
         (undercut || nearLevel) &&
         !((w as { touchedLevel?: boolean }).touchedLevel && !reclaim && extensionFromLevelPct != null && extensionFromLevelPct > 6);
-      const trigger = reclaim || (holdOk && (undercut || nearLevel));
+      const mbBurstTrigger =
+        w.preferredProfileId === 'momentum_burst' &&
+        volumeHint &&
+        !lateChase &&
+        isMomentumBurstDominant({
+          volumeM5Usd: w.volumeM5Usd,
+          priceChangeH1Pct: (w as { priceChangeH1Pct?: number }).priceChangeH1Pct,
+          nearSupport: w.nearSupport,
+          nearMultiTfSupport: w.nearMultiTfSupport,
+          supportTfHits: w.supportTfHits,
+        });
+      const trigger = reclaim || (holdOk && (undercut || nearLevel)) || mbBurstTrigger;
       if (!trigger) continue;
 
       // Pre-vetted armed reclaim — bypass scanner mint cooldown (anti-spam is for discretionary offers)
@@ -1348,7 +1404,11 @@ export async function tickScalperSetupWatches(opts?: {
       } catch {
         /* fail-open */
       }
-      w.lastReason = reclaim ? 'reclaim trigger' : 'confluence hold';
+      w.lastReason = reclaim
+        ? 'reclaim trigger'
+        : mbBurstTrigger
+          ? 'MB burst confirm'
+          : 'confluence hold';
       const c = buildHandoff(w);
       if (handOffScannerCandidate(c, { bypassCooldown: true })) {
         w.status = 'triggered';

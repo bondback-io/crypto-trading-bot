@@ -238,6 +238,8 @@ export type WatchConfluenceInput = {
   volOk?: boolean | null;
   volumeState?: string | null;
   volumeExpanding?: boolean | null;
+  volumeH1Usd?: number | null;
+  volumeM5Usd?: number | null;
   lateChase?: boolean | null;
   armedLateChase?: boolean | null;
   extensionFromLevelPct?: number | null;
@@ -281,13 +283,20 @@ export function watchNearFibFlag(watch: WatchConfluenceInput): boolean {
 
 export function watchVolumeOkFlag(watch: WatchConfluenceInput): boolean {
   const st = String(watch.volumeState || '').toLowerCase();
-  return (
+  if (
     watch.volOk === true ||
     watch.volumeExpanding === true ||
     st === 'expanding' ||
     st === 'stable' ||
     st === 'ok'
-  );
+  ) {
+    return true;
+  }
+  const h1 = Number(watch.volumeH1Usd);
+  const m5 = Number(watch.volumeM5Usd);
+  if (Number.isFinite(h1) && h1 >= 2_000) return true;
+  if (Number.isFinite(m5) && m5 >= 800) return true;
+  return false;
 }
 
 function overlayPassedTool(

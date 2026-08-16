@@ -1329,9 +1329,15 @@ function parkOwnedWatchFromFight(
       supportTfHits: signal.supportTfHits,
       curveProgressPct: signal.bondingCurve?.progressPct ?? null,
       dropFromPeakPct: signal.dropFromPeakPct,
+      lastPriceSol: signal.lastPriceSol ?? signal.priceSol,
+      supportPriceSol: signal.supportPriceSol,
+      fib05PriceSol: signal.fib05PriceSol,
+      fib618PriceSol: signal.fib618PriceSol,
     });
     if (!ok) return null;
-    return `owned_${family}_watch: waiting arm`;
+    const { formatOwnedWatchWaitingArm } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    return formatOwnedWatchWaitingArm(family, signal.mint);
   } catch {
     return null;
   }
@@ -1381,19 +1387,30 @@ function tryParkModeBFromFight(
         preferredProfileId: preferred,
       });
       if (!parked && !isMintOnActiveScalperWatch(signal.mint)) {
-        return { ok: false, reason: 'modeb_park_failed' };
+        const { formatArmingParkFailedReason } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        return { ok: false, reason: formatArmingParkFailedReason(preferred) };
       }
     }
   } catch {
-    return { ok: false, reason: 'modeb_park_failed' };
+    const { formatArmingParkFailedReason } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    return { ok: false, reason: formatArmingParkFailedReason(preferred) };
   }
-  return {
-    ok: true,
-    reason:
-      preferred === 'momentum_burst'
-        ? 'owned_mb_watch: waiting arm'
-        : 'owned_scalper_watch: waiting arm',
-  };
+  const family = preferred === 'momentum_burst' ? 'mb' : 'scalper';
+  try {
+    const { formatOwnedWatchWaitingArm } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    return {
+      ok: true,
+      reason: formatOwnedWatchWaitingArm(family, signal.mint),
+    };
+  } catch {
+    return {
+      ok: true,
+      reason: `owned_${family}_watch: waiting arm`,
+    };
+  }
 }
 
 /**
@@ -4936,7 +4953,26 @@ async function executeSignalBuy(
       status: 'skipped',
       skipReason: result.error || 'executeBuy failed',
     });
-    markScannerCooldown(signal.mint, false);
+    const buyErr = String(result.error || 'executeBuy failed');
+    try {
+      const { revertArmedWatchOpenFail } =
+        require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+      revertArmedWatchOpenFail(signal.mint, buyErr);
+    } catch {
+      /* optional */
+    }
+    if (/rpc_containment_entry_pause/i.test(buyErr)) {
+      bumpSkipReason('waiting_open_containment_pause', signal.mint);
+      try {
+        const { clearScannerMintCooldown } =
+          require('./marketScanner') as typeof import('./marketScanner');
+        clearScannerMintCooldown(signal.mint);
+      } catch {
+        /* optional */
+      }
+    } else {
+      markScannerCooldown(signal.mint, false);
+    }
   }
 }
 
@@ -8382,7 +8418,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             );
             const parked = modeB.ok
               ? modeB.reason
-              : 'owned_scalper_watch: waiting arm';
+              : modeB.reason ||
+                (require('./profileWatchRegistry') as typeof import('./profileWatchRegistry')).formatArmingParkFailedReason(
+                  'scalper'
+                );
             recordRejectedSignal(signal, parked);
             markLaneFightCascadeResult(signal.mint, false, parked);
             console.log(
@@ -8393,7 +8432,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           }
           const parked =
             parkOwnedWatchFromFight(signal, 'dip_buyer') ||
-            'owned_dip_watch: waiting arm';
+            (require('./profileWatchRegistry') as typeof import('./profileWatchRegistry')).formatArmingParkFailedReason(
+              'dip_buyer'
+            );
           recordRejectedSignal(signal, parked);
           markLaneFightCascadeResult(signal.mint, false, parked);
           console.log(

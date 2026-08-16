@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.388',
+    title: 'Waiting arm can arm, trigger, or expire',
+    sections: ['microbots', 'scanners', 'execution'],
+    items: [
+      'Owned watches no longer sit forever as waiting arm. Ticks still arm from stored Fib/S and vol-ok flags during a Watchers isolate (no extra RPC). After 20m they expire arm_timeout / trigger_timeout unless RPC weather paused the clock.',
+      'Skip text shows why (not_near_level, confluence, isolate, park failed). A Trading-spike buy fail reverts triggered→armed as waiting_open_containment_pause instead of burning the one-shot. Discretionary Scalper and MC bands are unchanged.',
+    ],
+  },
+  {
     version: '1.2.387',
     title: 'Watcher cards show live Micro Bot MC bands',
     sections: ['microbots', 'scanners'],

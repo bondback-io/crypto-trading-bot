@@ -133,15 +133,18 @@ export function normalizeSkipDiagReason(reason: string): string {
   if (!r) return 'unknown';
   if (/^ms_setup_stage_low/i.test(r)) return 'ms_setup_stage_low';
   if (/^ms_setup_tag_missing/i.test(r)) return 'ms_setup_tag_missing';
-  const owned = r.match(/^(owned_\w+_watch:\s*waiting arm)/i);
-  if (owned) return owned[1].replace(/\s+/g, ' ');
+  const owned = r.match(/^(owned_\w+_watch:\s*waiting arm(?:\s*\([^)]+\))?)/i);
+  if (owned) return owned[1].replace(/\s+/g, ' ').slice(0, 80);
+  if (/^waiting_open_containment_pause/i.test(r)) {
+    return 'waiting_open_containment_pause';
+  }
   if (/^owned_\w+_watch/i.test(r)) return r.slice(0, 80);
   return normalizeSkipReason(reason);
 }
 
 export function isParkWatchSkipReason(reason: string): boolean {
   const r = String(reason || '');
-  return /owned_\w+_watch|ms_setup_stage_low|ms_setup_tag_missing/i.test(r);
+  return /owned_\w+_watch|ms_setup_stage_low|ms_setup_tag_missing|waiting_open_containment_pause/i.test(r);
 }
 
 export function markPnlPct(entryPriceSol: number, exitPriceSol: number): number | null {

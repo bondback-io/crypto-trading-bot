@@ -37,6 +37,12 @@ import {
   watchLifecycleAction,
   WATCH_ARM_SCORE_FLOOR,
 } from './watchPriorityScore';
+import {
+  applyArmLifecycleTimeout,
+  resetArmClockOnArm,
+  stampWatchVolumeOk,
+  stampWatchingHoldReason,
+} from './watchArmLifecycle';
 
 export function coerceTokenLabel(raw: unknown, fallback: string): string {
   if (typeof raw === 'string') {
@@ -106,6 +112,9 @@ export interface GradWatchEntry {
   watchScoreAtArm?: number;
   prevLevelDistancePct?: number | null;
   prevConfluenceCount?: number | null;
+  volOk?: boolean;
+  armClockPausedAt?: number | null;
+  armClockPausedMs?: number;
 }
 
 const MAX_WATCHES = 32;
@@ -287,6 +296,14 @@ function applyMcGrace(w: GradWatchEntry, now: number): boolean {
 }
 
 async function refreshWatchMarket(w: GradWatchEntry, now: number): Promise<void> {
+  try {
+    const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
+      shouldIdleIsolate?: () => boolean;
+    };
+    if (shouldIdleIsolate?.()) return;
+  } catch {
+    /* fail-open */
+  }
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
   if (now - last < MC_REFRESH_MIN_MS) return;
   lastMcRefreshAt.set(w.mint, now);
@@ -708,7 +725,6 @@ export async function tickMigrationGradWatches(): Promise<number> {
     };
     if (shouldIdleIsolate?.()) {
       stopFastPoll();
-      return 0;
     }
   } catch {
     /* */
@@ -785,6 +801,16 @@ export async function tickMigrationGradWatches(): Promise<number> {
 
     let progress = w.curveProgressPct;
     let complete = false;
+    let isolate = false;
+    try {
+      const { shouldIdleIsolate } = require('./rpcWorkloadControl') as {
+        shouldIdleIsolate?: () => boolean;
+      };
+      isolate = shouldIdleIsolate?.() === true;
+    } catch {
+      isolate = false;
+    }
+    if (!isolate) {
     try {
       const curve = await fetchBondingCurve(w.mint, { force: true });
       if (curve) {
@@ -796,6 +822,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
     } catch {
       /* keep last progress */
     }
+    }
 
     if (complete) {
       if (w.completeSeenAtMs == null) w.completeSeenAtMs = now;
@@ -804,7 +831,27 @@ export async function tickMigrationGradWatches(): Promise<number> {
       continue;
     }
 
-    if (progress == null || !Number.isFinite(progress)) continue;
+    stampWatchVolumeOk(w);
+    const armLifeEarly = applyArmLifecycleTimeout(w, now);
+    if (armLifeEarly) {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = armLifeEarly;
+      funnel.expired += 1;
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchFunnel('migration_sniper', armLifeEarly);
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
+
+    if (progress == null || !Number.isFinite(progress)) {
+      if (w.status === 'watching') stampWatchingHoldReason(w);
+      continue;
+    }
 
     const peak = Math.max(peakProgress.get(w.mint) ?? progress, progress);
     peakProgress.set(w.mint, peak);
@@ -872,6 +919,23 @@ export async function tickMigrationGradWatches(): Promise<number> {
       }
       continue;
     }
+
+    stampWatchVolumeOk(w);
+    const armLife = applyArmLifecycleTimeout(w, now);
+    if (armLife) {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = armLife;
+      funnel.expired += 1;
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchFunnel('migration_sniper', armLife);
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
     if (w.status === 'watching' && quality) {
       if (
         shouldSkipArmForCap(
@@ -892,11 +956,14 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.updatedAt = now;
       w.watchScoreAtArm = w.watchScore;
       w.lastImprovementAt = now;
+      resetArmClockOnArm(w);
       w.lastReason = `armed @ ${progress.toFixed(0)}%`;
       funnel.armed += 1;
       console.log(`[grad-watch] ARMED ${w.symbol}`);
       }
     }
+
+    if (w.status === 'watching') stampWatchingHoldReason(w);
 
     // Fire: ≥ fireMin while still on curve (no upper-band miss before complete)
     const inFire = progress >= fMin;
@@ -1120,6 +1187,10 @@ export function getGradWatchCurveProgressPct(mint: string): number | null {
   const w = watches.get(String(mint || '').trim());
   const p = w?.curveProgressPct;
   return p != null && Number.isFinite(Number(p)) ? Number(p) : null;
+}
+
+export function getGradWatchByMint(mint: string): GradWatchEntry | undefined {
+  return watches.get(String(mint || '').trim());
 }
 
 /** Offer from near-mig wallet / scanner candidates. */

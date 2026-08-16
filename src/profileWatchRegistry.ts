@@ -14,12 +14,17 @@ import {
   type WatchFamilyId,
 } from './tradeProfiles';
 import { DEFAULT_LATE_CHASE_EXT_PCT } from './supportReclaim';
-import { scoreTaConfluence } from './profileTaPlaybook';
+import { scoreTaConfluence, watchVolumeOkFlag } from './profileTaPlaybook';
 import type {
   ConfluenceScore,
   ConfluenceToolResult,
   WatchConfluenceInput,
 } from './profileTaPlaybook';
+import {
+  inferWaitingArmHoldReason,
+  isRetryableOpenFail,
+  WAITING_OPEN_CONTAINMENT_PAUSE,
+} from './watchArmLifecycle';
 
 export type ProfileWatchState =
   | 'watching'
@@ -85,7 +90,10 @@ export type ProfileWatchFunnelKind =
   | 'trigger_ready'
   | 'opened'
   | 'expired'
-  | 'blocked';
+  | 'blocked'
+  | 'arm_timeout'
+  | 'trigger_timeout'
+  | 'open_fail';
 
 export interface ProfileWatchFunnel {
   sent_to_watch: number;
@@ -98,6 +106,9 @@ export interface ProfileWatchFunnel {
   armedOpens: number;
   zeroMfeArmed: number;
   zeroMfeNonArmed: number;
+  arm_timeout: number;
+  trigger_timeout: number;
+  open_fail: number;
 }
 
 const EMPTY_FUNNEL = (): ProfileWatchFunnel => ({
@@ -111,6 +122,9 @@ const EMPTY_FUNNEL = (): ProfileWatchFunnel => ({
   armedOpens: 0,
   zeroMfeArmed: 0,
   zeroMfeNonArmed: 0,
+  arm_timeout: 0,
+  trigger_timeout: 0,
+  open_fail: 0,
 });
 
 const funnels = new Map<string, ProfileWatchFunnel>();
@@ -156,7 +170,8 @@ export function noteProfileWatchFunnel(
     row.blocked[reason] = (row.blocked[reason] || 0) + 1;
     return;
   }
-  row[kind] += 1;
+  const rec = row as unknown as Record<string, number>;
+  rec[kind] = (Number(rec[kind]) || 0) + 1;
   try {
     const {
       noteSourceWatchInsert,
@@ -209,6 +224,175 @@ export function getProfileWatchFunnel(
   return row
     ? { ...row, blocked: { ...row.blocked } }
     : EMPTY_FUNNEL();
+}
+
+export interface WatchArmLifecycleCounts {
+  park_count: number;
+  waiting_arm_count: number;
+  arm_count: number;
+  trigger_count: number;
+  open_count: number;
+  arm_timeout_count: number;
+  trigger_timeout_count: number;
+  open_fail_count: number;
+}
+
+export function getWatchArmLifecycleSnapshot(): Record<
+  string,
+  WatchArmLifecycleCounts
+> {
+  const inv = getProfileWatchInventory();
+  const out: Record<string, WatchArmLifecycleCounts> = {};
+  for (const id of PROFILE_ORDER) {
+    const f = funnels.get(id) || EMPTY_FUNNEL();
+    const entries = inv[id]?.entries || [];
+    out[id] = {
+      park_count: f.sent_to_watch,
+      waiting_arm_count: entries.filter((e) => e.status === 'watching').length,
+      arm_count: f.armed,
+      trigger_count: f.trigger_ready,
+      open_count: f.opened,
+      arm_timeout_count: f.arm_timeout || 0,
+      trigger_timeout_count: f.trigger_timeout || 0,
+      open_fail_count: f.open_fail || 0,
+    };
+  }
+  return out;
+}
+
+function lookupLiveWatch(mint: string): {
+  family: string;
+  profileId: string;
+  row: {
+    status?: string;
+    lastReason?: string;
+    nearKeyFib?: boolean;
+    nearSupport?: boolean;
+    nearMultiTfSupport?: boolean;
+    supportTfHits?: unknown;
+    supportPriceSol?: number | null;
+    volumeState?: string;
+    volumeH1Usd?: number;
+    volumeM5Usd?: number;
+    preferredProfileId?: string | null;
+  };
+} | null {
+  const key = String(mint || '').trim();
+  if (!key) return null;
+  try {
+    const { getDipWatchByMint } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const d = getDipWatchByMint(key);
+    if (d && (d.status === 'watching' || d.status === 'armed' || d.status === 'triggered')) {
+      return {
+        family: 'dip',
+        profileId: String(d.preferredProfileId || 'dip_buyer'),
+        row: d,
+      };
+    }
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getScalperWatchByMint } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    const s = getScalperWatchByMint(key);
+    if (s && (s.status === 'watching' || s.status === 'armed' || s.status === 'triggered')) {
+      const pid = String(s.preferredProfileId || 'scalper');
+      const family =
+        pid === 'momentum_burst' ? 'mb' : pid === 'reversal_scalper' ? 'reversal' : 'scalper';
+      return { family, profileId: pid, row: s };
+    }
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getTrendWatchByMint } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    const t = getTrendWatchByMint(key);
+    if (t && (t.status === 'watching' || t.status === 'armed' || t.status === 'triggered')) {
+      return { family: 'trend', profileId: 'trend_rider', row: t };
+    }
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getGradWatchByMint } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    const g = getGradWatchByMint(key);
+    if (g && (g.status === 'watching' || g.status === 'armed' || g.status === 'triggered')) {
+      return { family: 'migration', profileId: 'migration_sniper', row: g };
+    }
+  } catch {
+    /* optional */
+  }
+  return null;
+}
+
+export function getOwnedWatchHoldReason(mint: string): string | null {
+  const found = lookupLiveWatch(mint);
+  if (!found) return null;
+  return inferWaitingArmHoldReason(found.row);
+}
+
+export function formatOwnedWatchWaitingArm(
+  family: string,
+  mint: string
+): string {
+  const hold = getOwnedWatchHoldReason(mint);
+  const base = `owned_${family}_watch: waiting arm`;
+  return hold ? `${base} (${hold})` : base;
+}
+
+type MutWatch = {
+  status: string;
+  updatedAt: number;
+  lastReason?: string;
+  armedAt?: number | null;
+  preferredProfileId?: string | null;
+};
+
+function mutateLiveWatch(
+  mint: string,
+  fn: (w: MutWatch, profileId: string) => void
+): boolean {
+  const found = lookupLiveWatch(mint);
+  if (!found) return false;
+  fn(found.row as MutWatch, found.profileId);
+  return true;
+}
+
+/**
+ * Queued handoff marked triggered before executeBuy. On containment / retryable
+ * fail, restore armed. On hard fail, expire with open_fail reason.
+ */
+export function revertArmedWatchOpenFail(
+  mint: string,
+  err: string | null | undefined
+): { ok: boolean; action: 'rearmed' | 'expired' | 'none' } {
+  const key = String(mint || '').trim();
+  if (!key) return { ok: false, action: 'none' };
+  const retry = isRetryableOpenFail(err);
+  const now = Date.now();
+  let action: 'rearmed' | 'expired' | 'none' = 'none';
+  mutateLiveWatch(key, (w, pid) => {
+    if (w.status !== 'triggered' && w.status !== 'armed') return;
+    if (retry) {
+      w.status = 'armed';
+      w.updatedAt = now;
+      w.lastReason = WAITING_OPEN_CONTAINMENT_PAUSE;
+      if (w.armedAt == null) w.armedAt = now;
+      action = 'rearmed';
+      noteProfileWatchFunnel(pid, 'blocked', WAITING_OPEN_CONTAINMENT_PAUSE, undefined, key);
+    } else {
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = `open_fail:${String(err || 'executeBuy failed').slice(0, 60)}`;
+      action = 'expired';
+      noteProfileWatchFunnel(pid, 'open_fail', undefined, undefined, key);
+    }
+  });
+  return { ok: action !== 'none', action };
 }
 
 function asState(status: unknown): ProfileWatchState {
@@ -540,7 +724,8 @@ export function canTriggerArmed(opts: {
   if (hasLevel && !score.lateChase) {
     const extraFib =
       watch.nearFib === true || watch.nearKeyFib === true ? 1 : 0;
-    const withLevel = Math.max(score.confluenceCount, 1 + extraFib);
+    const extraVol = watchVolumeOkFlag(watch) ? 1 : 0;
+    const withLevel = Math.max(score.confluenceCount, 1 + extraFib + extraVol);
     if (withLevel >= min) {
       return {
         ok: true,
@@ -942,6 +1127,11 @@ export function parkSignalOnProfileWatch(opts: {
   supportTfHits?: string[] | null;
   curveProgressPct?: number | null;
   dropFromPeakPct?: number | null;
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+  volumeState?: string | null;
 }): boolean {
   const pid = String(opts.profileId || '').trim();
   const mint = String(opts.mint || '').trim();
@@ -962,6 +1152,17 @@ export function parkSignalOnProfileWatch(opts: {
       pid === 'steady_compounder' ||
       pid === 'high_win_rate'
     ) {
+      let specialtyFeed: string | undefined;
+      if (pid === 'steady_compounder' || pid === 'high_win_rate') {
+        try {
+          const { universeWatchBand } =
+            require('./majorsUniverse') as typeof import('./majorsUniverse');
+          const mc = Number(opts.marketCapUsd);
+          specialtyFeed = universeWatchBand(mc) || 'medium';
+        } catch {
+          specialtyFeed = 'medium';
+        }
+      }
       const { offerDipWatchFromCandidate } =
         require('./dipSetupWatch') as typeof import('./dipSetupWatch');
       const ok = offerDipWatchFromCandidate({
@@ -975,6 +1176,11 @@ export function parkSignalOnProfileWatch(opts: {
         nearSupport: opts.nearSupport,
         dropFromPeakPct: opts.dropFromPeakPct,
         preferredProfileId: pid,
+        lastPriceSol: opts.lastPriceSol ?? undefined,
+        supportPriceSol: opts.supportPriceSol ?? undefined,
+        fib05PriceSol: opts.fib05PriceSol ?? undefined,
+        fib618PriceSol: opts.fib618PriceSol ?? undefined,
+        specialtyFeed,
       });
       if (!ok) {
         try {
@@ -1007,6 +1213,8 @@ export function parkSignalOnProfileWatch(opts: {
         nearMultiTfSupport: opts.nearMultiTfSupport,
         srConfluenceScore: opts.srConfluenceScore ?? undefined,
         supportTfHits: opts.supportTfHits as import('./technicalLevels').SrTimeframe[] | undefined,
+        lastPriceSol: opts.lastPriceSol ?? undefined,
+        supportPriceSol: opts.supportPriceSol ?? undefined,
         preferredProfileId: pid,
       });
     }

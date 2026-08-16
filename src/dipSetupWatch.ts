@@ -32,6 +32,12 @@ import {
 } from './watchPriorityScore';
 
 import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
+import {
+  applyArmLifecycleTimeout,
+  resetArmClockOnArm,
+  stampWatchVolumeOk,
+  stampWatchingHoldReason,
+} from './watchArmLifecycle';
 
 function stampDipPriority(w: DipWatchEntry, now: number): void {
   stampWatchPriority(
@@ -138,6 +144,9 @@ export interface DipWatchEntry {
   prevLevelDistancePct?: number | null;
   prevConfluenceCount?: number | null;
   exclusiveRouteReason?: string;
+  volOk?: boolean;
+  armClockPausedAt?: number | null;
+  armClockPausedMs?: number;
 }
 
 /** Unified Dip-family inventory (1M–500M + above-max Steady/HWR parks). */
@@ -1112,6 +1121,7 @@ function maybeArmQualityPark(
     w.status = 'armed';
     w.armedAt = now;
     w.updatedAt = now;
+    resetArmClockOnArm(w);
     const nearTa = w.nearKeyFib === true || w.nearSupport === true;
     w.lastReason = nearTa
       ? dropOk
@@ -1193,6 +1203,7 @@ function scheduleEagerLevelSeed(w: DipWatchEntry): void {
         w.status = 'armed';
         w.armedAt = now;
         w.updatedAt = now;
+        resetArmClockOnArm(w);
         w.lastReason = dropOk ? 'armed near Fib/S + dip' : 'armed near Fib/S';
         stampWatchPlan(w);
         noteDipFunnel('armed');
@@ -2211,7 +2222,6 @@ export async function tickDipSetupWatches(opts?: {
       (tickDipSetupWatches as { _lane?: boolean })._lane = false;
     }
   }
-  if (!isRpcWorkloadEnabled('dip_setup_watch')) return 0;
   if (!isDipProfileEnabled()) return 0;
   pruneTerminal();
   const m = dipMatch();
@@ -2282,6 +2292,8 @@ export async function tickDipSetupWatches(opts?: {
 
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
+    recomputeProximityFromLevels(w);
+    stampWatchVolumeOk(w);
     w.targetDipEntries = buildTargetDipEntries(w);
     stampDipPriority(w, now);
     const life = watchLifecycleAction(
@@ -2312,6 +2324,22 @@ export async function tickDipSetupWatches(opts?: {
         const { noteStagnantExpired } =
           require('./watchPipeline') as typeof import('./watchPipeline');
         noteStagnantExpired(life === 'expire_volume' ? 'volume' : 'stagnant');
+      } catch {
+        /* optional */
+      }
+      continue;
+    }
+
+    const armLife = applyArmLifecycleTimeout(w, now);
+    if (armLife) {
+      releaseQualitySoftArm(w.mint);
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = armLife;
+      try {
+        const { noteProfileWatchFunnel } =
+          require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+        noteProfileWatchFunnel(w.preferredProfileId || 'dip_buyer', armLife);
       } catch {
         /* optional */
       }
@@ -2423,6 +2451,7 @@ export async function tickDipSetupWatches(opts?: {
       w.updatedAt = now;
       w.watchScoreAtArm = w.watchScore;
       w.lastImprovementAt = now;
+      resetArmClockOnArm(w);
       w.lastReason = dropOk ? 'armed near Fib/S + dip' : 'armed near Fib/S';
       stampWatchPlan(w);
       noteDipFunnel('armed');
@@ -2455,6 +2484,8 @@ export async function tickDipSetupWatches(opts?: {
       }
       }
     }
+
+    if (w.status === 'watching') stampWatchingHoldReason(w);
 
     if (w.status === 'armed') {
       // Stronger confirm: touch/undercut → reclaim; reject touch-and-fail
@@ -2792,6 +2823,10 @@ export function getDipSetupWatchStatus(limit = 200): {
 export function isMintOnActiveDipWatch(mint: string): boolean {
   const w = watches.get(String(mint || '').trim());
   return w != null && (w.status === 'watching' || w.status === 'armed');
+}
+
+export function getDipWatchByMint(mint: string): DipWatchEntry | undefined {
+  return watches.get(String(mint || '').trim());
 }
 
 /** Offer specialty / scanner candidates into the watchlist (non-blocking). */

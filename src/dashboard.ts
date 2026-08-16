@@ -17365,6 +17365,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 (Number(d.dip_arm) || 0) +
                 '/' +
                 (Number(d.dip_open) || 0) +
+                '</p>' +
+                '<p class="mint mb-2">RPC weather isolate ' +
+                (d.watchers_isolate ? 'ON' : 'off') +
+                ' · trading entry pause ' +
+                (d.trading_entry_pause ? 'ON' : 'off') +
+                ' · arm_timeout ' +
+                (Number(d.arm_timeout_total) || 0) +
+                ' · open_fail ' +
+                (Number(d.open_fail_total) || 0) +
                 '</p>'
               );
             })() +
