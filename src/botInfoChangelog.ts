@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.399',
+    title: 'Dip tab lists in-band family watches',
+    sections: ['microbots', 'scanners', 'knobs'],
+    items: [
+      'Dip Buyer watchlist was hiding in-band $1M–$500M parks that exclusive Steady/HWR routing tagged away, so the tab showed 0 watching besides a leftover open trade. In-band Dip-family rows stay eligible for Dip Buyer (Steady/HWR can still share them). Parks above Dip max MC stay on Steady/HWR only.',
+    ],
+  },
+  {
     version: '1.2.398',
     title: 'Alchemy CU/s cooldown + quieter migration skips',
     sections: ['execution', 'scanners'],

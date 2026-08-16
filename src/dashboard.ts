@@ -15068,7 +15068,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const funnel =
           (data.byProfile && data.byProfile.funnels && data.byProfile.funnels[pid]) ||
           { sent_to_watch: 0, armed: 0, trigger_ready: 0, opened: 0, expired: 0, blocked: {} };
-        const invEntries = inv.entries || [];
+        let invEntries = (inv.entries || []).slice();
+        if (pid === 'dip_buyer' && data.dipWatch && Array.isArray(data.dipWatch.entries)) {
+          const band = (data.effectiveBand && data.effectiveBand.dip_buyer) || {};
+          const minMc = Number(band.min) > 0 ? Number(band.min) : 1000000;
+          const maxMc = Number(band.max) > 0 ? Number(band.max) : 500000000;
+          const seen = {};
+          invEntries.forEach(function (e) {
+            if (e && e.mint) seen[String(e.mint)] = true;
+          });
+          data.dipWatch.entries.forEach(function (e) {
+            if (!e || !e.mint) return;
+            if (seen[String(e.mint)]) return;
+            const st = String(e.status || '');
+            if (st !== 'watching' && st !== 'armed') return;
+            const mc = Number(e.marketCapUsd);
+            if (!(Number.isFinite(mc) && mc >= minMc && mc <= maxMc)) return;
+            seen[String(e.mint)] = true;
+            invEntries.push(Object.assign({}, e, { profileId: 'dip_buyer' }));
+          });
+        }
         const watchingN = invEntries.filter(function (e) {
           return e.status === 'watching';
         }).length;
@@ -15117,11 +15136,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         if (!listEl && !countEl) return;
         const active = sortWatchRowsByScore(
-          (inv.entries || []).filter(function (e) {
+          invEntries.filter(function (e) {
             return e.status === 'watching' || e.status === 'armed';
           })
         );
-        const terminal = pickWatchTerminal(inv.entries || [], [], pid);
+        const terminal = pickWatchTerminal(invEntries, [], pid);
         if (listEl) {
           const htmlParts = [];
           if (active.length) {
@@ -15135,10 +15154,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               data.dipWatch &&
               Number(data.dipWatch.active) > 0
             ) {
-              emptyMsg =
-                'Family has ' +
-                data.dipWatch.active +
-                ' Dip-family row(s) not shown here (MC > $500M / eligibility).';
+              const band = (data.effectiveBand && data.effectiveBand.dip_buyer) || {};
+              const maxMc = Number(band.max) > 0 ? Number(band.max) : 500000000;
+              const family = data.dipWatch.entries || [];
+              const above = family.filter(function (e) {
+                return Number(e.marketCapUsd) > maxMc;
+              }).length;
+              emptyMsg = above
+                ? above +
+                  ' Dip-family row(s) sit above max MC (Steady/HWR parks).'
+                : data.dipWatch.active +
+                  ' Dip-family row(s) are parked on Steady/HWR.';
             }
             htmlParts.push(
               '<div class="setup-watch-empty">' +
@@ -15151,7 +15177,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           });
           listEl.innerHTML = htmlParts.join('');
         }
-        if (countEl) countEl.textContent = (inv.active || active.length) + ' active';
+        if (countEl) countEl.textContent = (active.length || inv.active || 0) + ' active';
       }
 
       fillProfileWatchPanel({

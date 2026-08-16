@@ -5,6 +5,7 @@
 
 import type { TradeProfileId } from './tradeProfiles';
 import {
+  ensureDipBuyerOnInBandWatch,
   getMinTaPlaybookConfluences,
   isProfileArmingEnabled,
   isProfileWatchEnabled,
@@ -482,37 +483,49 @@ function profilesForFamilyRow(
   const tagged = Array.isArray(raw.eligibleProfileIds)
     ? (raw.eligibleProfileIds as unknown[]).map((x) => String(x || '').trim()).filter(Boolean)
     : [];
-  if (tagged.length) return tagged;
   const pref = String(raw.preferredProfileId || '').trim();
   const familyIds = [...WATCH_FAMILY_PROFILE_IDS[family]];
-  if (pref && (familyIds as string[]).includes(pref) && family !== 'dip') return [pref];
-  try {
-    return resolveWatchEligibleProfileIds({
-      family,
-      preferredProfileId: pref || null,
-      dipQualityPark:
-        family === 'dip' &&
-        (String(raw.source || '') === 'majors' ||
-          String(raw.source || '') === 'medium'),
-      marketCapUsd:
-        raw.marketCapUsd != null ? Number(raw.marketCapUsd) : null,
-      source: raw.source != null ? String(raw.source) : undefined,
-      liquidityUsd:
-        raw.liquidityUsd != null ? Number(raw.liquidityUsd) : null,
-      volumeH1Usd:
-        raw.volumeH1Usd != null ? Number(raw.volumeH1Usd) : null,
-      holderCount:
-        raw.holderCount != null ? Number(raw.holderCount) : null,
-      nearKeyFib: raw.nearKeyFib === true,
-      nearSupport: raw.nearSupport === true,
-      dropFromPeakPct:
-        raw.dropFromPeakPct != null ? Number(raw.dropFromPeakPct) : null,
-      symbol: raw.symbol != null ? String(raw.symbol) : null,
-      name: raw.name != null ? String(raw.name) : null,
-    });
-  } catch {
-    return pref ? [pref] : familyIds.slice(0, 1);
+  let ids: string[] = tagged;
+  if (!ids.length) {
+    if (pref && (familyIds as string[]).includes(pref) && family !== 'dip') {
+      ids = [pref];
+    } else {
+      try {
+        ids = resolveWatchEligibleProfileIds({
+          family,
+          preferredProfileId: pref || null,
+          dipQualityPark:
+            family === 'dip' &&
+            (String(raw.source || '') === 'majors' ||
+              String(raw.source || '') === 'medium'),
+          marketCapUsd:
+            raw.marketCapUsd != null ? Number(raw.marketCapUsd) : null,
+          source: raw.source != null ? String(raw.source) : undefined,
+          liquidityUsd:
+            raw.liquidityUsd != null ? Number(raw.liquidityUsd) : null,
+          volumeH1Usd:
+            raw.volumeH1Usd != null ? Number(raw.volumeH1Usd) : null,
+          holderCount:
+            raw.holderCount != null ? Number(raw.holderCount) : null,
+          nearKeyFib: raw.nearKeyFib === true,
+          nearSupport: raw.nearSupport === true,
+          dropFromPeakPct:
+            raw.dropFromPeakPct != null ? Number(raw.dropFromPeakPct) : null,
+          symbol: raw.symbol != null ? String(raw.symbol) : null,
+          name: raw.name != null ? String(raw.name) : null,
+        });
+      } catch {
+        ids = pref ? [pref] : familyIds.slice(0, 1);
+      }
+    }
   }
+  if (family === 'dip') {
+    ids = ensureDipBuyerOnInBandWatch(
+      ids,
+      raw.marketCapUsd != null ? Number(raw.marketCapUsd) : null
+    );
+  }
+  return ids;
 }
 
 const PROFILE_ORDER: string[] = [

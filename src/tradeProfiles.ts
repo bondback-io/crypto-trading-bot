@@ -2053,6 +2053,28 @@ export function isAboveDipBuyerMaxMc(
   return n > getDipBuyerMcBand().max;
 }
 
+/**
+ * Dip MC band owns Dip Buyer identity. Quality parks may also route
+ * Steady/HWR, but in-band rows must stay visible/eligible on Dip.
+ */
+export function ensureDipBuyerOnInBandWatch(
+  ids: string[] | null | undefined,
+  marketCapUsd?: number | null
+): string[] {
+  const out = Array.isArray(ids)
+    ? ids.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (!isInDipBuyerMcBand(marketCapUsd) || out.includes('dip_buyer')) {
+    return out;
+  }
+  try {
+    if (getTradeProfileEnabledFlags().dip_buyer === false) return out;
+  } catch {
+    /* keep dip_buyer */
+  }
+  return ['dip_buyer', ...out];
+}
+
 export const MIGRATION_SNIPER_DEFAULT_MAX_MC_USD = 175_000;
 export const SCALPER_DEFAULT_MIN_MC_USD = 150_000;
 export const SCALPER_DEFAULT_MAX_MC_USD = 1_000_000;
@@ -2494,12 +2516,13 @@ export function resolveWatchEligibleProfileIds(opts: {
       inDipBand,
       dumpReclaim: dumpReclaim && inDipBand && !aboveMax,
     });
-    const ids = routed.eligibleProfileIds.filter(
-      (id) => flags[id] !== false
+    const ids = ensureDipBuyerOnInBandWatch(
+      routed.eligibleProfileIds.filter((id) => flags[id] !== false),
+      mc
     );
     if (ids.length > 0) return ids;
     if (routed.reason === 'rejected_both') {
-      return inDipBand && !aboveMax && dumpReclaim ? ['dip_buyer'] : [];
+      return ensureDipBuyerOnInBandWatch([], mc);
     }
   } catch {
     /* fall through */
