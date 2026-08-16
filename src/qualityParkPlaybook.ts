@@ -626,7 +626,11 @@ function evaluateHwrArm(
       : 'active'
     : 'low_movement';
   const qf = DEFAULT_HWR_QUALITY_FILTER;
-  if (!isQualitySource(input.source)) {
+  const band = readWatchBand('high_win_rate');
+  const mc = Number(input.marketCapUsd);
+  const inBand =
+    Number.isFinite(mc) && mc >= band.min && mc <= band.max;
+  if (!isQualitySource(input.source) && !inBand) {
     return {
       ok: false,
       profileId: null,
@@ -638,8 +642,7 @@ function evaluateHwrArm(
       softArmOk: false,
     };
   }
-  const mc = Number(input.marketCapUsd);
-  if (!Number.isFinite(mc) || mc < HWR_WATCH_MIN_MC_USD || mc > HWR_WATCH_MAX_MC_USD) {
+  if (!inBand) {
     noteQualityParkDeny('high_win_rate', 'hwr_mc_band');
     return {
       ok: false,
@@ -999,9 +1002,6 @@ export function evaluateHwrWatchElig(input: QualityParkEvalInput): {
   ok: boolean;
   denyKey: QualityParkDenyKey | null;
 } {
-  if (!isQualitySource(input.source)) {
-    return { ok: false, denyKey: 'hwr_mc_band' };
-  }
   const mc = Number(input.marketCapUsd);
   const band = readWatchBand('high_win_rate');
   if (!Number.isFinite(mc) || mc < band.min || mc > band.max) {
@@ -1013,16 +1013,6 @@ export function evaluateHwrWatchElig(input: QualityParkEvalInput): {
     noteQualityParkDeny('high_win_rate', 'hwr_asset_proxy_excluded');
     noteQualityParkFunnel('high_win_rate', 'insert_denied');
     return { ok: false, denyKey: 'hwr_asset_proxy_excluded' };
-  }
-  const mov = evaluateQualityMovement(input.movement, {
-    watchBand:
-      String(input.source || '').toLowerCase() === 'majors' ? 'majors' : 'medium',
-    volumeFloorUsd: DEFAULT_HWR_QUALITY_FILTER.minVolumeH1Usd,
-  });
-  if (!mov.active && !mov.softEligible) {
-    noteQualityParkDeny('high_win_rate', 'hwr_low_movement');
-    noteQualityParkFunnel('high_win_rate', 'insert_denied');
-    return { ok: false, denyKey: 'hwr_low_movement' };
   }
   const liq = Number(input.liquidityUsd);
   if (

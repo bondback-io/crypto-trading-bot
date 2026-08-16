@@ -122,9 +122,9 @@ function stampTrendWatchEligibility(
     w.preferredProfileId = w.preferredProfileId || 'trend_rider';
     const ids = stampEligibleOnWatchEntry('trend', w);
     if (isNew) {
-      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch', undefined, w.source);
       if (w.status === 'armed') {
-        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+        for (const id of ids) noteProfileWatchFunnel(id, 'armed', undefined, w.source);
       }
     }
   } catch {

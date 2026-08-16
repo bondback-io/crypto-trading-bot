@@ -212,9 +212,9 @@ function stampDipWatchEligibility(w: DipWatchEntry, isNew = false): void {
       w.exclusiveRouteReason = 'routed_dip_dump';
     }
     if (isNew) {
-      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch', undefined, w.source);
       if (w.status === 'armed') {
-        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+        for (const id of ids) noteProfileWatchFunnel(id, 'armed', undefined, w.source);
       }
     }
   } catch {

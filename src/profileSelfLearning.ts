@@ -2098,7 +2098,7 @@ export function clampLearningPatch(
     match.minTaPlaybookConfluences = clamp(
       Math.round(Number(match.minTaPlaybookConfluences)),
       Math.max(0, base - 1),
-      Math.min(4, base + 1)
+      profileId === 'high_win_rate' ? base : Math.min(4, base + 1)
     );
   }
 

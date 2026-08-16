@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.377',
+    title: 'Armed confluence counts level/Fib/volume (have=0 fix)',
+    sections: ['scanners', 'microbots', 'tradecraft'],
+    items: [
+      'Watch trigger and UI share one TA confluence score. Level / Fib / volume tags on armed rows count as playbook tools, so need N (have 0) no longer blocks proven setups.',
+      'Late-chase still hard-blocks. Temporary fallback only when the engine returns 0 despite hard level + volume. Armed rows show TA have/min, passed tools, and a fallback badge.',
+      'HWR min confluence is 2. Mode B reclaim prefers Scalper; Momentum Burst armed share is capped. gmgn is marked off. Jupiter/AlphaScan/onchain watch inserts keep their source.',
+    ],
+  },
+  {
     version: '1.2.376',
     title: 'Over-max Scalper stamps park Dip/Trend; skip tallies count unique parks',
     sections: ['scanners', 'microbots', 'tradecraft'],

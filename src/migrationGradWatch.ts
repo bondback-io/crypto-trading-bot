@@ -585,15 +585,15 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
     return false;
   }
   if (w.status !== 'armed') {
-    w.lastReason = 'migration_quality_reject — post-grad not armed';
+    w.lastReason = 'post-grad not armed';
     w.updatedAt = now;
     try {
       const { noteProfileWatchFunnel } =
         require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
-      noteProfileWatchFunnel('migration_sniper', 'blocked', 'migration_quality_reject');
+      noteProfileWatchFunnel('migration_sniper', 'blocked', 'trigger_not_armed');
       const { noteTriggerOpenBlocked } =
         require('./watchPipeline') as typeof import('./watchPipeline');
-      noteTriggerOpenBlocked('migration_quality_reject');
+      noteTriggerOpenBlocked('trigger_not_armed');
     } catch {
       /* optional */
     }
@@ -610,7 +610,7 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
       entry: w,
     });
     if (!gate.ok) {
-      w.lastReason = gate.reason || 'migration_quality_reject';
+      w.lastReason = gate.reason || 'trigger blocked';
       return false;
     }
     if (gate.profileId !== 'migration_sniper') {

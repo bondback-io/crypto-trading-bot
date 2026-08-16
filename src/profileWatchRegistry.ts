@@ -14,8 +14,12 @@ import {
   type WatchFamilyId,
 } from './tradeProfiles';
 import { DEFAULT_LATE_CHASE_EXT_PCT } from './supportReclaim';
-import { countPassedTools, evaluateProfileTaEntry } from './profileTaPlaybook';
-import type { ProfileTaEntryContext } from './profileTaPlaybook';
+import { scoreTaConfluence } from './profileTaPlaybook';
+import type {
+  ConfluenceScore,
+  ConfluenceToolResult,
+  WatchConfluenceInput,
+} from './profileTaPlaybook';
 
 export type ProfileWatchState =
   | 'watching'
@@ -39,6 +43,11 @@ export interface ProfileWatchRow {
   lastReason?: string;
   confluenceCount?: number | null;
   playbookPassed?: string[];
+  toolsPassed?: string[];
+  toolsEvaluated?: ConfluenceToolResult[];
+  minTaPlaybookConfluences?: number | null;
+  hardLevelEvidence?: boolean;
+  fallbackUsed?: boolean;
   blockedReason?: string;
   source?: string;
   majorsBand?: string;
@@ -231,7 +240,24 @@ function rowFromFamily(
         : null,
     playbookPassed: Array.isArray(raw.playbookPassed)
       ? (raw.playbookPassed as string[])
+      : Array.isArray(raw.toolsPassed)
+        ? (raw.toolsPassed as string[])
+        : undefined,
+    toolsPassed: Array.isArray(raw.toolsPassed)
+      ? (raw.toolsPassed as string[])
+      : Array.isArray(raw.playbookPassed)
+        ? (raw.playbookPassed as string[])
+        : undefined,
+    toolsEvaluated: Array.isArray(raw.toolsEvaluated)
+      ? (raw.toolsEvaluated as ConfluenceToolResult[])
       : undefined,
+    minTaPlaybookConfluences:
+      raw.minTaPlaybookConfluences != null &&
+      Number.isFinite(Number(raw.minTaPlaybookConfluences))
+        ? Number(raw.minTaPlaybookConfluences)
+        : getMinTaPlaybookConfluences(profileId),
+    hardLevelEvidence: raw.hardLevelEvidence === true,
+    fallbackUsed: raw.fallbackUsed === true,
     blockedReason:
       raw.triggerBlockReason != null
         ? String(raw.triggerBlockReason)
@@ -322,6 +348,22 @@ export function getProfileWatchInventory(): ProfileWatchInventory {
       for (const profileId of eligible) {
         const bucket = out[profileId] || { active: 0, entries: [] };
         const row = rowFromFamily(family, raw, profileId, eligible);
+        if (isActiveStatus(row.status) && row.fallbackUsed !== true) {
+          try {
+            const score = scoreTaConfluence({
+              profileId,
+              watch: raw as WatchConfluenceInput,
+            });
+            row.confluenceCount = score.confluenceCount;
+            row.playbookPassed = score.passedIds;
+            row.toolsPassed = score.passedIds;
+            row.toolsEvaluated = score.toolsEvaluated;
+            row.hardLevelEvidence = score.hardLevelEvidence;
+            row.minTaPlaybookConfluences = getMinTaPlaybookConfluences(profileId);
+          } catch {
+            /* keep stamped */
+          }
+        }
         bucket.entries.push(row);
         if (isActiveStatus(row.status)) bucket.active += 1;
         out[profileId] = bucket;
@@ -376,6 +418,18 @@ export interface WatchTriggerConfluenceInput {
   supportTfHits?: string[] | null;
   chartPatternIds?: string[] | null;
   volumeExpanding?: boolean | null;
+  volOk?: boolean | null;
+  volumeState?: string | null;
+  nearLevel?: boolean | null;
+  touchedLevel?: boolean | null;
+  hasLevel?: boolean | null;
+  nearFib?: boolean | null;
+  lateChase?: boolean | null;
+  armedLateChase?: boolean | null;
+  extensionFromLevelPct?: number | null;
+  status?: string | null;
+  armed?: boolean | null;
+  mint?: string | null;
 }
 
 export interface WatchTriggerConfluenceResult {
@@ -384,10 +438,109 @@ export interface WatchTriggerConfluenceResult {
   minRequired: number;
   passed: string[];
   reason: string;
+  score?: ConfluenceScore;
+}
+
+export type WatchConfluenceStamp = {
+  preferredProfileId?: string | null;
+  nearSupport?: boolean | null;
+  nearKeyFib?: boolean | null;
+  nearFib?: boolean | null;
+  nearMultiTfSupport?: boolean | null;
+  nearMultiTfResistance?: boolean | null;
+  nearLevel?: boolean | null;
+  touchedLevel?: boolean | null;
+  hasLevel?: boolean | null;
+  volOk?: boolean | null;
+  volumeState?: string | null;
+  volumeExpanding?: boolean | null;
+  srConfluenceScore?: number | null;
+  supportTfHits?: string[] | null;
+  chartPatternIds?: string[] | null;
+  lateChase?: boolean | null;
+  armedLateChase?: boolean | null;
+  extensionFromLevelPct?: number | null;
+  status?: string | null;
+  armed?: boolean | null;
+  mint?: string | null;
+  confluenceCount?: number | null;
+  playbookPassed?: string[];
+  toolsPassed?: string[];
+  toolsEvaluated?: ConfluenceToolResult[];
+  minTaPlaybookConfluences?: number | null;
+  hardLevelEvidence?: boolean;
+  fallbackUsed?: boolean;
+  triggerBlockReason?: string;
+  lastReason?: string;
+};
+
+function stampConfluenceScore(
+  entry: WatchConfluenceStamp,
+  score: ConfluenceScore,
+  profileId: string
+): void {
+  entry.confluenceCount = score.confluenceCount;
+  entry.playbookPassed = score.passedIds;
+  entry.toolsPassed = score.passedIds;
+  entry.toolsEvaluated = score.toolsEvaluated;
+  entry.hardLevelEvidence = score.hardLevelEvidence;
+  entry.fallbackUsed = score.fallbackUsed === true;
+  entry.minTaPlaybookConfluences = getMinTaPlaybookConfluences(profileId);
+}
+
+export const ARMED_LATE_CHASE_BLOCK = 'armed_late_chase_blocked';
+
+export function canTriggerArmed(opts: {
+  profileId: string;
+  score: ConfluenceScore;
+  watch: WatchConfluenceInput;
+}): { ok: boolean; reason: string; score: ConfluenceScore } {
+  const watch = opts.watch || {};
+  const score = opts.score;
+  const status = String(watch.status || '').toLowerCase();
+  const armed = watch.armed === true || status === 'armed';
+  if (!armed && status && status !== 'armed') {
+    return { ok: false, reason: 'not_armed', score };
+  }
+  if (score.lateChase) {
+    return { ok: false, reason: ARMED_LATE_CHASE_BLOCK, score };
+  }
+  const min = getMinTaPlaybookConfluences(opts.profileId);
+  if (min <= 0) return { ok: true, reason: 'min_confluence_off', score };
+  if (score.confluenceCount >= min) {
+    return { ok: true, reason: 'confluence_met', score };
+  }
+  const volOk =
+    watch.volOk === true ||
+    watch.volumeExpanding === true ||
+    watch.volumeState === 'expanding' ||
+    watch.volumeState === 'stable' ||
+    watch.volumeState === 'ok';
+  if (
+    score.confluenceCount === 0 &&
+    score.hardLevelEvidence &&
+    volOk &&
+    !score.lateChase
+  ) {
+    const credited = Math.min(
+      min,
+      1 + (watch.nearFib === true || watch.nearKeyFib === true ? 1 : 0)
+    );
+    return {
+      ok: true,
+      reason: 'confluence_fallback_level_evidence',
+      score: { ...score, confluenceCount: credited, fallbackUsed: true },
+    };
+  }
+  return {
+    ok: false,
+    reason: `need ${min} TA confluences (have ${score.confluenceCount})`,
+    score,
+  };
 }
 
 /**
- * Trigger-time integer confluence gate. 0 = off. Fail-open on throw.
+ * Trigger-time integer confluence gate. Same ConfluenceScore as UI.
  * Does not replace playbook minConfluenceScore / Hard mode on the buy path.
  */
 export function evaluateWatchTriggerConfluence(
@@ -395,58 +548,23 @@ export function evaluateWatchTriggerConfluence(
 ): WatchTriggerConfluenceResult {
   const profileId = String(input.profileId || '').trim();
   const minRequired = getMinTaPlaybookConfluences(profileId);
-  if (minRequired <= 0) {
-    return {
-      ok: true,
-      count: 0,
-      minRequired: 0,
-      passed: [],
-      reason: 'confluence off',
-    };
-  }
-  try {
-    const { getProfileTaPlaybook } =
-      require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
-    const playbook = getProfileTaPlaybook(profileId);
-    const ctx: ProfileTaEntryContext = {
-      nearSupport: input.nearSupport === true,
-      nearKeyFib: input.nearKeyFib === true,
-      nearResistance: input.nearResistance === true,
-      nearMultiTfSupport: input.nearMultiTfSupport === true,
-      nearMultiTfResistance: input.nearMultiTfResistance === true,
-      srConfluenceScore: input.srConfluenceScore,
-      supportTfHits: input.supportTfHits,
-      chartPatternIds: input.chartPatternIds,
-      volumeExpanding: input.volumeExpanding === true,
-    };
-    const result = evaluateProfileTaEntry(playbook, ctx);
-    const count = countPassedTools(result);
-    const passed = result.passed.map(String);
-    if (count >= minRequired) {
-      return {
-        ok: true,
-        count,
-        minRequired,
-        passed,
-        reason: `${count}/${minRequired} TA tools`,
-      };
-    }
-    return {
-      ok: false,
-      count,
-      minRequired,
-      passed,
-      reason: `need ${minRequired} TA confluences (have ${count})`,
-    };
-  } catch {
-    return {
-      ok: true,
-      count: 0,
-      minRequired,
-      passed: [],
-      reason: 'confluence eval fail-open',
-    };
-  }
+  const score = scoreTaConfluence({
+    profileId,
+    watch: input,
+  });
+  const gate = canTriggerArmed({
+    profileId,
+    score,
+    watch: { ...input, status: input.status || 'armed', armed: true },
+  });
+  return {
+    ok: gate.ok,
+    count: gate.score.confluenceCount,
+    minRequired,
+    passed: gate.score.passedIds,
+    reason: gate.reason,
+    score: gate.score,
+  };
 }
 
 /**
@@ -582,71 +700,71 @@ export function mintHasOpenPaperOrLiveTrade(mint: string): boolean {
 /** Apply trigger confluence onto a watch row. Returns false when the count gate blocks. */
 export function applyTriggerConfluenceToWatch(
   profileId: string | null | undefined,
-  entry: {
-    preferredProfileId?: string | null;
-    nearSupport?: boolean | null;
-    nearKeyFib?: boolean | null;
-    nearMultiTfSupport?: boolean | null;
-    nearMultiTfResistance?: boolean | null;
-    srConfluenceScore?: number | null;
-    supportTfHits?: string[] | null;
-    chartPatternIds?: string[] | null;
-    confluenceCount?: number | null;
-    playbookPassed?: string[];
-    triggerBlockReason?: string;
-    lastReason?: string;
+  entry: WatchConfluenceStamp,
+  extra?: {
+    lateChase?: boolean;
+    extensionFromLevelPct?: number | null;
+    status?: string | null;
+    armed?: boolean;
   }
 ): boolean {
-  const pid = String(
-    profileId || entry.preferredProfileId || ''
-  ).trim();
+  const pid = String(profileId || entry.preferredProfileId || '').trim();
   try {
-    const r = evaluateWatchTriggerConfluence({
-      profileId: pid,
-      nearSupport: entry.nearSupport,
-      nearKeyFib: entry.nearKeyFib,
-      nearMultiTfSupport: entry.nearMultiTfSupport,
-      nearMultiTfResistance: entry.nearMultiTfResistance,
-      srConfluenceScore: entry.srConfluenceScore,
-      supportTfHits: Array.isArray(entry.supportTfHits)
-        ? entry.supportTfHits.map(String)
-        : null,
-      chartPatternIds: Array.isArray(entry.chartPatternIds)
-        ? (entry.chartPatternIds as string[])
-        : null,
-    });
-    entry.confluenceCount = r.count;
-    entry.playbookPassed = r.passed;
-    if (!r.ok) {
-      entry.triggerBlockReason = r.reason;
-      entry.lastReason = r.reason;
-      noteProfileWatchFunnel(pid, 'blocked', r.reason);
+    const watch: WatchConfluenceInput = {
+      ...entry,
+      lateChase: extra?.lateChase ?? entry.lateChase,
+      extensionFromLevelPct:
+        extra?.extensionFromLevelPct ?? entry.extensionFromLevelPct,
+      status: extra?.status ?? entry.status,
+      armed: extra?.armed ?? entry.armed,
+    };
+    const score = scoreTaConfluence({ profileId: pid, watch });
+    const gate = canTriggerArmed({ profileId: pid, score, watch });
+    stampConfluenceScore(entry, gate.score, pid);
+    if (String(watch.status || '').toLowerCase() === 'armed' || watch.armed === true) {
+      try {
+        const { logger } = require('./logger') as typeof import('./logger');
+        logger.info('ta_confluence', 'armed eval', {
+          mint: watch.mint,
+          profile: pid,
+          min: getMinTaPlaybookConfluences(pid),
+          have: gate.score.confluenceCount,
+          passed: gate.score.passedIds,
+          hardLevelEvidence: gate.score.hardLevelEvidence,
+          lateChase: gate.score.lateChase,
+        });
+      } catch {
+        /* optional */
+      }
+    }
+    if (!gate.ok) {
+      entry.triggerBlockReason = gate.reason;
+      entry.lastReason = gate.reason;
+      noteProfileWatchFunnel(pid, 'blocked', gate.reason);
       try {
         const { noteTriggerOpenBlocked } =
           require('./watchPipeline') as typeof import('./watchPipeline');
-        noteTriggerOpenBlocked(r.reason || 'confluence');
+        noteTriggerOpenBlocked(gate.reason || 'confluence');
       } catch {
         /* optional */
       }
       return false;
     }
+    entry.triggerBlockReason = undefined;
+    noteProfileWatchFunnel(pid, 'trigger_ready');
+    try {
+      const { noteTriggerReady } =
+        require('./watchPipeline') as typeof import('./watchPipeline');
+      noteTriggerReady();
+    } catch {
+      /* optional */
+    }
+    return true;
   } catch {
     /* fail-open on confluence eval throw */
     return true;
   }
-  entry.triggerBlockReason = undefined;
-  noteProfileWatchFunnel(pid, 'trigger_ready');
-  try {
-    const { noteTriggerReady } =
-      require('./watchPipeline') as typeof import('./watchPipeline');
-    noteTriggerReady();
-  } catch {
-    /* optional */
-  }
-  return true;
 }
-
-export const ARMED_LATE_CHASE_BLOCK = 'armed_late_chase_blocked';
 
 export function isExtensionLateChase(
   lateChase?: boolean,
@@ -703,7 +821,14 @@ export function prepareArmedWatchOpen(opts: {
     };
   }
   try {
-    if (!applyTriggerConfluenceToWatch(pid, opts.entry)) {
+    if (
+      !applyTriggerConfluenceToWatch(pid, opts.entry, {
+        lateChase: opts.lateChase,
+        extensionFromLevelPct: opts.extensionFromLevelPct,
+        status: opts.status || 'armed',
+        armed: true,
+      })
+    ) {
       return {
         ok: false,
         profileId: pid,

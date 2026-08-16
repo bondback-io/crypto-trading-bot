@@ -687,6 +687,114 @@ check(
     'migration_not_setup'
 );
 
+{
+  const { scoreTaConfluence } = require('../src/profileTaPlaybook') as typeof import('../src/profileTaPlaybook');
+  const {
+    canTriggerArmed,
+    ARMED_LATE_CHASE_BLOCK,
+  } = require('../src/profileWatchRegistry') as typeof import('../src/profileWatchRegistry');
+  const { getMinTaPlaybookConfluences } = require('../src/tradeProfiles') as typeof import('../src/tradeProfiles');
+  const { isSourceEnabled } = require('../src/watchPipeline') as typeof import('../src/watchPipeline');
+
+  const dipScore = scoreTaConfluence({
+    profileId: 'dip_buyer',
+    watch: {
+      mint: 'DipLevelFib11111111111111111111111111111',
+      status: 'armed',
+      nearSupport: true,
+      nearKeyFib: true,
+      volOk: true,
+    },
+  });
+  check(
+    'dip has-level + near-fib is not have=0',
+    dipScore.confluenceCount >= 2,
+    `${dipScore.confluenceCount} [${dipScore.passedIds.join(',')}]`
+  );
+  const dipGate = canTriggerArmed({
+    profileId: 'dip_buyer',
+    score: dipScore,
+    watch: { status: 'armed', nearSupport: true, nearKeyFib: true, volOk: true },
+  });
+  check(
+    'dip level+fib meets min 2',
+    dipGate.ok === true && dipGate.reason === 'confluence_met',
+    dipGate.reason
+  );
+
+  const lateScore = scoreTaConfluence({
+    profileId: 'scalper',
+    watch: {
+      status: 'armed',
+      nearSupport: true,
+      lateChase: true,
+    },
+  });
+  const lateGate = canTriggerArmed({
+    profileId: 'scalper',
+    score: lateScore,
+    watch: { status: 'armed', nearSupport: true, lateChase: true },
+  });
+  check(
+    'late-chase still blocks armed trigger',
+    lateGate.ok === false && lateGate.reason === ARMED_LATE_CHASE_BLOCK,
+    lateGate.reason
+  );
+
+  const emptyEngine = {
+    toolsEvaluated: [],
+    passedIds: [] as string[],
+    confluenceCount: 0,
+    hardLevelEvidence: true,
+    lateChase: false,
+  };
+  const fb = canTriggerArmed({
+    profileId: 'scalper',
+    score: emptyEngine,
+    watch: {
+      status: 'armed',
+      nearSupport: true,
+      volOk: true,
+    },
+  });
+  check(
+    'fallback credits hard level + vol when engine have=0',
+    fb.ok === true &&
+      fb.reason === 'confluence_fallback_level_evidence' &&
+      fb.score.fallbackUsed === true &&
+      fb.score.confluenceCount >= 1,
+    `${fb.reason} have=${fb.score.confluenceCount}`
+  );
+  const fbLate = canTriggerArmed({
+    profileId: 'scalper',
+    score: { ...emptyEngine, lateChase: true },
+    watch: { status: 'armed', nearSupport: true, volOk: true, lateChase: true },
+  });
+  check(
+    'fallback never applies on late-chase',
+    fbLate.ok === false && fbLate.reason === ARMED_LATE_CHASE_BLOCK,
+    fbLate.reason
+  );
+
+  check(
+    'HWR min TA confluences is 2',
+    getMinTaPlaybookConfluences('high_win_rate') === 2,
+    String(getMinTaPlaybookConfluences('high_win_rate'))
+  );
+  check(
+    'Dip min TA confluences is 2',
+    getMinTaPlaybookConfluences('dip_buyer') === 2
+  );
+  check(
+    'Scalper min TA confluences is 1',
+    getMinTaPlaybookConfluences('scalper') === 1
+  );
+  check(
+    'gmgn source is off/dead',
+    isSourceEnabled('gmgn') === false
+  );
+}
+
 if (failed) {
   console.error(`\n${failed} check(s) failed`);
   process.exit(1);

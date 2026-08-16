@@ -215,15 +215,16 @@ export function listScannerSources(input?: {
   return out.length > 0 ? out : ['unknown'];
 }
 
-function isSourceEnabled(source: string): boolean {
+export function isSourceEnabled(source: string): boolean {
   try {
     const { config } = require('./config') as typeof import('./config');
     const ms = config.marketScanner || {};
     const scannerOn = ms.enabled !== false;
     switch (source) {
       case 'dexscreener':
-      case 'gmgn':
         return scannerOn;
+      case 'gmgn':
+        return false;
       case 'jupiter':
         return scannerOn && ms.jupiterTrendingEnabled !== false;
       case 'alphascan':

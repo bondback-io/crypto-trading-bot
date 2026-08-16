@@ -951,7 +951,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       hardLateChase: true,
       armingEnabled: true,
       watchEnabled: true,
-      minTaPlaybookConfluences: 3,
+      minTaPlaybookConfluences: 2,
       maxArmedWatches: 5,
       allowSteadyHwrOverlap: false,
     },
@@ -1037,7 +1037,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       armingEnabled: true,
       watchEnabled: true,
       minTaPlaybookConfluences: 1,
-      maxArmedWatches: 5,
+      maxArmedWatches: 2,
     },
     exitRules: {
       forceScalp: true,
@@ -1905,7 +1905,11 @@ export function getMinTaPlaybookConfluences(
       resolveTradeProfileDefinition(profileId).match.minTaPlaybookConfluences
     );
     if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.max(0, Math.min(6, Math.floor(n)));
+    const capped = Math.max(0, Math.min(6, Math.floor(n)));
+    if (String(profileId || '').trim() === 'high_win_rate') {
+      return Math.min(capped, 2);
+    }
+    return capped;
   } catch {
     return 0;
   }

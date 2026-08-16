@@ -144,9 +144,9 @@ function stampScalperWatchEligibility(
       require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
     const ids = stampEligibleOnWatchEntry('scalper', w);
     if (isNew) {
-      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch');
+      for (const id of ids) noteProfileWatchFunnel(id, 'sent_to_watch', undefined, w.source);
       if (w.status === 'armed') {
-        for (const id of ids) noteProfileWatchFunnel(id, 'armed');
+        for (const id of ids) noteProfileWatchFunnel(id, 'armed', undefined, w.source);
       }
     }
   } catch {
@@ -436,11 +436,7 @@ function pickPreferredProfile(input: {
   if (atReclaim && mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX) {
     return 'scalper';
   }
-  if (
-    !strictRec &&
-    mc >= SCALPER_MC_MIN &&
-    mc <= SCALPER_MC_MAX
-  ) {
+  if (mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX) {
     return 'scalper';
   }
   return 'momentum_burst';
@@ -483,6 +479,20 @@ function stampWatchPlan(w: ScalperWatchEntry): void {
   } catch {
     w.sizePlanSol = w.sizePlanSol ?? null;
   }
+}
+
+function mbArmedShareCapped(
+  rows: Iterable<ScalperWatchEntry>
+): boolean {
+  let mb = 0;
+  let total = 0;
+  for (const row of rows) {
+    if (row.status !== 'armed') continue;
+    total += 1;
+    if (row.preferredProfileId === 'momentum_burst') mb += 1;
+  }
+  if (total < 2) return false;
+  return mb >= Math.max(2, Math.ceil(total * 0.4));
 }
 
 function pruneTerminal(): void {
@@ -1099,6 +1109,20 @@ export async function tickScalperSetupWatches(opts?: {
         preferredProfileId: w.preferredProfileId,
         honorExplicitPrefer: false,
       });
+      if (
+        w.preferredProfileId === 'momentum_burst' &&
+        mbArmedShareCapped(watches.values()) &&
+        !isMomentumBurstDominant({
+          volumeM5Usd: w.volumeM5Usd,
+          nearSupport: true,
+          nearMultiTfSupport: w.nearMultiTfSupport,
+          supportTfHits: w.supportTfHits,
+        })
+      ) {
+        w.preferredProfileId = isReversalDominant({})
+          ? 'reversal_scalper'
+          : 'scalper';
+      }
       stampScalperWatchEligibility(w);
       try {
         const { noteProfileWatchFunnel } =

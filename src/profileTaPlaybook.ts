@@ -20,6 +20,7 @@ import type {
 } from './profileTaIndicators';
 import { evaluateProfileTaIndicators } from './profileTaIndicators';
 import type { TradeProfileId } from './tradeProfiles';
+import { DEFAULT_LATE_CHASE_EXT_PCT } from './supportReclaim';
 
 export type ProfileTaMode = 'off' | 'soft' | 'hard';
 export type ProfileTaWhaleMode = 'off' | 'soft' | 'hard';
@@ -212,6 +213,200 @@ export function countPassedTools(
   return result.passed.filter((id) =>
     (PROFILE_TA_TOOL_IDS as readonly string[]).includes(id)
   ).length;
+}
+
+export type ConfluenceToolResult = {
+  id: ProfileTaToolId | string;
+  passed: boolean;
+  weight?: number;
+  reason?: string;
+};
+
+export type WatchConfluenceInput = {
+  mint?: string | null;
+  status?: string | null;
+  armed?: boolean | null;
+  nearSupport?: boolean | null;
+  nearKeyFib?: boolean | null;
+  nearFib?: boolean | null;
+  nearResistance?: boolean | null;
+  nearMultiTfSupport?: boolean | null;
+  nearMultiTfResistance?: boolean | null;
+  nearLevel?: boolean | null;
+  touchedLevel?: boolean | null;
+  hasLevel?: boolean | null;
+  volOk?: boolean | null;
+  volumeState?: string | null;
+  volumeExpanding?: boolean | null;
+  lateChase?: boolean | null;
+  armedLateChase?: boolean | null;
+  extensionFromLevelPct?: number | null;
+  srConfluenceScore?: number | null;
+  supportTfHits?: string[] | null;
+  chartPatternIds?: string[] | null;
+  candles?: HaCandleInput[] | null;
+  indicators?: IndicatorReport | null;
+  haState?: HaState | null;
+  profileTaIndicators?: ProfileTaIndicatorReport | null;
+};
+
+export type ConfluenceScore = {
+  toolsEvaluated: ConfluenceToolResult[];
+  passedIds: string[];
+  confluenceCount: number;
+  hardLevelEvidence: boolean;
+  lateChase: boolean;
+  fallbackUsed?: boolean;
+};
+
+export function watchHasHardLevel(watch: WatchConfluenceInput): boolean {
+  if (
+    watch.hasLevel === true ||
+    watch.nearSupport === true ||
+    watch.nearMultiTfSupport === true ||
+    watch.nearLevel === true ||
+    watch.touchedLevel === true
+  ) {
+    return true;
+  }
+  return Array.isArray(watch.supportTfHits) && watch.supportTfHits.length >= 1;
+}
+
+export function watchNearFibFlag(watch: WatchConfluenceInput): boolean {
+  return watch.nearKeyFib === true || watch.nearFib === true;
+}
+
+export function watchVolumeOkFlag(watch: WatchConfluenceInput): boolean {
+  const st = String(watch.volumeState || '').toLowerCase();
+  return (
+    watch.volOk === true ||
+    watch.volumeExpanding === true ||
+    st === 'expanding' ||
+    st === 'stable' ||
+    st === 'ok'
+  );
+}
+
+function overlayPassedTool(
+  passedIds: string[],
+  toolsEvaluated: ConfluenceToolResult[],
+  id: ProfileTaToolId,
+  reason: string
+): void {
+  if (passedIds.includes(id)) return;
+  toolsEvaluated.push({ id, passed: true, reason });
+  passedIds.push(id);
+}
+
+/**
+ * Single confluence counter for arm / trigger / UI.
+ * Playbook tool eval plus watch-flag overlay onto existing ProfileTaToolId ids.
+ */
+export function scoreTaConfluence(input: {
+  profileId: string;
+  playbook?: ProfileTaPlaybook;
+  watch: WatchConfluenceInput;
+}): ConfluenceScore {
+  const profileId = String(input.profileId || '').trim();
+  const watch = input.watch || {};
+  const nearSupport =
+    watch.nearSupport === true ||
+    watch.hasLevel === true ||
+    watch.nearLevel === true ||
+    watch.touchedLevel === true ||
+    watch.nearMultiTfSupport === true ||
+    (Array.isArray(watch.supportTfHits) && watch.supportTfHits.length >= 1);
+  const nearFib = watchNearFibFlag(watch);
+  const volOk = watchVolumeOkFlag(watch);
+  const hardLevelEvidence = watchHasHardLevel(watch) || nearFib;
+  const ext = Number(watch.extensionFromLevelPct);
+  const lateChase =
+    watch.lateChase === true ||
+    watch.armedLateChase === true ||
+    (Number.isFinite(ext) && ext >= DEFAULT_LATE_CHASE_EXT_PCT);
+
+  let toolsEvaluated: ConfluenceToolResult[] = [];
+  let passedIds: string[] = [];
+
+  try {
+    let playbook = input.playbook;
+    if (!playbook) {
+      const { getProfileTaPlaybook } =
+        require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+      playbook = getProfileTaPlaybook(profileId);
+    }
+    const ctx: ProfileTaEntryContext = {
+      nearSupport,
+      nearKeyFib: nearFib,
+      nearResistance: watch.nearResistance === true,
+      nearMultiTfSupport: watch.nearMultiTfSupport === true,
+      nearMultiTfResistance: watch.nearMultiTfResistance === true,
+      srConfluenceScore: watch.srConfluenceScore,
+      supportTfHits: Array.isArray(watch.supportTfHits)
+        ? watch.supportTfHits.map(String)
+        : null,
+      chartPatternIds: Array.isArray(watch.chartPatternIds)
+        ? watch.chartPatternIds
+        : null,
+      volumeExpanding: volOk,
+      candles: watch.candles,
+      indicators: watch.indicators,
+      haState: watch.haState,
+      profileTaIndicators: watch.profileTaIndicators,
+    };
+    const result = evaluateProfileTaEntry(playbook, ctx);
+    toolsEvaluated = (result.conditions || []).map((c) => ({
+      id: c.id,
+      passed: c.passed,
+      weight: c.score,
+      reason: c.detail,
+    }));
+    passedIds = (result.passed || [])
+      .map(String)
+      .filter((id) => (PROFILE_TA_TOOL_IDS as readonly string[]).includes(id));
+  } catch {
+    /* overlay from watch flags below */
+  }
+
+  if (nearSupport) {
+    overlayPassedTool(
+      passedIds,
+      toolsEvaluated,
+      'supportResistance',
+      'watch.hasLevel/nearSupport'
+    );
+  }
+  if (nearFib) {
+    overlayPassedTool(passedIds, toolsEvaluated, 'fib', 'watch.nearFib');
+  }
+  if (volOk) {
+    overlayPassedTool(
+      passedIds,
+      toolsEvaluated,
+      'volumeExpansion',
+      'watch.volOk'
+    );
+  }
+  if (Array.isArray(watch.chartPatternIds) && watch.chartPatternIds.length > 0) {
+    overlayPassedTool(
+      passedIds,
+      toolsEvaluated,
+      'patterns',
+      'watch.chartPatternIds'
+    );
+  }
+
+  const confluenceCount = passedIds.filter((id) =>
+    (PROFILE_TA_TOOL_IDS as readonly string[]).includes(id)
+  ).length;
+
+  return {
+    toolsEvaluated,
+    passedIds,
+    confluenceCount,
+    hardLevelEvidence,
+    lateChase,
+  };
 }
 
 export interface ProfileTaExitHint {
@@ -776,7 +971,7 @@ export function evaluateProfileTaEntry(
 
   if (et.ha) {
     enabledTools.push('ha');
-    const required = mode === 'hard';
+    const required = mode === 'hard' && ha.available;
     if (!ha.available) {
       const penalty = mode === 'soft' ? -6 : 0;
       score += penalty;
@@ -829,7 +1024,7 @@ export function evaluateProfileTaEntry(
     const required =
       requireMtf ||
       (mode === 'hard' && playbook.supportResistance.preferNearSupport);
-    if (playbook.supportResistance.preferNearSupport) {
+    if (playbook.supportResistance.preferNearSupport || supportOk || nearSupport) {
       const basePts = nearMultiTfSupport ? 24 : supportOk ? 18 : 0;
       const pts = toolWeight(playbook, 'supportResistance', basePts);
       const passed = requireMtf ? nearMultiTfSupport : supportOk;

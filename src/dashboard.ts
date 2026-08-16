@@ -14093,27 +14093,47 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '</span>'
               : '');
         }
+        const taMin =
+          e.minTaPlaybookConfluences != null && isFinite(Number(e.minTaPlaybookConfluences))
+            ? Number(e.minTaPlaybookConfluences)
+            : null;
+        const taHave =
+          e.confluenceCount != null && isFinite(Number(e.confluenceCount))
+            ? Number(e.confluenceCount)
+            : null;
+        const passedTools =
+          Array.isArray(e.toolsPassed) && e.toolsPassed.length
+            ? e.toolsPassed
+            : Array.isArray(e.playbookPassed)
+              ? e.playbookPassed
+              : [];
+        let taHtml = '';
+        if (taHave != null || passedTools.length || e.fallbackUsed === true) {
+          let taLabel = '';
+          if (taHave != null) {
+            taLabel = 'TA ' + taHave + (taMin != null ? '/' + taMin : '');
+          }
+          if (passedTools.length) {
+            taLabel += (taLabel ? ' · ' : '') + passedTools.slice(0, 4).join(', ');
+          }
+          if (e.fallbackUsed === true) {
+            taLabel += (taLabel ? ' · ' : '') + 'fallback';
+          }
+          taHtml =
+            '<span class="setup-watch-mc setup-watch-ta" title="' +
+            escAttr(taLabel) +
+            '">' +
+            escHtml(taLabel) +
+            '</span>';
+        }
         const reason =
           (e.lastReason || e.blockedReason)
             ? '<span class="setup-watch-mc setup-watch-reason" title="' +
               escAttr(String(e.lastReason || e.blockedReason || '')) +
-              (e.confluenceCount != null
-                ? ' · TA ' + e.confluenceCount +
-                  (Array.isArray(e.playbookPassed) && e.playbookPassed.length
-                    ? ' (' + e.playbookPassed.join(', ') + ')'
-                    : '')
-                : '') +
               '">' +
               escHtml(String(e.lastReason || e.blockedReason).slice(0, 48)) +
-              (e.confluenceCount != null
-                ? ' · TA ' + e.confluenceCount
-                : '') +
               '</span>'
-            : e.confluenceCount != null
-              ? '<span class="setup-watch-mc setup-watch-reason">TA ' +
-                escHtml(String(e.confluenceCount)) +
-                '</span>'
-              : '';
+            : '';
         // Quality chips on Steady/HWR panels only — Dip is a unified Fib/S list.
         let qualityChips = '';
         if (
@@ -14320,6 +14340,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           target +
           holders +
           reason +
+          taHtml +
           '</div>' +
           '</div>' +
           actions +
