@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.378',
+    title: 'RPC Spike Inspector + on-screen Cursor diagnosis',
+    sections: ['knobs', 'execution'],
+    items: [
+      'Stats → RPC shows Spike Inspector chips (Trading/Helius, Watchers/Alchemy) and the last 10 spikes. Containment is ON by default: Watchers shed enrich; Trading pauses new entries only. Exits stay on Critical.',
+      'Generate Diagnosis paints a read-only Cursor package on the same RPC page (copy, no download-primary). Labels only — no secret URLs. Toggle containment next to Share RPC load.',
+    ],
+  },
+  {
     version: '1.2.377',
     title: 'Armed confluence counts level/Fib/volume (have=0 fix)',
     sections: ['scanners', 'microbots', 'tradecraft'],

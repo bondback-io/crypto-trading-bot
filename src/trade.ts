@@ -623,6 +623,19 @@ export async function executeBuy(
   symbol: string,
   meta?: BuyOptions
 ): Promise<SwapResult> {
+  try {
+    const { shouldSoftPauseNewEntries } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    if (shouldSoftPauseNewEntries()) {
+      return {
+        success: false,
+        mode: config.mode,
+        error: 'rpc_containment_entry_pause',
+      };
+    }
+  } catch {
+    /* inspector optional */
+  }
   if (!hasRpcRoleContext()) {
     return runWithRpcRole(
       getRpcRoleFor('trade_entry', Boolean(config.rpc?.shareLoad)),
@@ -1445,6 +1458,14 @@ export async function executeSell(
       };
     }
     return { success: true, mode: config.mode, positionId };
+  }
+
+  if (!hasRpcRoleContext()) {
+    return runWithRpcRole(
+      'primary',
+      () => executeSell(positionId, mint, tokenAmount),
+      'send_tx'
+    );
   }
 
   const keypair = getKeypair();

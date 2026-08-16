@@ -1018,6 +1018,48 @@ export function createServer(): express.Application {
     }
   });
 
+  app.post('/api/rpc/containment', (req: Request, res: Response) => {
+    try {
+      const { setRpcContainmentEnabled } =
+        require('./config') as typeof import('./config');
+      const enabled =
+        req.body?.enabled === true ||
+        req.body?.enabled === 'true' ||
+        req.body?.enabled === 1 ||
+        req.body?.containmentEnabled === true;
+      const containmentEnabled = setRpcContainmentEnabled(enabled);
+      res.json({
+        ...getRpcStats(),
+        ok: true,
+        containmentEnabled,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/rpc/spike-diagnosis', (_req: Request, res: Response) => {
+    try {
+      const { buildRpcSpikeDiagnosis } =
+        require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+      const report = buildRpcSpikeDiagnosis();
+      res.json({
+        ok: true,
+        generatedAt: report.generatedAt,
+        reportText: report.reportText,
+        cursorPackage: report.cursorPackage,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/rpc/helius-extra-fallback', (req: Request, res: Response) => {
     try {
       const { setHeliusExtraFallback } =

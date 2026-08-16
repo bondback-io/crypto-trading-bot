@@ -10861,6 +10861,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="card">
           <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
           <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="toggle-row mb-2"><span title="When ON, Watchers spikes shed enrich and Trading spikes pause new entries only. Exits stay on Critical. Detect/record still run when OFF.">RPC containment</span><label class="switch"><input type="checkbox" id="rpc-containment" onchange="toggleRpcContainment(this.checked)" /><span class="slider"></span></label></div>
           <div class="toggle-row mb-2"><span title="Extra Critical failover after Helius → Alchemy (scanners) → QuickNode. OFF by default. Does not probe BACKUP2 until Helius is actually failing.">Helius extra fallback</span><label class="switch"><input type="checkbox" id="rpc-helius-extra" onchange="toggleHeliusExtraFallback(this.checked)" /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-md" title="BACKUP2 preferred for live. Public is paper/emergency only (rate limits miss buys).">
@@ -10900,6 +10901,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
+          <div id="rpc-spike-inspector" class="mt-4">
+            <div class="section-title" style="margin-bottom:0.4rem">Spike Inspector</div>
+            <p class="mint text-xs mb-2">Trading / Helius and Watchers / Alchemy — labels only, no URLs. Last 10 spikes. Generate Diagnosis stays on this page.</p>
+            <div id="rpc-spike-chips" class="flex flex-wrap gap-2 mb-2"></div>
+            <div class="overflow-x-auto mb-2"><table id="rpc-spike-table"><thead><tr><th>Lane</th><th>Class</th><th>Duration</th><th>Recovered</th></tr></thead><tbody></tbody></table></div>
+            <div class="mt-2 flex flex-wrap gap-2 items-center">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-rpc-spike-diagnosis" onclick="generateRpcSpikeDiagnosis()">Generate Diagnosis</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="copyRpcSpikeDiagnosis()">Copy Cursor package</button>
+              <span class="mint text-xs" id="rpc-spike-diag-status">—</span>
+            </div>
+            <p class="mint text-xs mb-2" id="rpc-spike-diag-stamp">Diagnosis: —</p>
+            <pre id="rpc-spike-viewer" class="mint text-xs" style="max-height:min(50vh,24rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate Diagnosis to build a Cursor package…</pre>
+          </div>
           <div class="mt-3 flex flex-wrap gap-2 items-center">
             <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
             <span class="mint text-xs" id="rpc-diag-status">—</span>
@@ -27463,6 +27477,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
       const shareToggle = document.getElementById('rpc-share-load');
       if (shareToggle) shareToggle.checked = rpc.shareLoad === true;
+      const containToggle = document.getElementById('rpc-containment');
+      if (containToggle) {
+        containToggle.checked =
+          rpc.containmentEnabled !== false &&
+          !(rpc.spikeInspector && rpc.spikeInspector.containmentEnabled === false);
+      }
       const extraToggle = document.getElementById('rpc-helius-extra');
       if (extraToggle) extraToggle.checked = rpc.heliusExtraFallbackEnabled === true;
       const extraTarget = document.getElementById('rpc-helius-extra-target');
@@ -27600,6 +27620,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <td>\${e.isActive ? '●' : ''}</td>
             </tr>\`).join('');
       }
+      try { paintRpcSpikeInspector(rpc); } catch (_spikePaint) {}
       const jito = status.jito || {};
       const mev = status.mev || {};
       const js = mev.jitoStats || {};
@@ -36718,6 +36739,165 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (st) st.textContent = err.message || String(err);
       }
     }
+
+    async function toggleRpcContainment(enabled) {
+      const st = document.getElementById('rpc-diag-status');
+      if (st) st.textContent = 'Saving RPC containment…';
+      try {
+        const data = await fetchJSON('/api/rpc/containment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !!enabled }),
+        });
+        if (st) {
+          st.textContent = data.containmentEnabled
+            ? 'Containment ON — Watchers shed on spike; Trading pauses new entries only'
+            : 'Containment OFF — detect/record only';
+        }
+        const t = document.getElementById('rpc-containment');
+        if (t) t.checked = data.containmentEnabled !== false;
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        const t = document.getElementById('rpc-containment');
+        if (t) t.checked = !enabled;
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+    window.toggleRpcContainment = toggleRpcContainment;
+
+    function rpcSpikeChipHtml(label, lane) {
+      const st = String((lane && lane.status) || 'ok');
+      const color = st === 'spike' ? '#f87171' : st === 'recovering' ? '#fbbf24' : '#34d399';
+      const p95 = lane && lane.p95 != null ? Math.round(Number(lane.p95)) + 'ms' : '—';
+      return '<span class="mint text-xs" style="display:inline-block;padding:0.2rem 0.55rem;border-radius:999px;border:1px solid ' +
+        color + '55;color:' + color + '">' +
+        escHtml(label) + ' · ' + escHtml(st) + ' · p95 ' + p95 + '</span>';
+    }
+
+    function rpcSpikeRowHtml(s) {
+      const row = s || {};
+      const lane = row.lane === 'primary' ? 'Trading' : row.lane === 'watchers' ? 'Watchers' : String(row.lane || '—');
+      const dur = row.durationMs != null
+        ? Math.round(Number(row.durationMs) / 1000) + 's'
+        : 'open';
+      const recovered = row.recoveredAt ? 'yes' : 'no';
+      const methodsParts = [];
+      const topMethods = Array.isArray(row.topMethods) ? row.topMethods : [];
+      for (let i = 0; i < topMethods.length; i++) {
+        const m = topMethods[i] || {};
+        methodsParts.push(String(m.method || 'unknown') + '×' + (m.count || 0));
+      }
+      const methods = methodsParts.join(', ');
+      const actions = Array.isArray(row.containmentActions)
+        ? row.containmentActions.join(', ')
+        : '';
+      const extra = [
+        methods ? 'methods: ' + methods : '',
+        actions ? 'actions: ' + actions : '',
+        row.provider ? 'provider: ' + String(row.provider) : '',
+        row.peakP95 != null ? 'peak p95 ' + Math.round(Number(row.peakP95)) + 'ms' : '',
+      ].filter(Boolean).join(' · ');
+      return '<tr><td>' + escHtml(lane) + '</td><td>' + escHtml(row.class || 'unknown') +
+        '</td><td>' + escHtml(dur) + '</td><td>' + escHtml(recovered) +
+        '</td></tr><tr><td colspan="4" style="color:#94a3b8;font-size:0.75rem"><details><summary>details</summary>' +
+        escHtml(extra || '—') + '</details></td></tr>';
+    }
+
+    function paintRpcSpikeInspector(rpc) {
+      try {
+        const si = (rpc && rpc.spikeInspector) || {};
+        const chips = document.getElementById('rpc-spike-chips');
+        if (chips) {
+          chips.innerHTML =
+            rpcSpikeChipHtml('Trading / Helius', si.trading || {}) +
+            rpcSpikeChipHtml('Watchers / Alchemy', si.watchers || {});
+        }
+        const body = document.querySelector('#rpc-spike-table tbody');
+        if (!body) return;
+        const rows = Array.isArray(si.spikes) ? si.spikes.slice(0, 10) : [];
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">No spikes recorded yet</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map(rpcSpikeRowHtml).join('');
+      } catch (_err) {}
+    }
+
+    let __rpcSpikeDiagText = '';
+    let __rpcSpikeDiagBusy = false;
+
+    async function generateRpcSpikeDiagnosis() {
+      const viewer = document.getElementById('rpc-spike-viewer');
+      const stamp = document.getElementById('rpc-spike-diag-stamp');
+      const st = document.getElementById('rpc-spike-diag-status');
+      const btn = document.getElementById('btn-rpc-spike-diagnosis');
+      if (__rpcSpikeDiagBusy) return;
+      __rpcSpikeDiagBusy = true;
+      if (btn) btn.disabled = true;
+      try {
+        if (viewer) viewer.textContent = 'Generating diagnosis…';
+        if (stamp) stamp.textContent = 'Diagnosis: generating…';
+        if (st) st.textContent = 'Generating…';
+        const data = await fetchJSON('/api/rpc/spike-diagnosis');
+        if (!data || data.ok === false) {
+          throw new Error((data && data.error) || 'Diagnosis failed');
+        }
+        __rpcSpikeDiagText =
+          data && data.cursorPackage
+            ? String(data.cursorPackage)
+            : (data && data.reportText ? String(data.reportText) : '');
+        if (viewer) {
+          viewer.textContent = __rpcSpikeDiagText || 'Empty diagnosis.';
+        }
+        if (stamp) {
+          stamp.textContent = 'Diagnosis: ' + (data.generatedAt || new Date().toISOString()) + ' (read-only)';
+        }
+        if (st) st.textContent = 'Ready — copy the Cursor package if needed';
+      } catch (err) {
+        __rpcSpikeDiagText = '';
+        const msg = (err && err.message) || String(err);
+        if (viewer) viewer.textContent = 'Diagnosis failed: ' + msg;
+        if (stamp) stamp.textContent = 'Diagnosis: error — ' + msg;
+        if (st) st.textContent = msg;
+        try {
+          if (typeof showToast === 'function') showToast('RPC diagnosis failed: ' + msg, 'error');
+        } catch (_) {}
+      } finally {
+        __rpcSpikeDiagBusy = false;
+        if (btn) btn.disabled = false;
+      }
+    }
+    window.generateRpcSpikeDiagnosis = generateRpcSpikeDiagnosis;
+
+    async function copyRpcSpikeDiagnosis() {
+      const stamp = document.getElementById('rpc-spike-diag-stamp');
+      const st = document.getElementById('rpc-spike-diag-status');
+      try {
+        if (
+          !__rpcSpikeDiagText ||
+          /Click Generate|Generating|failed/i.test(__rpcSpikeDiagText)
+        ) {
+          await generateRpcSpikeDiagnosis();
+        }
+        const text = __rpcSpikeDiagText || '';
+        if (!text || /failed/i.test(text)) {
+          throw new Error('No diagnosis to copy');
+        }
+        await copyTextToClipboard(text);
+        if (stamp) {
+          const prev = stamp.textContent || '';
+          stamp.textContent = prev.replace(/ \(copied[^)]*\)/g, '') + ' (copied)';
+        }
+        if (st) st.textContent = 'Copied Cursor package';
+      } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (st) st.textContent = msg;
+        try {
+          if (typeof showToast === 'function') showToast('Copy failed: ' + msg, 'error');
+        } catch (_) {}
+      }
+    }
+    window.copyRpcSpikeDiagnosis = copyRpcSpikeDiagnosis;
 
     async function saveRpcSoftWatchCap() {
       const st = document.getElementById('rpc-soft-watch-status');

@@ -34,6 +34,14 @@ import {
   getRpcGateSnapshot,
   isRpcGateSkipError,
 } from './rpcGate';
+import {
+  classifyRpcOutcome,
+  currentSpikeCallContext,
+  getSpikeInspectorSnapshot,
+  noteRpcCall,
+  runWithSpikeCallContext,
+  withRpcAttemptCap,
+} from './rpcSpikeInspector';
 
 dotenv.config();
 
@@ -173,6 +181,8 @@ function recordHttpRpcCall(opts: {
   method: string;
   ok: boolean;
   latencyMs: number;
+  status?: number | null;
+  error?: unknown;
 }): void {
   const feature = rpcFeatureAls.getStore() || 'ungated';
   const role = rpcRoleAls.getStore() ?? 'unknown';
@@ -193,6 +203,22 @@ function recordHttpRpcCall(opts: {
   row.calls += 1;
   if (!opts.ok) row.errors += 1;
   row.totalMs += Math.max(0, opts.latencyMs);
+  const ctx = currentSpikeCallContext();
+  const queueWaitMs = ctx?.queueWaitMs ?? 0;
+  noteRpcCall({
+    lane: role === 'unknown' ? undefined : role,
+    provider: opts.endpoint,
+    method: opts.method,
+    queueWaitMs,
+    networkMs: opts.latencyMs,
+    totalMs: queueWaitMs + opts.latencyMs,
+    outcome: classifyRpcOutcome({
+      ok: opts.ok,
+      status: opts.status,
+      error: opts.error,
+    }),
+    inFlight: ctx?.inFlight,
+  });
 }
 
 export function getRpcCallTraffic(limit = 40): {
@@ -267,6 +293,7 @@ function meteredFetch(endpointLabel: string) {
           method,
           ok,
           latencyMs,
+          status: res.status,
         });
       }
       return res;
@@ -278,6 +305,7 @@ function meteredFetch(endpointLabel: string) {
           method,
           ok: false,
           latencyMs,
+          error: err,
         });
       }
       throw err;
@@ -725,16 +753,22 @@ export async function runWithRpcRole<T>(
   }
 
   let release: (() => void) | null = null;
+  let queueWaitMs = 0;
+  let inFlight = 0;
   try {
     const gate = await acquireRpcLane(role, feature);
     release = gate.release;
+    queueWaitMs = gate.queueWaitMs ?? 0;
+    inFlight = gate.inFlight ?? 0;
   } catch (err) {
     if (isRpcGateSkipError(err)) throw err;
     throw err;
   }
 
   try {
-    return await rpcGateDepthAls.run(depth + 1, bind);
+    return await rpcGateDepthAls.run(depth + 1, () =>
+      runWithSpikeCallContext({ queueWaitMs, inFlight }, bind)
+    );
   } finally {
     release?.();
   }
@@ -1387,9 +1421,10 @@ async function withRpcInner<T>(
   const critical =
     /trade|migrat|send|confirm|swap|buy|sell/i.test(label) ||
     r === 'primary';
-  const maxAttempts = critical
+  const defaultMax = critical
     ? WITH_RPC_MAX_ATTEMPTS_CRITICAL
     : WITH_RPC_MAX_ATTEMPTS_OTHER;
+  const maxAttempts = withRpcAttemptCap(critical, defaultMax);
 
   // Build attempt order: preferred → other paid → QuickNode → utility → remaining
   const order: number[] = [];
@@ -1548,6 +1583,8 @@ export function getRpcStats(): {
     typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
   > | null;
   utilityWeakPublic: boolean;
+  containmentEnabled: boolean;
+  spikeInspector: ReturnType<typeof getSpikeInspectorSnapshot> | null;
 } {
   ensureEndpoints();
   const pIdx = resolveIndexForRole('primary');
@@ -1749,7 +1786,16 @@ export function getRpcStats(): {
     quarantine,
     loadControl,
     utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
+    containmentEnabled: Boolean(config.rpc?.containmentEnabled !== false),
+    spikeInspector: null as ReturnType<typeof getSpikeInspectorSnapshot> | null,
   };
+  try {
+    const snap = getSpikeInspectorSnapshot();
+    stats.spikeInspector = snap;
+    stats.containmentEnabled = snap.containmentEnabled;
+  } catch {
+    /* */
+  }
   try {
     const { setWatcherLaneLatency } =
       require('./watchPipeline') as typeof import('./watchPipeline');

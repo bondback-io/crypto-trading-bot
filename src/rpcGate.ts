@@ -50,6 +50,7 @@ type LaneState = {
 
 const CRITICAL_FEATURES = new Set([
   'trade_entry',
+  'trade_exit',
   'migration',
   'mev_sandwich',
   'send_tx',
@@ -157,10 +158,16 @@ function logGate(
 export async function acquireRpcLane(
   role: RpcGateRole,
   feature?: string
-): Promise<{ release: () => void; decision: RpcGateDecision }> {
+): Promise<{
+  release: () => void;
+  decision: RpcGateDecision;
+  queueWaitMs: number;
+  inFlight: number;
+}> {
   const limits = laneLimits(role);
   const lane = lanes[role];
   const critical = isCritical(feature);
+  const waitStartedAt = Date.now();
 
   refill(lane, role);
 
@@ -281,7 +288,12 @@ export async function acquireRpcLane(
     if (next) next.resolve();
   };
 
-  return { release, decision: 'run' };
+  return {
+    release,
+    decision: 'run',
+    queueWaitMs: Math.max(0, Date.now() - waitStartedAt),
+    inFlight: lane.inFlight,
+  };
 }
 
 export class RpcGateSkipError extends Error {
@@ -313,7 +325,12 @@ export async function runDedupedRpcJob<T>(
   const existing = inflightJobs.get(key);
   if (existing) {
     const roleHint = key.split(':')[0];
-    if (roleHint === 'primary' || roleHint === 'secondary' || roleHint === 'utility') {
+    if (
+      roleHint === 'primary' ||
+      roleHint === 'secondary' ||
+      roleHint === 'utility' ||
+      roleHint === 'watchers'
+    ) {
       lanes[roleHint].deduped += 1;
     } else {
       lanes.utility.deduped += 1;

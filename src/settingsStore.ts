@@ -132,6 +132,8 @@ export interface PersistedBotSettings {
   pollIntervalMs?: number;
   /** Share RPC load across Helius / Alchemy / public */
   rpcShareLoad?: boolean;
+  /** Spike Inspector containment (Watchers shed / Trading entry pause) */
+  rpcContainmentEnabled?: boolean;
   rpcHeliusExtraFallbackEnabled?: boolean;
   rpcHeliusExtraFallbackTarget?: 'backup2' | 'public';
   /** Favourites soft-watch wallet cap (0 = pause) */

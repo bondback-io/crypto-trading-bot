@@ -26,10 +26,7 @@ import { isStrategyEnabledGlobal } from './strategies';
 import { isSmartBotProfilesEnabled } from './tradeProfiles';
 import { noteWatcherPoll } from './watcherPollMetrics';
 
-/** Fail-open: rpcWorkloadControl is not on this tree. */
-function isRpcWorkloadEnabled(_id: string): boolean {
-  return true;
-}
+import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
 
 /** UI / watch source band */
 export type UniverseWatchBand = 'medium' | 'majors';

@@ -6,6 +6,8 @@ import type { RpcRole } from './connection';
 
 export type RpcFeature =
   | 'trade_entry'
+  | 'trade_exit'
+  | 'send_tx'
   | 'migration'
   | 'market_scanner'
   | 'alpha_scan'
@@ -34,6 +36,8 @@ export function getRpcRoleFor(
 
   switch (feature) {
     case 'trade_entry':
+    case 'trade_exit':
+    case 'send_tx':
     case 'migration':
       return 'primary';
     case 'market_scanner':

@@ -30,10 +30,7 @@ import {
   WATCH_ARM_SCORE_FLOOR,
 } from './watchPriorityScore';
 
-/** Fail-open: rpcWorkloadControl is not on this tree. */
-function isRpcWorkloadEnabled(_id: string): boolean {
-  return true;
-}
+import { isRpcWorkloadEnabled } from './rpcWorkloadControl';
 
 function stampDipPriority(w: DipWatchEntry, now: number): void {
   stampWatchPriority(

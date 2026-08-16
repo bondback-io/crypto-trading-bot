@@ -1851,6 +1851,11 @@ export interface BotConfig {
      */
     shareLoad: boolean;
     /**
+     * Spike Inspector containment (default ON). Detect/record still run when
+     * OFF; shedding / entry-pause / retry-cap do not.
+     */
+    containmentEnabled: boolean;
+    /**
      * Favourites soft-watch wallet cap (Utility lane when Share ON).
      * 0 = pause Favourites RPC watch (utility relief).
      * unset = default 12 (Share ON) / 20 (Share OFF). Env RPC_SOFT_WATCH_CAP wins if set.
@@ -2711,6 +2716,11 @@ export const config: BotConfig = {
             process.env.HELIUS_API_KEY?.trim() &&
               process.env.ALCHEMY_API_KEY?.trim()
           ),
+    containmentEnabled:
+      process.env.RPC_CONTAINMENT === '0' ||
+      process.env.RPC_CONTAINMENT === 'false'
+        ? false
+        : true,
     softWatchCap:
       process.env.RPC_SOFT_WATCH_CAP != null &&
       process.env.RPC_SOFT_WATCH_CAP !== '' &&
@@ -3132,6 +3142,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
     rpcShareLoad: Boolean(config.rpc.shareLoad),
+    rpcContainmentEnabled: Boolean(config.rpc.containmentEnabled !== false),
     rpcSoftWatchCap:
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
         ? config.rpc.softWatchCap
@@ -3892,6 +3903,9 @@ function applySettingsSnapshot(
   }
   if (typeof saved.rpcShareLoad === 'boolean') {
     config.rpc.shareLoad = saved.rpcShareLoad;
+  }
+  if (typeof saved.rpcContainmentEnabled === 'boolean') {
+    config.rpc.containmentEnabled = saved.rpcContainmentEnabled;
   }
   if (typeof saved.rpcHeliusExtraFallbackEnabled === 'boolean') {
     config.rpc.heliusExtraFallbackEnabled = saved.rpcHeliusExtraFallbackEnabled;
@@ -5912,6 +5926,19 @@ export function setRpcShareLoad(enabled: boolean): boolean {
   return config.rpc.shareLoad;
 }
 
+/** Enable/disable Spike Inspector containment (shed Watchers / pause Trading entries). */
+export function setRpcContainmentEnabled(enabled: boolean): boolean {
+  config.rpc.containmentEnabled = Boolean(enabled);
+  persistUserSettings();
+  console.log(
+    `[rpc] Containment ${config.rpc.containmentEnabled ? 'ON' : 'OFF'} — ` +
+      (config.rpc.containmentEnabled
+        ? 'Watchers shed on spike; Trading pauses new entries only'
+        : 'detect/record only — no shedding')
+  );
+  return config.rpc.containmentEnabled;
+}
+
 export function setHeliusExtraFallback(
   enabled: boolean,
   target?: 'backup2' | 'public'
@@ -6708,6 +6735,7 @@ export function getConfigSnapshot() {
       healthIntervalMs: config.rpc.healthIntervalMs,
       failoverDownMs: config.rpc.failoverDownMs,
       shareLoad: Boolean(config.rpc.shareLoad),
+      containmentEnabled: Boolean(config.rpc.containmentEnabled !== false),
       heliusExtraFallbackEnabled: Boolean(
         config.rpc.heliusExtraFallbackEnabled
       ),
