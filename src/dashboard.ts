@@ -10929,6 +10929,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="section-title" style="margin-bottom:0.4rem">Spike Inspector</div>
             <p class="mint text-xs mb-2">Trading / Helius and Watchers / Alchemy — labels only, no URLs. Last 10 spikes. Generate Diagnosis stays on this page.</p>
             <div id="rpc-spike-chips" class="flex flex-wrap gap-2 mb-2"></div>
+            <p class="mint text-xs mb-2" id="rpc-spike-meta" style="color:#94a3b8">—</p>
             <div class="overflow-x-auto mb-2"><table id="rpc-spike-table"><thead><tr><th>Lane</th><th>Class</th><th>Duration</th><th>Recovered</th></tr></thead><tbody></tbody></table></div>
             <div class="mt-2 flex flex-wrap gap-2 items-center">
               <button type="button" class="btn btn-primary btn-sm" id="btn-rpc-spike-diagnosis" onclick="generateRpcSpikeDiagnosis()">Generate Diagnosis</button>
@@ -37177,6 +37178,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           chips.innerHTML =
             rpcSpikeChipHtml('Trading / Helius', si.trading || {}) +
             rpcSpikeChipHtml('Watchers / Alchemy', si.watchers || {});
+        }
+        const meta = document.getElementById('rpc-spike-meta');
+        if (meta) {
+          meta.textContent =
+            'entry pause ' + (si.entryPauseActive ? 'on' : 'off') +
+            ' · auto-cleared ' + (si.entry_pause_auto_cleared || 0) +
+            ' · last recover ' + (si.lastRecoverReason || '—') +
+            ' · exit_lane_guard_trips ' + (si.exit_lane_guard_trips || 0);
         }
         const body = document.querySelector('#rpc-spike-table tbody');
         if (!body) return;

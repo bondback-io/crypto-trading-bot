@@ -82,14 +82,22 @@ const RECENT_WINDOW_MS = 30_000;
 const P95_TRADING_MS = 200;
 const P95_WATCHERS_MS = 350;
 const P95_OTHER_MS = 400;
+/** Trading recover bar — a stable ~250ms Helius window is healthy. */
+const RECOVER_TRADING_MS = 280;
 const HARD_SPIKE_MS = 1_500;
 const HARD_CALL_COOLDOWN_MS = 30_000;
+const MAX_SPIKE_AGE_MS = 90_000;
+const MAX_SPIKE_AGE_PROBES = 5;
+const SOFT_PAUSE_MAX_MS = 90_000;
 const BURST_429_N = 3;
 const BURST_429_MS = 10_000;
 const EXIT_CRITICAL_METHOD_RE =
   /sendRawTransaction|sendTransaction|sendLegacy|confirmTransaction/i;
 let startedAt = Date.now();
 let lastRecoverReason: string | null = null;
+let entryPauseAutoCleared = 0;
+/** Spike id whose entry pause already auto-cleared — stays off until a new spike. */
+let entryPauseClearedSpikeId: string | null = null;
 
 const lanes: Record<RpcSpikeLane, LaneBuf> = {
   primary: emptyBuf(),
@@ -138,7 +146,8 @@ function thresholdFor(lane: RpcSpikeLane): number {
 }
 
 function recoverThreshold(lane: RpcSpikeLane): number {
-  return Math.round(thresholdFor(lane) * 0.85);
+  if (lane === 'primary') return RECOVER_TRADING_MS;
+  return thresholdFor(lane);
 }
 
 function isContainmentOn(): boolean {
@@ -305,6 +314,7 @@ function startSpike(
   };
   buf.openSpike = rec;
   buf.recoveringSince = null;
+  if (lane === 'primary') entryPauseClearedSpikeId = null;
   history.push(rec);
   trimHistory();
   console.warn('[rpc_spike_start]', {
@@ -401,6 +411,27 @@ function endOpenSpike(
   });
 }
 
+function lastNonExitProbes(buf: LaneBuf, n: number): Sample[] {
+  const out: Sample[] = [];
+  for (let i = buf.samples.length - 1; i >= 0 && out.length < n; i--) {
+    if (!isExitCriticalMethod(buf.samples[i].method)) {
+      out.push(buf.samples[i]);
+    }
+  }
+  return out.reverse();
+}
+
+function lastProbesUnderRecoverBar(
+  lane: RpcSpikeLane,
+  buf: LaneBuf,
+  n: number
+): boolean {
+  const probes = lastNonExitProbes(buf, n);
+  if (probes.length < n) return false;
+  const bar = recoverThreshold(lane);
+  return probes.every((s) => s.totalMs <= bar);
+}
+
 function maybeRecover(lane: RpcSpikeLane, buf: LaneBuf, now: number): void {
   const rec = buf.openSpike;
   if (!rec) {
@@ -408,19 +439,23 @@ function maybeRecover(lane: RpcSpikeLane, buf: LaneBuf, now: number): void {
     return;
   }
   const { healthy } = recoverHealth(lane, buf, now);
-  if (!healthy) {
+  if (healthy) {
+    if (buf.recoveringSince == null) buf.recoveringSince = now;
+    if (now - buf.recoveringSince >= RECOVER_STABLE_MS) {
+      const reason =
+        rec.class === 'post_boot' ? 'post_boot_stable_clear' : 'p95_stable';
+      endOpenSpike(lane, buf, now, reason);
+      return;
+    }
+  } else {
     buf.recoveringSince = null;
-    return;
   }
-  if (buf.recoveringSince == null) buf.recoveringSince = now;
-  if (now - buf.recoveringSince < RECOVER_STABLE_MS) return;
-  const reason =
-    rec.class === 'post_boot'
-      ? 'post_boot_stable_clear'
-      : lane === 'primary'
-        ? 'trading_p95_stable'
-        : 'p95_stable';
-  endOpenSpike(lane, buf, now, reason);
+  if (
+    now - rec.startedAt >= MAX_SPIKE_AGE_MS &&
+    lastProbesUnderRecoverBar(lane, buf, MAX_SPIKE_AGE_PROBES)
+  ) {
+    endOpenSpike(lane, buf, now, 'max_age');
+  }
 }
 
 /** After boot: relabel stuck post_boot if still hot; recover from recent p95. */
@@ -544,8 +579,37 @@ export function isLaneRecovering(lane: RpcSpikeLane): boolean {
   return lanes[lane].openSpike != null && lanes[lane].recoveringSince != null;
 }
 
+function recentWindowHasTimeoutOr429(buf: LaneBuf, now: number): boolean {
+  return recentSamples(buf, now).some(
+    (s) => s.outcome === 'timeout' || s.outcome === '429'
+  );
+}
+
+/**
+ * Pause new entries while a primary spike is open, but not for the whole uptime.
+ * After 90s with no timeouts/429s, auto-clear for this spike. A new spike re-pauses.
+ */
+function refreshPrimaryEntryPause(now: number): boolean {
+  if (!isContainmentOn()) return false;
+  const rec = lanes.primary.openSpike;
+  if (!rec) return false;
+  if (entryPauseClearedSpikeId === rec.id) return false;
+  if (now - rec.startedAt < SOFT_PAUSE_MAX_MS) return true;
+  if (recentWindowHasTimeoutOr429(lanes.primary, now)) return true;
+  entryPauseClearedSpikeId = rec.id;
+  entryPauseAutoCleared += 1;
+  if (!rec.containmentActions.includes('entry_pause_auto_cleared')) {
+    rec.containmentActions.push('entry_pause_auto_cleared');
+  }
+  console.warn('[rpc_containment_action]', 'entry_pause_auto_cleared', {
+    spikeId: rec.id,
+    count: entryPauseAutoCleared,
+  });
+  return false;
+}
+
 export function shouldSoftPauseNewEntries(): boolean {
-  return isContainmentOn() && isLaneSpiking('primary');
+  return refreshPrimaryEntryPause(Date.now());
 }
 
 /** Shed non-exit getSignatures/getTransaction on Trading while a primary spike is open. */
@@ -583,6 +647,16 @@ export function laneTelemetry(lane: RpcSpikeLane): RpcLaneTelemetry {
   };
 }
 
+function readExitLaneGuardTrips(): number {
+  try {
+    return (
+      require('./connection') as typeof import('./connection')
+    ).getExitLaneGuardTrips();
+  } catch {
+    return 0;
+  }
+}
+
 export function getSpikeInspectorSnapshot(): {
   containmentEnabled: boolean;
   trading: RpcLaneTelemetry;
@@ -591,8 +665,14 @@ export function getSpikeInspectorSnapshot(): {
   utility: RpcLaneTelemetry;
   spikes: RpcSpikeRecord[];
   openSpikes: RpcSpikeRecord[];
+  entryPauseActive: boolean;
+  entry_pause_auto_cleared: number;
+  lastRecoverReason: string | null;
+  exit_lane_guard_trips: number;
 } {
   tickAllLaneHygiene();
+  const now = Date.now();
+  const entryPauseActive = refreshPrimaryEntryPause(now);
   return {
     containmentEnabled: isContainmentOn(),
     trading: laneTelemetry('primary'),
@@ -601,6 +681,10 @@ export function getSpikeInspectorSnapshot(): {
     utility: laneTelemetry('utility'),
     spikes: history.slice().reverse(),
     openSpikes: history.filter((s) => !s.recoveredAt),
+    entryPauseActive,
+    entry_pause_auto_cleared: entryPauseAutoCleared,
+    lastRecoverReason,
+    exit_lane_guard_trips: readExitLaneGuardTrips(),
   };
 }
 
@@ -690,6 +774,10 @@ export function buildRpcSpikeDiagnosis(): {
     `- containment: ${snap.containmentEnabled ? 'ON' : 'OFF'}`
   );
   lines.push(
+    `- entry pause: ${snap.entryPauseActive ? 'active' : 'off'} · auto_cleared ${snap.entry_pause_auto_cleared} · last recover: ${snap.lastRecoverReason || '—'}`
+  );
+  lines.push(`- exit_lane_guard_trips: ${snap.exit_lane_guard_trips}`);
+  lines.push(
     `- Trading / Helius: status ${snap.trading.status} · p50 ${fmtMs(snap.trading.p50)} · p95 ${fmtMs(snap.trading.p95)} · inFlight ${snap.trading.inFlight} · 429 ${snap.trading.rateLimitedCount} · timeout ${snap.trading.timeoutCount}`
   );
   lines.push(
@@ -775,6 +863,8 @@ export function __resetRpcSpikeInspectorForTests(): void {
   spikeSeq = 0;
   containmentActionsLog.length = 0;
   lastRecoverReason = null;
+  entryPauseAutoCleared = 0;
+  entryPauseClearedSpikeId = null;
 }
 
 /** Pretend the inspector has been up for `ms` (post-boot hygiene tests). */
@@ -797,6 +887,16 @@ export function __ageLaneSamplesForTests(lane: RpcSpikeLane, ageMs: number): voi
   const buf = lanes[lane];
   const d = Math.max(0, Math.round(ageMs));
   for (const s of buf.samples) s.ts -= d;
+}
+
+/** Age an open spike's start so max-age / pause-cap tests can fire. */
+export function __ageOpenSpikeStartedAtForTests(
+  lane: RpcSpikeLane,
+  ageMs: number
+): void {
+  const rec = lanes[lane].openSpike;
+  if (!rec) return;
+  rec.startedAt -= Math.max(0, Math.round(ageMs));
 }
 
 /** End an open spike so tests can open the next one (sets hard-call cooldown). */

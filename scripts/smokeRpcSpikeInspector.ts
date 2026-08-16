@@ -7,6 +7,7 @@ import path from 'node:path';
 import { config } from '../src/config';
 import {
   __ageLaneSamplesForTests,
+  __ageOpenSpikeStartedAtForTests,
   __clearHardCallCooldownForTests,
   __endOpenSpikeForTests,
   __forceSpikeRecoveringElapsedForTests,
@@ -26,7 +27,13 @@ import {
   getExitLaneGuardTrips,
   __resetExitLaneGuardTripsForTests,
 } from '../src/connection';
-import { runDedupedRpcJob, getRpcGateSnapshot } from '../src/rpcGate';
+import {
+  acquireSpikeAccountInfoCap,
+  getRpcGateSnapshot,
+  getSpikeAccountInfoInFlight,
+  runDedupedRpcJob,
+  __resetSpikeAccountInfoCapForTests,
+} from '../src/rpcGate';
 import {
   isRpcWorkloadEnabled,
   shouldIdleIsolate,
@@ -545,12 +552,148 @@ check(
   'Trading recovers on 30s p95 despite one hard poll + slow send',
   isLaneSpiking('primary') === false &&
     shouldSoftPauseNewEntries() === false &&
-    getLastRpcSpikeRecoverReason() === 'trading_p95_stable',
+    getLastRpcSpikeRecoverReason() === 'p95_stable',
   String(getLastRpcSpikeRecoverReason())
 );
 check(
   'retry cap returns to configured defaults after recover',
   withRpcAttemptCap(true, 4) === 4 && withRpcAttemptCap(false, 3) === 3
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 2,
+});
+__ageLaneSamplesForTests('primary', 31_000);
+for (let i = 0; i < 8; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 4,
+    networkMs: 246,
+    totalMs: 250,
+    outcome: 'success',
+    inFlight: 1,
+  });
+}
+__forceSpikeRecoveringElapsedForTests('primary', 45_000);
+const snap250 = getSpikeInspectorSnapshot();
+check(
+  '1.2.389 ~250ms window recovers as p95_stable',
+  isLaneSpiking('primary') === false &&
+    shouldSoftPauseNewEntries() === false &&
+    getLastRpcSpikeRecoverReason() === 'p95_stable' &&
+    snap250.entryPauseActive === false,
+  String(getLastRpcSpikeRecoverReason())
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getSignaturesForAddress',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 2,
+});
+for (let i = 0; i < 8; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 8,
+    networkMs: 400,
+    totalMs: 408,
+    outcome: 'success',
+    inFlight: 2,
+  });
+}
+for (let i = 0; i < 5; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 4,
+    networkMs: 246,
+    totalMs: 250,
+    outcome: 'success',
+    inFlight: 1,
+  });
+}
+__ageOpenSpikeStartedAtForTests('primary', 91_000);
+getSpikeInspectorSnapshot();
+check(
+  '1.2.389 max_age recovers when last 5 probes are under 280ms',
+  isLaneSpiking('primary') === false &&
+    getLastRpcSpikeRecoverReason() === 'max_age',
+  String(getLastRpcSpikeRecoverReason())
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 2,
+});
+for (let i = 0; i < 8; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 8,
+    networkMs: 400,
+    totalMs: 408,
+    outcome: 'success',
+    inFlight: 2,
+  });
+}
+check('1.2.389 pause on while spike is young', shouldSoftPauseNewEntries() === true);
+__ageOpenSpikeStartedAtForTests('primary', 91_000);
+const snapPause = getSpikeInspectorSnapshot();
+check(
+  '1.2.389 entry pause auto-clears after 90s with 0 timeouts/429s',
+  isLaneSpiking('primary') === true &&
+    shouldSoftPauseNewEntries() === false &&
+    snapPause.entryPauseActive === false &&
+    snapPause.entry_pause_auto_cleared >= 1,
+  `spike=${isLaneSpiking('primary')} pause=${shouldSoftPauseNewEntries()} cleared=${snapPause.entry_pause_auto_cleared}`
+);
+__endOpenSpikeForTests('primary');
+__clearHardCallCooldownForTests('primary');
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 2,
+});
+check(
+  '1.2.389 new spike re-pauses entries',
+  shouldSoftPauseNewEntries() === true && isLaneSpiking('primary') === true
 );
 
 __resetExitLaneGuardTripsForTests();
@@ -576,6 +719,71 @@ check(
 check(
   'exit send attempt order skips utility/watchers failover',
   /if \(!exitSend\)[\s\S]{0,400}pushUnique\(preferredUtility\)/.test(connSrc)
+);
+check(
+  'snapshot exposes exit_lane_guard_trips',
+  getSpikeInspectorSnapshot().exit_lane_guard_trips >= 1
+);
+check(
+  'primary monitor join includes getAccountInfo and never send_tx',
+  (() => {
+    const block = connSrc.match(
+      /PRIMARY_MONITOR_METHODS = new Set\(\[([\s\S]*?)\]\)/
+    );
+    const body = block ? block[1] : '';
+    return (
+      /getAccountInfo/.test(body) &&
+      !/sendTransaction/.test(body) &&
+      !/sendRaw/.test(body) &&
+      !/confirmTransaction/.test(body)
+    );
+  })()
+);
+
+__resetSpikeAccountInfoCapForTests();
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+noteRpcCall({
+  lane: 'watchers',
+  provider: 'Alchemy',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 3,
+});
+const gaiA = acquireSpikeAccountInfoCap(
+  'watchers',
+  ['getAccountInfo'],
+  'bonding_curve'
+);
+const gaiB = acquireSpikeAccountInfoCap(
+  'watchers',
+  ['getAccountInfo'],
+  'token_metrics'
+);
+const gaiC = acquireSpikeAccountInfoCap(
+  'watchers',
+  ['getAccountInfo'],
+  'market_scanner'
+);
+check(
+  'watchers spike drops 3rd concurrent getAccountInfo enrich',
+  gaiA.allowed === true &&
+    gaiB.allowed === true &&
+    gaiC.allowed === false &&
+    getSpikeAccountInfoInFlight('watchers') === 2,
+  `a=${gaiA.allowed} b=${gaiB.allowed} c=${gaiC.allowed} inflight=${getSpikeAccountInfoInFlight('watchers')}`
+);
+gaiA.release();
+gaiB.release();
+gaiC.release();
+check(
+  'executeSell still has no containment pause',
+  !/export async function executeSell[\s\S]*shouldSoftPauseNewEntries/.test(
+    readSrc('src/trade.ts')
+  )
 );
 
 __resetRpcSpikeInspectorForTests();

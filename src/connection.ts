@@ -31,9 +31,11 @@ import {
 } from './rpcUrl';
 import {
   acquireRpcLane,
+  acquireSpikeAccountInfoCap,
   getRpcGateSnapshot,
   isRpcGateSkipError,
   runDedupedRpcJob,
+  RpcGateSkipError,
 } from './rpcGate';
 import {
   classifyRpcOutcome,
@@ -282,6 +284,7 @@ const PRIMARY_MONITOR_METHODS = new Set([
   'getSignaturesForAddress',
   'getTransaction',
   'getParsedTransaction',
+  'getAccountInfo',
 ]);
 
 function isExitRpcFeature(feature: string): boolean {
@@ -368,23 +371,31 @@ function meteredFetch(endpointLabel: string) {
     const role = rpcRoleAls.getStore();
     const feature = rpcFeatureAls.getStore() || 'ungated';
     const monitor = methods.some((m) => PRIMARY_MONITOR_METHODS.has(m));
-    if (
-      role === 'primary' &&
-      monitor &&
-      !isExitRpcFeature(feature) &&
-      shouldShedPrimaryMonitoring()
-    ) {
-      const raw =
-        typeof init?.body === 'string'
-          ? init.body
-          : String(init?.body || '');
-      const key = `primary:monitor:${methods.slice().sort().join('+')}:${raw.slice(0, 240)}`;
-      const joined = await runDedupedRpcJob(key, () => doFetch(input, init), {
-        join: true,
-      });
-      if (joined) return joined;
+    const accountCap = acquireSpikeAccountInfoCap(role, methods, feature);
+    if (!accountCap.allowed) {
+      throw new RpcGateSkipError('busy', role || 'watchers', feature);
     }
-    return doFetch(input, init);
+    try {
+      if (
+        role === 'primary' &&
+        monitor &&
+        !isExitRpcFeature(feature) &&
+        shouldShedPrimaryMonitoring()
+      ) {
+        const raw =
+          typeof init?.body === 'string'
+            ? init.body
+            : String(init?.body || '');
+        const key = `primary:monitor:${methods.slice().sort().join('+')}:${raw.slice(0, 240)}`;
+        const joined = await runDedupedRpcJob(key, () => doFetch(input, init), {
+          join: true,
+        });
+        if (joined) return joined;
+      }
+      return await doFetch(input, init);
+    } finally {
+      accountCap.release();
+    }
   };
 }
 

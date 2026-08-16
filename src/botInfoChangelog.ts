@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.389',
+    title: 'Sticky RPC recover + capped entry pause',
+    sections: ['knobs', 'execution'],
+    items: [
+      'A Trading spike now recovers when non-exit p95 stays ≤280ms for 45s (so a stable ~250ms Helius window clears). Watchers/other recover at their start bars. Spikes older than 90s with the last 5 probes under the bar end as max_age. Recover logs p95_stable or max_age.',
+      'New-entry pause auto-clears 90s after a Trading spike starts if the recent window has no timeouts or 429s; a new spike re-pauses. Exits/SL stay on Helius. Duplicate getAccountInfo monitoring joins during a Trading spike; Watchers/secondary getAccountInfo enrich is capped at 2 in-flight.',
+    ],
+  },
+  {
     version: '1.2.388',
     title: 'Waiting arm can arm, trigger, or expire',
     sections: ['microbots', 'scanners', 'execution'],

@@ -314,6 +314,86 @@ export function isRpcGateSkipError(err: unknown): err is RpcGateSkipError {
   return err instanceof RpcGateSkipError;
 }
 
+const SPIKE_ACCOUNTINFO_CAP = 2;
+const accountInfoInFlight: Record<'watchers' | 'secondary', number> = {
+  watchers: 0,
+  secondary: 0,
+};
+
+function isAccountInfoCapLane(
+  role: RpcGateRole | undefined
+): role is 'watchers' | 'secondary' {
+  return role === 'watchers' || role === 'secondary';
+}
+
+/** Enrich/reprice/curve — droppable when the lane is already at the spike cap. */
+function isAccountInfoEnrichFeature(feature?: string): boolean {
+  const f = String(feature || 'ungated');
+  if (CRITICAL_FEATURES.has(f) || f.startsWith('trade_')) return false;
+  if (/send_tx|confirm_tx|trade_exit|health_probe|arm_|trigger_/i.test(f)) {
+    return false;
+  }
+  return true;
+}
+
+export function getSpikeAccountInfoInFlight(
+  role: 'watchers' | 'secondary'
+): number {
+  return accountInfoInFlight[role];
+}
+
+export function __resetSpikeAccountInfoCapForTests(): void {
+  accountInfoInFlight.watchers = 0;
+  accountInfoInFlight.secondary = 0;
+}
+
+/**
+ * During a Watchers/secondary spike, cap concurrent getAccountInfo at 2.
+ * Excess enrich calls are dropped (reuse last / skip). Exits are never dropped.
+ */
+export function acquireSpikeAccountInfoCap(
+  role: RpcGateRole | undefined,
+  methods: string[],
+  feature?: string
+): { allowed: boolean; release: () => void } {
+  const noop = { allowed: true, release: () => {} };
+  if (!isAccountInfoCapLane(role)) return noop;
+  if (!methods.some((m) => m === 'getAccountInfo')) return noop;
+  try {
+    const { isLaneSpiking, isRpcContainmentEnabled } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    if (!isRpcContainmentEnabled() || !isLaneSpiking(role)) return noop;
+  } catch {
+    return noop;
+  }
+  const enrich = isAccountInfoEnrichFeature(feature);
+  if (accountInfoInFlight[role] >= SPIKE_ACCOUNTINFO_CAP && enrich) {
+    lanes[role].skipped += 1;
+    try {
+      const { noteBackgroundRpcSkip } =
+        require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+      noteBackgroundRpcSkip(role, feature);
+    } catch {
+      /* */
+    }
+    logGate(role, 'getAccountInfo enrich dropped (spike cap 2)', {
+      feature: feature || 'ungated',
+      inFlight: accountInfoInFlight[role],
+    });
+    return { allowed: false, release: () => {} };
+  }
+  accountInfoInFlight[role] += 1;
+  let released = false;
+  return {
+    allowed: true,
+    release: () => {
+      if (released) return;
+      released = true;
+      accountInfoInFlight[role] = Math.max(0, accountInfoInFlight[role] - 1);
+    },
+  };
+}
+
 /** In-flight dedupe: same key shares one promise; later callers await or skip. */
 const inflightJobs = new Map<string, Promise<unknown>>();
 
