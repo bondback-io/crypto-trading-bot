@@ -7,6 +7,8 @@ import path from 'node:path';
 import { config } from '../src/config';
 import {
   __ageLaneSamplesForTests,
+  __clearHardCallCooldownForTests,
+  __endOpenSpikeForTests,
   __forceSpikeRecoveringElapsedForTests,
   __resetRpcSpikeInspectorForTests,
   __setSpikeInspectorUptimeForTests,
@@ -296,6 +298,112 @@ check(
     shouldSoftPauseNewEntries() === false
 );
 config.rpc.containmentEnabled = true;
+
+function feedUtilityCall(totalMs: number, method = 'getSlot'): void {
+  noteRpcCall({
+    lane: 'utility',
+    provider: 'rpc-url',
+    method,
+    queueWaitMs: 2,
+    networkMs: Math.max(0, totalMs - 2),
+    totalMs,
+    outcome: 'success',
+    inFlight: 1,
+  });
+}
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+for (let i = 0; i < 8; i++) feedUtilityCall(20);
+feedUtilityCall(1800);
+check(
+  'lone hard call among fast recent samples does not start a utility spike',
+  isLaneSpiking('utility') === false &&
+    getSpikeInspectorSnapshot().spikes.length === 0
+);
+check(
+  'false hard call does not slow utility polls',
+  utilityPollScale().skipActivity === false
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+for (let i = 0; i < 8; i++) feedUtilityCall(510);
+const hotUtil = getSpikeInspectorSnapshot();
+check(
+  'sustained utility p95 starts spike as provider_slowness',
+  isLaneSpiking('utility') === true &&
+    hotUtil.spikes[0]?.class === 'provider_slowness' &&
+    utilityPollScale().skipActivity === true,
+  `class=${hotUtil.spikes[0]?.class}`
+);
+
+__ageLaneSamplesForTests('utility', 31_000);
+__forceSpikeRecoveringElapsedForTests('utility', 45_000);
+getSpikeInspectorSnapshot();
+check('forced recover clears utility spike', isLaneSpiking('utility') === false);
+feedUtilityCall(1800);
+check(
+  'hard-call-only within 30s cooldown does not reopen',
+  isLaneSpiking('utility') === false
+);
+__clearHardCallCooldownForTests('utility');
+__ageLaneSamplesForTests('utility', 31_000);
+for (let i = 0; i < 8; i++) feedUtilityCall(20);
+feedUtilityCall(1800);
+check(
+  'after cooldown, lone hard call among fast samples still does not reopen',
+  isLaneSpiking('utility') === false
+);
+for (let i = 0; i < 8; i++) feedUtilityCall(510);
+check(
+  'after cooldown, recent p95 hot reopens utility spike',
+  isLaneSpiking('utility') === true
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = false;
+__setSpikeInspectorUptimeForTests(130_000);
+for (let i = 0; i < 8; i++) feedUtilityCall(510);
+check(
+  'containment OFF still records p95-hot utility spike but does not slow polls',
+  isLaneSpiking('utility') === true &&
+    getSpikeInspectorSnapshot().spikes[0]?.class === 'provider_slowness' &&
+    utilityPollScale().skipActivity === false
+);
+config.rpc.containmentEnabled = true;
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'sendTransaction',
+  queueWaitMs: 20,
+  networkMs: 2100,
+  totalMs: 2120,
+  outcome: 'timeout',
+  inFlight: 5,
+});
+check('history test: primary spike is open', isLaneSpiking('primary') === true);
+for (let n = 0; n < 10; n++) {
+  __endOpenSpikeForTests('utility');
+  for (let i = 0; i < 8; i++) feedUtilityCall(510);
+  check(
+    'history test: utility p95 spike ' + (n + 1),
+    isLaneSpiking('utility') === true
+  );
+  __endOpenSpikeForTests('utility');
+}
+const histSnap = getSpikeInspectorSnapshot();
+check(
+  'open primary spike remains in last-10 after utility churn',
+  isLaneSpiking('primary') === true &&
+    histSnap.spikes.some((s) => s.lane === 'primary' && s.recoveredAt == null)
+);
 
 const tradeSrc = readSrc('src/trade.ts');
 check(

@@ -70,6 +70,8 @@ type LaneBuf = {
   inFlight: number;
   openSpike: RpcSpikeRecord | null;
   recoveringSince: number | null;
+  /** Ignore hard_call-only starts until this ts (p95Hot / 429_burst still start). */
+  hardCallCooldownUntil: number;
 };
 
 const SAMPLE_CAP = 96;
@@ -81,6 +83,7 @@ const P95_TRADING_MS = 200;
 const P95_WATCHERS_MS = 350;
 const P95_OTHER_MS = 400;
 const HARD_SPIKE_MS = 1_500;
+const HARD_CALL_COOLDOWN_MS = 30_000;
 const BURST_429_N = 3;
 const BURST_429_MS = 10_000;
 let startedAt = Date.now();
@@ -111,6 +114,7 @@ function emptyBuf(): LaneBuf {
     inFlight: 0,
     openSpike: null,
     recoveringSince: null,
+    hardCallCooldownUntil: 0,
   };
 }
 
@@ -212,7 +216,17 @@ function classifySpike(lane: RpcSpikeLane, window: Sample[]): RpcSpikeClass {
   }
   if (peakInf >= 6 && methods >= 4) return 'burst_fanout';
   if (avgN >= 180 && avgQ < 60) return 'provider_slowness';
-  void lane;
+  const maxMs = window.reduce((m, x) => Math.max(m, x.totalMs), 0);
+  const winP95 = pctl(
+    window.map((s) => s.totalMs),
+    0.95
+  );
+  if (
+    maxMs >= HARD_SPIKE_MS ||
+    (winP95 != null && winP95 > thresholdFor(lane))
+  ) {
+    return 'provider_slowness';
+  }
   return 'unknown';
 }
 
@@ -289,7 +303,7 @@ function startSpike(
   buf.openSpike = rec;
   buf.recoveringSince = null;
   history.push(rec);
-  while (history.length > SPIKE_CAP) history.shift();
+  trimHistory();
   console.warn('[rpc_spike_start]', {
     id: rec.id,
     lane,
@@ -300,6 +314,14 @@ function startSpike(
   });
   console.warn('[rpc_spike_class]', { id: rec.id, class: rec.class });
   applyContainment(lane, rec);
+}
+
+function trimHistory(): void {
+  while (history.length > SPIKE_CAP) {
+    const idx = history.findIndex((s) => s.endedAt != null);
+    if (idx < 0) return;
+    history.splice(idx, 1);
+  }
 }
 
 function recentSamples(buf: LaneBuf, now: number): Sample[] {
@@ -326,6 +348,7 @@ function endOpenSpike(
   rec.topMethods = topMethods(buf.samples.filter((s) => s.ts >= rec.startedAt));
   buf.openSpike = null;
   buf.recoveringSince = null;
+  buf.hardCallCooldownUntil = now + HARD_CALL_COOLDOWN_MS;
   console.warn('[rpc_spike_recovered]', {
     id: rec.id,
     lane,
@@ -440,28 +463,36 @@ export function noteRpcCall(opts: {
     }
   }
 
-  const totals = buf.samples.map((s) => s.totalMs);
-  const p95 = pctl(totals, 0.95);
   const thr = thresholdFor(lane);
+  const recentWin = recentSamples(buf, now);
+  const recent = recentWin.length
+    ? pctl(
+        recentWin.map((s) => s.totalMs),
+        0.95
+      )
+    : null;
+  const recoverAt = recoverThreshold(lane);
+  const recentHealthy = recent == null || recent <= recoverAt;
   const hard = totalMs >= Math.max(HARD_SPIKE_MS, thr * 3);
   const burst429 = buf.last429At.length >= BURST_429_N;
-  const p95Hot = totals.length >= 8 && p95 != null && p95 > thr;
+  const p95Hot = recentWin.length >= 8 && recent != null && recent > thr;
 
   if (buf.openSpike) {
-    const recent = recentP95(buf, now);
-    buf.openSpike.peakP95 = Math.max(buf.openSpike.peakP95, recent ?? p95 ?? 0);
+    buf.openSpike.peakP95 = Math.max(buf.openSpike.peakP95, recent ?? 0);
     buf.openSpike.peakInFlight = Math.max(buf.openSpike.peakInFlight, inFlight);
     if (opts.outcome === 'timeout') buf.openSpike.errorCounts.timeout += 1;
     if (opts.outcome === '429') buf.openSpike.errorCounts.rateLimited += 1;
     if (opts.outcome === 'other') buf.openSpike.errorCounts.other += 1;
     tickLaneHygiene(lane, buf, now);
-  } else if (p95Hot || hard || burst429) {
-    const reason = burst429
-      ? '429_burst'
-      : hard
-        ? 'hard_call'
-        : 'p95';
-    startSpike(lane, buf, now, reason);
+  } else if (burst429) {
+    startSpike(lane, buf, now, '429_burst');
+  } else if (p95Hot) {
+    startSpike(lane, buf, now, 'p95');
+  } else if (hard) {
+    const inHardCooldown = now < (buf.hardCallCooldownUntil || 0);
+    if (!inHardCooldown && !recentHealthy) {
+      startSpike(lane, buf, now, 'hard_call');
+    }
   }
 }
 
@@ -714,4 +745,14 @@ export function __ageLaneSamplesForTests(lane: RpcSpikeLane, ageMs: number): voi
   const buf = lanes[lane];
   const d = Math.max(0, Math.round(ageMs));
   for (const s of buf.samples) s.ts -= d;
+}
+
+/** End an open spike so tests can open the next one (sets hard-call cooldown). */
+export function __endOpenSpikeForTests(lane: RpcSpikeLane): void {
+  endOpenSpike(lane, lanes[lane], Date.now(), 'test_end');
+}
+
+/** Expire hard-call-only cooldown so a later lone hard call can be evaluated again. */
+export function __clearHardCallCooldownForTests(lane: RpcSpikeLane): void {
+  lanes[lane].hardCallCooldownUntil = 0;
 }

@@ -8,6 +8,7 @@ import {
   buildBotInfoMenuItemHtml,
   buildBotInfoPanelHtml,
 } from './dashboardBotInfo';
+import { PROFILE_FIELD_MUTABILITY } from './profileFieldMutability';
 import { getAppVersion } from './version';
 
 const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
@@ -4310,6 +4311,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       color: #94a3b8;
       font-size: 0.62rem;
     }
+    .tp-field-legend .tp-ff { font-size: 0.62rem; }
+    .tp-field-lab {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      min-width: 0;
+    }
+    .tp-field-flags {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.06rem;
+      flex-shrink: 0;
+      font-size: 0.55rem;
+      line-height: 1;
+      letter-spacing: 0.02em;
+      user-select: none;
+      cursor: help;
+    }
+    .tp-ff { opacity: 0.22; color: #64748b; }
+    .tp-ff-used.is-on { opacity: 1; color: #4ade80; }
+    .tp-ff-learn.is-on { opacity: 1; color: #fbbf24; }
+    .tp-ff-ml.is-on { opacity: 1; color: #7dd3fc; }
+    .tp-check .tp-field-flags { margin-left: 0.12rem; vertical-align: 0.05em; }
     .tp-params label {
       display: flex;
       flex-direction: column;
@@ -15060,6 +15084,49 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       unwatchSetupToken(kind, mint);
     });
 
+    const TP_FIELD_MUTABILITY = /*TP_FIELD_MUTABILITY_JSON*/;
+    function tpFieldFlagHtml(profileId, key) {
+      const spec = (TP_FIELD_MUTABILITY && TP_FIELD_MUTABILITY[key]) || {
+        usedOn: 'all',
+        selfLearn: false,
+        mlSteer: false
+      };
+      const usedOn = spec.usedOn;
+      const used = usedOn === 'all' || (Array.isArray(usedOn) && usedOn.indexOf(profileId) >= 0);
+      const learn = spec.selfLearn === true;
+      const ml = spec.mlSteer === true;
+      const optional = spec.optional === true;
+      const usedTip = used
+        ? (optional
+            ? 'Used by this bot when this optional path is ON (for example specialty feed).'
+            : 'Used by this bot.')
+        : 'Not used by this bot — this lane ignores the value.';
+      const learnTip = learn
+        ? 'Self-learn (auto, or shadow + Apply) and Level upgrades can nudge this. Micro/delta learning uses the same key. Global Micro-Bot TP pauses exit deltas only.'
+        : 'Operator / catalog only — self-learn, delta learning, and Level upgrades never write this field.';
+      const mlTip = ml
+        ? 'ML hybrid/lead can steer this key. ML shadow is advice-only and does not write knobs.'
+        : (learn
+            ? 'ML-led candidates do not target this key. Hybrid may still apply a heuristic candidate that includes it. ML shadow never writes.'
+            : 'ML (shadow / hybrid / lead) does not write this field.');
+      const title = usedTip + ' ' + learnTip + ' ' + mlTip;
+      return (
+        '<span class="tp-field-flags" title="' + escHtml(title) + '" aria-label="' + escHtml(title) + '">' +
+          '<span class="tp-ff tp-ff-used' + (used ? ' is-on' : '') + '">●</span>' +
+          '<span class="tp-ff tp-ff-learn' + (learn ? ' is-on' : '') + '">↻</span>' +
+          '<span class="tp-ff tp-ff-ml' + (ml ? ' is-on' : '') + '">Δ</span>' +
+        '</span>'
+      );
+    }
+    function tpFieldLabel(profileId, key, label) {
+      return (
+        '<span class="tp-field-lab">' +
+          escHtml(label) +
+          tpFieldFlagHtml(profileId, key) +
+        '</span>'
+      );
+    }
+
     function renderTradeProfilesUi(tp) {
       const master = document.getElementById('trade-profiles-master');
       const smartBot = document.getElementById('smart-bot-profiles');
@@ -15385,7 +15452,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const numField = function (cfg) {
             return (
               '<label' + (cfg.title ? ' title="' + escHtml(cfg.title) + '"' : '') + '>' +
-                escHtml(cfg.label) +
+                tpFieldLabel(p.id, cfg.flagKey || cfg.key, cfg.label) +
                 '<input type="number" data-k="' + escHtml(cfg.key) + '"' +
                   (cfg.match ? ' data-match="1"' : '') +
                   (cfg.step != null ? ' step="' + escHtml(String(cfg.step)) + '"' : '') +
@@ -15399,7 +15466,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const selectField = function (cfg) {
             return (
               '<label' + (cfg.title ? ' title="' + escHtml(cfg.title) + '"' : '') + '>' +
-                escHtml(cfg.label) +
+                tpFieldLabel(p.id, cfg.flagKey || cfg.key, cfg.label) +
                 '<select data-k="' + escHtml(cfg.key) + '"' +
                   (cfg.match ? ' data-match="1"' : '') +
                   (cfg.kind ? ' data-kind="' + escHtml(cfg.kind) + '"' : '') +
@@ -15848,6 +15915,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '<div class="tp-param-section">' +
                   '<p class="tp-param-title">Entry / lane fit</p>' +
                   '<p class="tp-param-hint">Arming OFF = legacy spot open path. Arming ON waits for watch → arm → trigger (and Min TA Playbook Confluences at trigger). Blank fields fall back to official defaults.</p>' +
+                  '<p class="tp-param-hint tp-field-legend">Icons: <span class="tp-ff tp-ff-used is-on">●</span> used by this bot · <span class="tp-ff tp-ff-learn is-on">↻</span> self-learn / Level upgrades can change · <span class="tp-ff tp-ff-ml is-on">Δ</span> ML hybrid/lead can steer (shadow ML is advice-only). Dim = unused or never written.</p>' +
                   entryFields.join('') +
                 '</div>' +
                 specialtyFeedHtml +
@@ -15882,29 +15950,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   }) +
                   '<p class="tp-param-title" style="grid-column:1/-1;margin-top:0.5rem">Profit-lock / giveback</p>' +
                   '<p class="tp-param-hint" style="grid-column:1/-1">Arm after peak unrealized %; force sell if giveback pts from peak (e.g. 80%→50% = 30 pts).</p>' +
-                  '<label title="Arm profit-lock after peak unrealized reaches this %">Lock arm %' +
+                  '<label title="Arm profit-lock after peak unrealized reaches this %">' +
+                    tpFieldLabel(p.id, 'profitLockArmPct', 'Lock arm %') +
                     '<input type="number" data-policy="profitLockArmPct" step="1" min="0" placeholder="default" value="' +
                     escHtml(String(pol.profitLockArmPct != null ? pol.profitLockArmPct : (offPol.profitLockArmPct != null ? offPol.profitLockArmPct : ''))) +
                   '" /></label>' +
-                  '<label title="Full exit when unrealized falls this many points from peak">Giveback pts' +
+                  '<label title="Full exit when unrealized falls this many points from peak">' +
+                    tpFieldLabel(p.id, 'profitGivebackPts', 'Giveback pts') +
                     '<input type="number" data-policy="profitGivebackPts" step="1" min="0" placeholder="default" value="' +
                     escHtml(String(pol.profitGivebackPts != null ? pol.profitGivebackPts : (offPol.profitGivebackPts != null ? offPol.profitGivebackPts : ''))) +
                   '" /></label>' +
-                  '<label title="Once armed, never let unrealized fall below this % (0 = off)">Profit floor %' +
+                  '<label title="Once armed, never let unrealized fall below this % (0 = off)">' +
+                    tpFieldLabel(p.id, 'profitFloorPct', 'Profit floor %') +
                     '<input type="number" data-policy="profitFloorPct" step="1" min="0" placeholder="default" value="' +
                     escHtml(String(pol.profitFloorPct != null ? pol.profitFloorPct : (offPol.profitFloorPct != null ? offPol.profitFloorPct : ''))) +
                   '" /></label>' +
                   '<p class="tp-param-title" style="grid-column:1/-1;margin-top:0.5rem">Peak Profit Protection</p>' +
                   '<p class="tp-param-hint" style="grid-column:1/-1">When global Peak Profit Protection is ON: arm at % of this bot&apos;s target TP; exit on giveback as % of peak. Overrides global scalper/non-scalper defaults when set. Leave blank for global defaults.</p>' +
-                  '<label title="Arm when peak reaches this % of target TP">Arm % of TP' +
+                  '<label title="Arm when peak reaches this % of target TP">' +
+                    tpFieldLabel(p.id, 'peakProtectArmOfTpPct', 'Arm % of TP') +
                     '<input type="number" data-policy="peakProtectArmOfTpPct" step="1" min="0" max="95" placeholder="global" value="' +
                     escHtml(String(pol.peakProtectArmOfTpPct != null ? pol.peakProtectArmOfTpPct : (offPol.peakProtectArmOfTpPct != null ? offPol.peakProtectArmOfTpPct : ''))) +
                   '" /></label>' +
-                  '<label title="Full exit when giveback reaches this % of peak">Giveback % of peak' +
+                  '<label title="Full exit when giveback reaches this % of peak">' +
+                    tpFieldLabel(p.id, 'peakProtectGivebackOfPeakPct', 'Giveback % of peak') +
                     '<input type="number" data-policy="peakProtectGivebackOfPeakPct" step="1" min="0" max="80" placeholder="global" value="' +
                     escHtml(String(pol.peakProtectGivebackOfPeakPct != null ? pol.peakProtectGivebackOfPeakPct : (offPol.peakProtectGivebackOfPeakPct != null ? offPol.peakProtectGivebackOfPeakPct : ''))) +
                   '" /></label>' +
-                  '<label title="Early partial take-profit %">Early partial %' +
+                  '<label title="Early partial take-profit %">' +
+                    tpFieldLabel(p.id, 'earlyPartialTpPct', 'Early partial %') +
                     '<input type="number" data-policy="earlyPartialTpPct" step="1" min="0" placeholder="default" value="' +
                     escHtml(String(pol.earlyPartialTpPct != null ? pol.earlyPartialTpPct : (offPol.earlyPartialTpPct != null ? offPol.earlyPartialTpPct : ''))) +
                   '" /></label>' +
@@ -15917,7 +15991,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                         '<input type="checkbox" data-lm-optin-toggle="1"' +
                           (p.learningModeOptIn !== false ? ' checked' : '') +
                           ' onchange="toggleProfileLearningModeOptIn(\\'' + p.id + '\\', this.checked)" />' +
-                        '<span>Participate in Learning Mode</span>' +
+                        '<span>Participate in Learning Mode ' + tpFieldFlagHtml(p.id, 'learningModeOptIn') + '</span>' +
                       '</label>' +
                     '</div>' +
                     '<div class="tp-param-section">' +
@@ -15927,10 +16001,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                         '<input type="checkbox" data-selflearn-toggle="1"' +
                           (sl.enabled ? ' checked' : '') +
                           ' onchange="toggleProfileSelfLearning(\\'' + p.id + '\\', this.checked)" />' +
-                        '<span>Self-Learning ON</span>' +
+                        '<span>Self-Learning ON ' + tpFieldFlagHtml(p.id, 'selfLearningEnabled') + '</span>' +
                       '</label>' +
                       '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="Auto applies upgrades and micro-tweaks. Shadow only proposes Level upgrades until you Apply.">' +
-                        'Mode' +
+                        'Mode ' + tpFieldFlagHtml(p.id, 'selfLearningMode') +
                         '<select data-selflearn-mode="' +
                         escAttr(p.id) +
                         '" onchange="setProfileSelfLearnMode(\\'' +
@@ -15945,7 +16019,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                         '</select>' +
                       '</label>' +
                       '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="ML advisor: shadow = advice only; hybrid = blend with heuristics; lead = ML deltas + heuristic backup; off = heuristics only.">' +
-                        'ML' +
+                        'ML ' + tpFieldFlagHtml(p.id, 'selfLearningMlMode') +
                         '<select data-selflearn-mlmode="' +
                         escAttr(p.id) +
                         '" onchange="setProfileSelfLearnMlMode(\\'' +
@@ -15969,7 +16043,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                           : '') +
                       '</label>' +
                       '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="Closed trades needed before proposing an upgrade (6–40). Nudges scale up as more trades feed the bot.">' +
-                        'Min trades' +
+                        'Min trades ' + tpFieldFlagHtml(p.id, 'selfLearningMinTrades') +
                         '<input type="number" min="6" max="40" step="1" style="width:3.5rem" data-selflearn-min="' +
                         escAttr(p.id) +
                         '" value="' +
@@ -16137,25 +16211,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                           '<p class="mint text-xs" style="margin:0"><strong style="color:#4ade80">Quality Filter</strong> — stricter MC / liq / volume / holders on technicals (HWR only)</p>' +
                           '<label class="tp-check">' +
                             '<input type="checkbox" data-qf="enabled"' + (qf.enabled !== false ? ' checked' : '') + ' />' +
-                            '<span>Enable Quality Filter</span></label>' +
-                          '<label>Mode<select data-qf="mode">' +
+                            '<span>Enable Quality Filter ' + tpFieldFlagHtml(p.id, 'qf.enabled') + '</span></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.mode', 'Mode') + '<select data-qf="mode">' +
                             '<option value="reject"' + (qf.mode !== 'penalize' ? ' selected' : '') + '>Reject weak setups</option>' +
                             '<option value="penalize"' + (qf.mode === 'penalize' ? ' selected' : '') + '>Penalize only</option>' +
                           '</select></label>' +
-                          '<label>Min MC $<input type="number" data-qf="minMarketCapUsd" step="1000" value="' + escHtml(String(qf.minMarketCapUsd)) + '" /></label>' +
-                          '<label>Prefer MC $<input type="number" data-qf="preferMarketCapUsd" step="1000" value="' + escHtml(String(qf.preferMarketCapUsd)) + '" /></label>' +
-                          '<label>Min liquidity $<input type="number" data-qf="minLiquidityUsd" step="500" value="' + escHtml(String(qf.minLiquidityUsd)) + '" /></label>' +
-                          '<label>Min vol 1h $<input type="number" data-qf="minVolumeH1Usd" step="500" value="' + escHtml(String(qf.minVolumeH1Usd)) + '" /></label>' +
-                          '<label>Min holders<input type="number" data-qf="minHolders" step="1" value="' + escHtml(String(qf.minHolders)) + '" /></label>' +
-                          '<label>Min pattern conf<input type="number" data-qf="minPatternConfidence" step="1" min="30" max="95" value="' + escHtml(String(qf.minPatternConfidence)) + '" /></label>' +
-                          '<label>Weak penalty<input type="number" data-qf="weakSetupPenalty" step="1" value="' + escHtml(String(qf.weakSetupPenalty)) + '" /></label>' +
-                          '<label>Clean bonus<input type="number" data-qf="cleanSetupBonus" step="1" value="' + escHtml(String(qf.cleanSetupBonus)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.minMarketCapUsd', 'Min MC $') + '<input type="number" data-qf="minMarketCapUsd" step="1000" value="' + escHtml(String(qf.minMarketCapUsd)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.preferMarketCapUsd', 'Prefer MC $') + '<input type="number" data-qf="preferMarketCapUsd" step="1000" value="' + escHtml(String(qf.preferMarketCapUsd)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.minLiquidityUsd', 'Min liquidity $') + '<input type="number" data-qf="minLiquidityUsd" step="500" value="' + escHtml(String(qf.minLiquidityUsd)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.minVolumeH1Usd', 'Min vol 1h $') + '<input type="number" data-qf="minVolumeH1Usd" step="500" value="' + escHtml(String(qf.minVolumeH1Usd)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.minHolders', 'Min holders') + '<input type="number" data-qf="minHolders" step="1" value="' + escHtml(String(qf.minHolders)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.minPatternConfidence', 'Min pattern conf') + '<input type="number" data-qf="minPatternConfidence" step="1" min="30" max="95" value="' + escHtml(String(qf.minPatternConfidence)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.weakSetupPenalty', 'Weak penalty') + '<input type="number" data-qf="weakSetupPenalty" step="1" value="' + escHtml(String(qf.weakSetupPenalty)) + '" /></label>' +
+                          '<label>' + tpFieldLabel(p.id, 'qf.cleanSetupBonus', 'Clean bonus') + '<input type="number" data-qf="cleanSetupBonus" step="1" value="' + escHtml(String(qf.cleanSetupBonus)) + '" /></label>' +
                           '<label class="tp-check">' +
                             '<input type="checkbox" data-qf="applyToFibSupport"' + (qf.applyToFibSupport !== false ? ' checked' : '') + ' />' +
-                            '<span>Apply to Fib / Support</span></label>' +
+                            '<span>Apply to Fib / Support ' + tpFieldFlagHtml(p.id, 'qf.applyToFibSupport') + '</span></label>' +
                           '<label class="tp-check">' +
                             '<input type="checkbox" data-qf="preferFibOrSupport"' + (qf.preferFibOrSupport !== false ? ' checked' : '') + ' />' +
-                            '<span>Pullbacks need Fib / Support</span></label>' +
+                            '<span>Pullbacks need Fib / Support ' + tpFieldFlagHtml(p.id, 'qf.preferFibOrSupport') + '</span></label>' +
                         '</div>'
                       );
                     })()
@@ -38583,4 +38657,8 @@ const _botInfoVer = `v${getAppVersion().version}`;
 export const DASHBOARD_HTML = _DASHBOARD_HTML_RAW
   .replace('/* BOT_INFO_CSS_PLACEHOLDER */', BOT_INFO_CSS)
   .replace('<!-- BOT_INFO_MENU_PLACEHOLDER -->', buildBotInfoMenuItemHtml(_botInfoVer))
-  .replace('<!-- BOT_INFO_PANEL_PLACEHOLDER -->', buildBotInfoPanelHtml(_botInfoVer));
+  .replace('<!-- BOT_INFO_PANEL_PLACEHOLDER -->', buildBotInfoPanelHtml(_botInfoVer))
+  .replace(
+    '/*TP_FIELD_MUTABILITY_JSON*/',
+    JSON.stringify(PROFILE_FIELD_MUTABILITY)
+  );

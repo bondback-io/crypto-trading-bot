@@ -43,6 +43,24 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.384',
+    title: 'RPC hard-call anti-flap: ignore one-off slow probes',
+    sections: ['knobs', 'execution'],
+    items: [
+      'A single 1.5s getSlot/getSignatures no longer opens a utility spike when the last 30s p95 is already under the recover bar. After recover, hard-call-only starts wait 30s so polls do not flap. Real p95-hot and 429 bursts still contain.',
+      'Hard outliers classify as provider slowness instead of unknown. Open spikes stay in last-10 history so a Trading spike is not crowded out by utility churn. Exits stay on Critical/Helius.',
+    ],
+  },
+  {
+    version: '1.2.383',
+    title: 'Micro Bot param icons: used vs learn vs ML',
+    sections: ['microbots', 'learning', 'knobs'],
+    items: [
+      'Each Params & rules field now has tiny ● / ↻ / Δ icons: used by this bot, self-learn / Level upgrades can write it, and ML hybrid/lead can steer it. Hover for the exact rule. TP/SL, MC bands, Watch/Arm, and specialty feed stay operator-only.',
+      'ML shadow stays advice-only. Self-learn auto (or shadow + Apply) still writes the same learnable keys as before — icons confirm, they do not change learning.',
+    ],
+  },
+  {
     version: '1.2.382',
     title: 'RPC post-boot spikes reclassify or clear after 2 min',
     sections: ['knobs', 'execution'],
