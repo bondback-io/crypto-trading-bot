@@ -13,12 +13,20 @@ import {
   __resetRpcSpikeInspectorForTests,
   __setSpikeInspectorUptimeForTests,
   buildRpcSpikeDiagnosis,
+  getLastRpcSpikeRecoverReason,
   getSpikeInspectorSnapshot,
   isLaneSpiking,
   noteRpcCall,
+  shouldShedPrimaryMonitoring,
   shouldSoftPauseNewEntries,
   withRpcAttemptCap,
 } from '../src/rpcSpikeInspector';
+import {
+  applyExitSendLaneGuard,
+  getExitLaneGuardTrips,
+  __resetExitLaneGuardTripsForTests,
+} from '../src/connection';
+import { runDedupedRpcJob, getRpcGateSnapshot } from '../src/rpcGate';
 import {
   isRpcWorkloadEnabled,
   shouldIdleIsolate,
@@ -485,10 +493,152 @@ check(
 );
 
 __resetRpcSpikeInspectorForTests();
-config.rpc.containmentEnabled = prevContainment;
-
-if (failed) {
-  console.error(`\n${failed} check(s) failed`);
-  process.exit(1);
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 2,
+});
+check('1.2.386 setup: primary spike open', isLaneSpiking('primary') === true);
+__ageLaneSamplesForTests('primary', 31_000);
+for (let i = 0; i < 8; i++) {
+  noteRpcCall({
+    lane: 'primary',
+    provider: 'Helius',
+    method: 'getSlot',
+    queueWaitMs: 2,
+    networkMs: 40,
+    totalMs: 42,
+    outcome: 'success',
+    inFlight: 1,
+  });
 }
-console.log('\nAll RPC spike inspector smoke checks passed.');
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getSignaturesForAddress',
+  queueWaitMs: 2,
+  networkMs: 1690,
+  totalMs: 1692,
+  outcome: 'success',
+  inFlight: 1,
+});
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'sendRawTransaction',
+  queueWaitMs: 5,
+  networkMs: 2200,
+  totalMs: 2205,
+  outcome: 'success',
+  inFlight: 1,
+});
+__forceSpikeRecoveringElapsedForTests('primary', 45_000);
+getSpikeInspectorSnapshot();
+check(
+  'Trading recovers on 30s p95 despite one hard poll + slow send',
+  isLaneSpiking('primary') === false &&
+    shouldSoftPauseNewEntries() === false &&
+    getLastRpcSpikeRecoverReason() === 'trading_p95_stable',
+  String(getLastRpcSpikeRecoverReason())
+);
+check(
+  'retry cap returns to configured defaults after recover',
+  withRpcAttemptCap(true, 4) === 4 && withRpcAttemptCap(false, 3) === 3
+);
+
+__resetExitLaneGuardTripsForTests();
+check(
+  'watchers-context send pins to primary and trips guard',
+  applyExitSendLaneGuard('sendRawTransaction', 'watchers') === 'primary' &&
+    getExitLaneGuardTrips() >= 1
+);
+check(
+  'utility-context send pins to primary',
+  applyExitSendLaneGuard('sendLegacy', 'utility') === 'primary'
+);
+check(
+  'primary send does not trip extra when already primary',
+  applyExitSendLaneGuard('sendRawTransaction', 'primary') === 'primary'
+);
+check(
+  'sendOptimizedTransaction forces primary role',
+  /sendOptimizedTransaction[\s\S]{0,900}withRpc\([\s\S]{0,80}'sendRawTransaction'[\s\S]{0,900}'primary'/.test(
+    connSrc
+  )
+);
+check(
+  'exit send attempt order skips utility/watchers failover',
+  /if \(!exitSend\)[\s\S]{0,400}pushUnique\(preferredUtility\)/.test(connSrc)
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+__setSpikeInspectorUptimeForTests(130_000);
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 1,
+});
+check(
+  'primary spike sheds non-exit monitoring',
+  shouldShedPrimaryMonitoring() === true && shouldSoftPauseNewEntries() === true
+);
+let monitorRuns = 0;
+const d1 = runDedupedRpcJob(
+  'primary:monitor:getSignaturesForAddress:smoke',
+  async () => {
+    monitorRuns += 1;
+    await new Promise((r) => setTimeout(r, 40));
+    return 'a';
+  },
+  { join: true }
+);
+const d2 = runDedupedRpcJob(
+  'primary:monitor:getSignaturesForAddress:smoke',
+  async () => {
+    monitorRuns += 1;
+    return 'b';
+  },
+  { join: true }
+);
+void Promise.all([d1, d2]).then(([r1, r2]) => {
+  check(
+    'duplicate primary getSignatures joins in-flight (no extra storm)',
+    monitorRuns === 1 &&
+      r1 === 'a' &&
+      r2 === 'a' &&
+      getRpcGateSnapshot().lanes.primary.deduped >= 1,
+    `runs=${monitorRuns} d1=${r1} d2=${r2}`
+  );
+  check(
+    'meteredFetch dedupes primary monitor methods during spike',
+    /PRIMARY_MONITOR_METHODS/.test(connSrc) && /runDedupedRpcJob/.test(connSrc)
+  );
+  const mevSrc = readSrc('src/mev.ts');
+  check(
+    'sandwich scan sheds during primary spike; sell path stays open',
+    /rpc_containment_shed/.test(mevSrc) &&
+      /shouldShedPrimaryMonitoring/.test(mevSrc)
+  );
+
+  __resetRpcSpikeInspectorForTests();
+  config.rpc.containmentEnabled = prevContainment;
+
+  if (failed) {
+    console.error(`\n${failed} check(s) failed`);
+    process.exit(1);
+  }
+  console.log('\nAll RPC spike inspector smoke checks passed.');
+});

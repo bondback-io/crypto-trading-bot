@@ -33,6 +33,7 @@ import {
   acquireRpcLane,
   getRpcGateSnapshot,
   isRpcGateSkipError,
+  runDedupedRpcJob,
 } from './rpcGate';
 import {
   classifyRpcOutcome,
@@ -42,6 +43,7 @@ import {
   isRpcContainmentEnabled,
   noteRpcCall,
   runWithSpikeCallContext,
+  shouldShedPrimaryMonitoring,
   withRpcAttemptCap,
 } from './rpcSpikeInspector';
 
@@ -276,9 +278,54 @@ function parseRpcMethodsFromBody(body: unknown): string[] {
   }
 }
 
+const PRIMARY_MONITOR_METHODS = new Set([
+  'getSignaturesForAddress',
+  'getTransaction',
+  'getParsedTransaction',
+]);
+
+function isExitRpcFeature(feature: string): boolean {
+  return /send_tx|sendRawTransaction|sendLegacy|trade_exit|confirm_tx|confirmTransaction/i.test(
+    feature
+  );
+}
+
+function isExitSendLabel(label: string, feature?: string): boolean {
+  return isExitRpcFeature(`${label} ${feature || ''}`);
+}
+
+let exitLaneGuardTrips = 0;
+
+export function getExitLaneGuardTrips(): number {
+  return exitLaneGuardTrips;
+}
+
+export function __resetExitLaneGuardTripsForTests(): void {
+  exitLaneGuardTrips = 0;
+}
+
+/** Pin send/confirm onto Trading/Helius. Never Watchers or Utility. */
+export function applyExitSendLaneGuard(
+  label: string,
+  role: RpcRole,
+  feature?: string
+): RpcRole {
+  if (!isExitSendLabel(label, feature)) return role;
+  if (role === 'watchers' || role === 'utility') {
+    exitLaneGuardTrips += 1;
+    console.warn('[exit_lane_guard]', {
+      from: role,
+      to: 'primary',
+      label,
+      trips: exitLaneGuardTrips,
+    });
+  }
+  return 'primary';
+}
+
 function meteredFetch(endpointLabel: string) {
   const baseFetch = globalThis.fetch.bind(globalThis);
-  return async (
+  const doFetch = async (
     input: Parameters<typeof fetch>[0],
     init?: Parameters<typeof fetch>[1]
   ): Promise<Response> => {
@@ -312,6 +359,32 @@ function meteredFetch(endpointLabel: string) {
       }
       throw err;
     }
+  };
+  return async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1]
+  ): Promise<Response> => {
+    const methods = parseRpcMethodsFromBody(init?.body);
+    const role = rpcRoleAls.getStore();
+    const feature = rpcFeatureAls.getStore() || 'ungated';
+    const monitor = methods.some((m) => PRIMARY_MONITOR_METHODS.has(m));
+    if (
+      role === 'primary' &&
+      monitor &&
+      !isExitRpcFeature(feature) &&
+      shouldShedPrimaryMonitoring()
+    ) {
+      const raw =
+        typeof init?.body === 'string'
+          ? init.body
+          : String(init?.body || '');
+      const key = `primary:monitor:${methods.slice().sort().join('+')}:${raw.slice(0, 240)}`;
+      const joined = await runDedupedRpcJob(key, () => doFetch(input, init), {
+        join: true,
+      });
+      if (joined) return joined;
+    }
+    return doFetch(input, init);
   };
 }
 
@@ -1417,10 +1490,13 @@ async function withRpcInner<T>(
   role?: RpcRole
 ): Promise<T> {
   ensureEndpoints();
-  const r = role ?? currentRole();
+  const feature = rpcFeatureAls.getStore() || label;
+  const exitSend = isExitSendLabel(label, feature);
+  let r = applyExitSendLaneGuard(label, role ?? currentRole(), feature);
   const startIndex = resolveIndexForRole(r);
   let lastError: unknown;
   const critical =
+    exitSend ||
     /trade|migrat|send|confirm|swap|buy|sell/i.test(label) ||
     r === 'primary';
   const defaultMax = critical
@@ -1434,19 +1510,22 @@ async function withRpcInner<T>(
     if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
   };
   pushUnique(startIndex);
-  for (const other of piggybackOrder(r)) {
-    pushUnique(preferredIndexFor(other));
+  if (!exitSend) {
+    for (const other of piggybackOrder(r)) {
+      pushUnique(preferredIndexFor(other));
+    }
+    if (r === 'primary' || r === 'secondary') {
+      pushUnique(preferredQuicknode);
+      pushUnique(preferredUtility);
+    }
+    for (let i = 0; i < endpoints.length; i++) pushUnique(i);
   }
-  if (r === 'primary' || r === 'secondary') {
-    pushUnique(preferredQuicknode);
-    pushUnique(preferredUtility);
-  }
-  for (let i = 0; i < endpoints.length; i++) pushUnique(i);
 
   logger.info('RPC', `start: ${label}`, {
     role: r,
     active: endpoints[startIndex]?.endpoint.label,
-    endpoints: endpoints.length,
+    endpoints: exitSend ? 1 : endpoints.length,
+    exitPinned: exitSend,
   });
 
   let attempts = 0;
@@ -1456,7 +1535,9 @@ async function withRpcInner<T>(
     if (!state) continue;
 
     // Skip cooling 429 / hard-fail hosts when another endpoint can take the call.
+    // Exit sends stay on Helius — never skip the only Trading endpoint.
     if (
+      !exitSend &&
       (isEndpointRateLimited(state) || isEndpointHardFailed(state)) &&
       endpoints.some(
         (e, i) =>
@@ -1470,6 +1551,7 @@ async function withRpcInner<T>(
     const prefRateLimited = isEndpointRateLimited(endpoints[pref]);
     // Sticky grace only for transient errors — not 429 cooldowns.
     if (
+      !exitSend &&
       !prefRateLimited &&
       !state.healthy &&
       attempts > 0 &&
@@ -1896,15 +1978,19 @@ export async function sendOptimizedTransaction(
   serialized: Uint8Array,
   options: SendOptions = {}
 ): Promise<string> {
-  return withRpc('sendRawTransaction', async (conn) => {
-    const sig = await conn.sendRawTransaction(serialized, {
-      skipPreflight: options.skipPreflight ?? false,
-      maxRetries: options.maxRetries ?? 3,
-      preflightCommitment: 'confirmed',
-    });
-    await conn.confirmTransaction(sig, 'confirmed');
-    return sig;
-  });
+  return withRpc(
+    'sendRawTransaction',
+    async (conn) => {
+      const sig = await conn.sendRawTransaction(serialized, {
+        skipPreflight: options.skipPreflight ?? false,
+        maxRetries: options.maxRetries ?? 3,
+        preflightCommitment: 'confirmed',
+      });
+      await conn.confirmTransaction(sig, 'confirmed');
+      return sig;
+    },
+    'primary'
+  );
 }
 
 export async function sendAndConfirmVersioned(
@@ -1914,19 +2000,23 @@ export async function sendAndConfirmVersioned(
 }
 
 export async function sendAndConfirmLegacyTx(tx: Transaction): Promise<string> {
-  return withRpc('sendLegacy', async (conn) => {
-    const { blockhash, lastValidBlockHeight } =
-      await conn.getLatestBlockhash('confirmed');
-    tx.recentBlockhash = blockhash;
-    tx.lastValidBlockHeight = lastValidBlockHeight;
-    const raw = tx.serialize();
-    const sig = await conn.sendRawTransaction(raw, {
-      skipPreflight: false,
-      maxRetries: 3,
-    });
-    await conn.confirmTransaction(sig, 'confirmed');
-    return sig;
-  });
+  return withRpc(
+    'sendLegacy',
+    async (conn) => {
+      const { blockhash, lastValidBlockHeight } =
+        await conn.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = blockhash;
+      tx.lastValidBlockHeight = lastValidBlockHeight;
+      const raw = tx.serialize();
+      const sig = await conn.sendRawTransaction(raw, {
+        skipPreflight: false,
+        maxRetries: 3,
+      });
+      await conn.confirmTransaction(sig, 'confirmed');
+      return sig;
+    },
+    'primary'
+  );
 }
 
 /**

@@ -86,7 +86,10 @@ const HARD_SPIKE_MS = 1_500;
 const HARD_CALL_COOLDOWN_MS = 30_000;
 const BURST_429_N = 3;
 const BURST_429_MS = 10_000;
+const EXIT_CRITICAL_METHOD_RE =
+  /sendRawTransaction|sendTransaction|sendLegacy|confirmTransaction/i;
 let startedAt = Date.now();
+let lastRecoverReason: string | null = null;
 
 const lanes: Record<RpcSpikeLane, LaneBuf> = {
   primary: emptyBuf(),
@@ -334,6 +337,45 @@ function recentP95(buf: LaneBuf, now: number): number | null {
   return pctl(window.map((s) => s.totalMs), 0.95);
 }
 
+function isExitCriticalMethod(method: string): boolean {
+  return EXIT_CRITICAL_METHOD_RE.test(String(method || ''));
+}
+
+/** 30s recover window — exit sends do not keep entry pause pinned. */
+function recoverSamples(buf: LaneBuf, now: number): Sample[] {
+  return recentSamples(buf, now).filter((s) => !isExitCriticalMethod(s.method));
+}
+
+/**
+ * Healthy when idle, under the recover bar, or only one hard outlier remains
+ * (same lone-hard-call idea as spike start).
+ */
+function recoverHealth(
+  lane: RpcSpikeLane,
+  buf: LaneBuf,
+  now: number
+): { p95: number | null; healthy: boolean } {
+  const recoverAt = recoverThreshold(lane);
+  const window = recoverSamples(buf, now);
+  if (!window.length) return { p95: null, healthy: true };
+  const hardOutliers = window.filter((s) => s.totalMs >= HARD_SPIKE_MS);
+  if (hardOutliers.length === 1 && window.length >= 2) {
+    const rest = window.filter((s) => s !== hardOutliers[0]);
+    const restP95 = pctl(
+      rest.map((s) => s.totalMs),
+      0.95
+    );
+    if (restP95 == null || restP95 <= recoverAt) {
+      return { p95: restP95, healthy: true };
+    }
+  }
+  const p95 = pctl(
+    window.map((s) => s.totalMs),
+    0.95
+  );
+  return { p95, healthy: p95 == null || p95 <= recoverAt };
+}
+
 function endOpenSpike(
   lane: RpcSpikeLane,
   buf: LaneBuf,
@@ -349,6 +391,7 @@ function endOpenSpike(
   buf.openSpike = null;
   buf.recoveringSince = null;
   buf.hardCallCooldownUntil = now + HARD_CALL_COOLDOWN_MS;
+  lastRecoverReason = reason;
   console.warn('[rpc_spike_recovered]', {
     id: rec.id,
     lane,
@@ -358,20 +401,13 @@ function endOpenSpike(
   });
 }
 
-function maybeRecover(
-  lane: RpcSpikeLane,
-  buf: LaneBuf,
-  now: number,
-  p95: number | null
-): void {
+function maybeRecover(lane: RpcSpikeLane, buf: LaneBuf, now: number): void {
   const rec = buf.openSpike;
   if (!rec) {
     buf.recoveringSince = null;
     return;
   }
-  const recoverAt = recoverThreshold(lane);
-  // Empty recent window (idle) or p95 under the 85% bar counts as healthy.
-  const healthy = p95 == null || p95 <= recoverAt;
+  const { healthy } = recoverHealth(lane, buf, now);
   if (!healthy) {
     buf.recoveringSince = null;
     return;
@@ -379,7 +415,11 @@ function maybeRecover(
   if (buf.recoveringSince == null) buf.recoveringSince = now;
   if (now - buf.recoveringSince < RECOVER_STABLE_MS) return;
   const reason =
-    rec.class === 'post_boot' ? 'post_boot_stable_clear' : 'p95_stable';
+    rec.class === 'post_boot'
+      ? 'post_boot_stable_clear'
+      : lane === 'primary'
+        ? 'trading_p95_stable'
+        : 'p95_stable';
   endOpenSpike(lane, buf, now, reason);
 }
 
@@ -402,7 +442,7 @@ function tickLaneHygiene(lane: RpcSpikeLane, buf: LaneBuf, now: number): void {
       });
     }
   }
-  maybeRecover(lane, buf, now, p95);
+  maybeRecover(lane, buf, now);
 }
 
 function tickAllLaneHygiene(): void {
@@ -508,6 +548,15 @@ export function shouldSoftPauseNewEntries(): boolean {
   return isContainmentOn() && isLaneSpiking('primary');
 }
 
+/** Shed non-exit getSignatures/getTransaction on Trading while a primary spike is open. */
+export function shouldShedPrimaryMonitoring(): boolean {
+  return isContainmentOn() && isLaneSpiking('primary');
+}
+
+export function getLastRpcSpikeRecoverReason(): string | null {
+  return lastRecoverReason;
+}
+
 export function withRpcAttemptCap(critical: boolean, defaultMax: number): number {
   if (!isContainmentOn() || !isLaneSpiking('primary')) return defaultMax;
   return critical ? Math.min(defaultMax, 2) : Math.min(defaultMax, 1);
@@ -515,7 +564,9 @@ export function withRpcAttemptCap(critical: boolean, defaultMax: number): number
 
 export function laneTelemetry(lane: RpcSpikeLane): RpcLaneTelemetry {
   const buf = lanes[lane];
-  const totals = buf.samples.map((s) => s.totalMs);
+  const now = Date.now();
+  const recent = recentSamples(buf, now);
+  const totals = recent.map((s) => s.totalMs);
   let status: RpcLaneTelemetry['status'] = 'ok';
   if (buf.openSpike && buf.recoveringSince) status = 'recovering';
   else if (buf.openSpike) status = 'spike';
@@ -526,7 +577,7 @@ export function laneTelemetry(lane: RpcSpikeLane): RpcLaneTelemetry {
     inFlight: buf.inFlight,
     timeoutCount: buf.timeouts,
     rateLimitedCount: buf.rateLimited,
-    samples: buf.samples.length,
+    samples: recent.length,
     status,
     provider: buf.provider,
   };
@@ -723,6 +774,7 @@ export function __resetRpcSpikeInspectorForTests(): void {
   history.length = 0;
   spikeSeq = 0;
   containmentActionsLog.length = 0;
+  lastRecoverReason = null;
 }
 
 /** Pretend the inspector has been up for `ms` (post-boot hygiene tests). */

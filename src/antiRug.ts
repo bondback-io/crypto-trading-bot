@@ -1708,6 +1708,15 @@ async function detectRecentDevSells(
 ): Promise<{ sold: boolean; count: number }> {
   // Share load: holder/dev tx scans must not land on Utility public lane.
   const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+  try {
+    const { shouldShedPrimaryMonitoring } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    if (role === 'primary' && shouldShedPrimaryMonitoring()) {
+      return { sold: false, count: 0 };
+    }
+  } catch {
+    /* inspector optional */
+  }
   return runWithRpcRole(
     role,
     () => detectRecentDevSellsInner(mint, devWallet),

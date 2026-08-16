@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.386',
+    title: 'Trading spike recovers; exits stay on Helius',
+    sections: ['knobs', 'execution'],
+    items: [
+      'A Trading/Helius spike now ends when recent p95 stays under the recover bar for 45s. Slow sells and one hard poll no longer pin soft-pause. Recover logs trading_p95_stable; entries resume without a restart. Retry cap 1–2 only applies while the spike is open.',
+      'Sends/SL/peak-protect stay on Trading Critical (Helius). Watchers/Utility misroutes trip exit_lane_guard_trips and still send on primary. During a Trading spike, duplicate getSignatures/getTransaction monitoring is joined and sandwich/dev scans shed — exits are not throttled.',
+    ],
+  },
+  {
     version: '1.2.385',
     title: 'Micro Bot MC bands apply to fight, watch, and arm',
     sections: ['microbots', 'scanners', 'execution'],

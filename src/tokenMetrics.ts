@@ -915,6 +915,15 @@ async function fetchDevActivity(
 ): Promise<{ count: number; active: boolean }> {
   const lookbackMs = config.tokenMetrics?.devActivityLookbackMs ?? 2 * MS_PER_DAY;
   const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+  try {
+    const { shouldShedPrimaryMonitoring } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    if (role === 'primary' && shouldShedPrimaryMonitoring()) {
+      return { count: 0, active: false };
+    }
+  } catch {
+    /* inspector optional */
+  }
   return runWithRpcRole(
     role,
     async () => {

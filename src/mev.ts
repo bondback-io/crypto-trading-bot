@@ -83,6 +83,21 @@ export async function checkSandwichRisk(
   }
 
   // Share load: do not dump getParsedTransaction storms onto Utility (Favourites lane).
+  try {
+    const { shouldShedPrimaryMonitoring } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    if (shouldShedPrimaryMonitoring()) {
+      if (
+        lastSandwichCheck &&
+        now - lastSandwichCheck.checkedAt < 60_000
+      ) {
+        return lastSandwichCheck;
+      }
+      return empty(true, 'rpc_containment_shed');
+    }
+  } catch {
+    /* inspector optional */
+  }
   return runWithRpcRole('primary', () => checkSandwichRiskInner(mint, empty), 'mev_sandwich');
 }
 
