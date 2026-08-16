@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.382',
+    title: 'RPC post-boot spikes reclassify or clear after 2 min',
+    sections: ['knobs', 'execution'],
+    items: [
+      'After the 120s boot window, open post_boot spikes reclassify to provider slowness if recent p95 is still hot, or recover when the last 30s stay under the recover bar. Chips no longer stay post_boot for the whole session.',
+      'Recovery uses a 30s window so boot samples cannot pin containment forever. Soft-pause and Watchers shed still follow live spikes. Exits stay on Critical/Helius.',
+    ],
+  },
+  {
     version: '1.2.381',
     title: 'Watch/arm ownership: Mode B mid-band, MS watch max, fewer routing-none',
     sections: ['scanners', 'microbots', 'execution'],

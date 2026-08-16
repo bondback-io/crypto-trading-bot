@@ -6,7 +6,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../src/config';
 import {
+  __ageLaneSamplesForTests,
+  __forceSpikeRecoveringElapsedForTests,
   __resetRpcSpikeInspectorForTests,
+  __setSpikeInspectorUptimeForTests,
   buildRpcSpikeDiagnosis,
   getSpikeInspectorSnapshot,
   isLaneSpiking,
@@ -211,6 +214,88 @@ check(
   'primary-only spike does not idle-isolate Watchers',
   isLaneSpiking('primary') && shouldIdleIsolate() === false
 );
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+noteRpcCall({
+  lane: 'watchers',
+  provider: 'Alchemy',
+  method: 'getAccountInfo',
+  queueWaitMs: 12,
+  networkMs: 1800,
+  totalMs: 1812,
+  outcome: 'success',
+  inFlight: 2,
+});
+check(
+  'boot window stamps post_boot',
+  getSpikeInspectorSnapshot().spikes[0]?.class === 'post_boot'
+);
+__setSpikeInspectorUptimeForTests(130_000);
+const hotSnap = getSpikeInspectorSnapshot();
+const hotClass = hotSnap.spikes.find((s) => s.lane === 'watchers')?.class;
+check(
+  'after boot, hot post_boot reclassifies and stays open',
+  isLaneSpiking('watchers') &&
+    hotClass != null &&
+    hotClass !== 'post_boot' &&
+    shouldIdleIsolate() === true,
+  `class=${hotClass}`
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = true;
+noteRpcCall({
+  lane: 'primary',
+  provider: 'Helius',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 1,
+});
+check('primary post_boot pauses entries', shouldSoftPauseNewEntries() === true);
+__ageLaneSamplesForTests('primary', 31_000);
+__setSpikeInspectorUptimeForTests(130_000);
+__forceSpikeRecoveringElapsedForTests('primary', 45_000);
+const recoveredSnap = getSpikeInspectorSnapshot();
+check(
+  'post_boot stable clear ends spike without a new event',
+  isLaneSpiking('primary') === false &&
+    shouldSoftPauseNewEntries() === false &&
+    recoveredSnap.spikes.some(
+      (s) => s.lane === 'primary' && s.recoveredAt != null
+    )
+);
+check(
+  'recovered log reason is post_boot_stable_clear',
+  readSrc('src/rpcSpikeInspector.ts').includes("reason: 'post_boot_stable_clear'") ||
+    readSrc('src/rpcSpikeInspector.ts').includes('post_boot_stable_clear')
+);
+
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = false;
+noteRpcCall({
+  lane: 'watchers',
+  provider: 'Alchemy',
+  method: 'getAccountInfo',
+  queueWaitMs: 12,
+  networkMs: 1800,
+  totalMs: 1812,
+  outcome: 'success',
+  inFlight: 2,
+});
+__setSpikeInspectorUptimeForTests(130_000);
+getSpikeInspectorSnapshot();
+check(
+  'containment OFF reclassifies but does not shed',
+  isLaneSpiking('watchers') &&
+    getSpikeInspectorSnapshot().spikes[0]?.class !== 'post_boot' &&
+    shouldIdleIsolate() === false &&
+    shouldSoftPauseNewEntries() === false
+);
+config.rpc.containmentEnabled = true;
 
 const tradeSrc = readSrc('src/trade.ts');
 check(

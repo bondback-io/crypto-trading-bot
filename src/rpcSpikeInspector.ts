@@ -76,13 +76,14 @@ const SAMPLE_CAP = 96;
 const SPIKE_CAP = 10;
 const BOOT_MS = 120_000;
 const RECOVER_STABLE_MS = 45_000;
+const RECENT_WINDOW_MS = 30_000;
 const P95_TRADING_MS = 200;
 const P95_WATCHERS_MS = 350;
 const P95_OTHER_MS = 400;
 const HARD_SPIKE_MS = 1_500;
 const BURST_429_N = 3;
 const BURST_429_MS = 10_000;
-const startedAt = Date.now();
+let startedAt = Date.now();
 
 const lanes: Record<RpcSpikeLane, LaneBuf> = {
   primary: emptyBuf(),
@@ -301,19 +302,24 @@ function startSpike(
   applyContainment(lane, rec);
 }
 
-function maybeRecover(lane: RpcSpikeLane, buf: LaneBuf, now: number, p95: number | null): void {
+function recentSamples(buf: LaneBuf, now: number): Sample[] {
+  return buf.samples.filter((s) => now - s.ts <= RECENT_WINDOW_MS);
+}
+
+function recentP95(buf: LaneBuf, now: number): number | null {
+  const window = recentSamples(buf, now);
+  if (!window.length) return null;
+  return pctl(window.map((s) => s.totalMs), 0.95);
+}
+
+function endOpenSpike(
+  lane: RpcSpikeLane,
+  buf: LaneBuf,
+  now: number,
+  reason: string
+): void {
   const rec = buf.openSpike;
-  if (!rec) {
-    buf.recoveringSince = null;
-    return;
-  }
-  const recoverAt = recoverThreshold(lane);
-  if (p95 == null || p95 > recoverAt) {
-    buf.recoveringSince = null;
-    return;
-  }
-  if (buf.recoveringSince == null) buf.recoveringSince = now;
-  if (now - buf.recoveringSince < RECOVER_STABLE_MS) return;
+  if (!rec) return;
   rec.endedAt = now;
   rec.recoveredAt = now;
   rec.durationMs = now - rec.startedAt;
@@ -325,7 +331,62 @@ function maybeRecover(lane: RpcSpikeLane, buf: LaneBuf, now: number, p95: number
     lane,
     durationMs: rec.durationMs,
     class: rec.class,
+    reason,
   });
+}
+
+function maybeRecover(
+  lane: RpcSpikeLane,
+  buf: LaneBuf,
+  now: number,
+  p95: number | null
+): void {
+  const rec = buf.openSpike;
+  if (!rec) {
+    buf.recoveringSince = null;
+    return;
+  }
+  const recoverAt = recoverThreshold(lane);
+  // Empty recent window (idle) or p95 under the 85% bar counts as healthy.
+  const healthy = p95 == null || p95 <= recoverAt;
+  if (!healthy) {
+    buf.recoveringSince = null;
+    return;
+  }
+  if (buf.recoveringSince == null) buf.recoveringSince = now;
+  if (now - buf.recoveringSince < RECOVER_STABLE_MS) return;
+  const reason =
+    rec.class === 'post_boot' ? 'post_boot_stable_clear' : 'p95_stable';
+  endOpenSpike(lane, buf, now, reason);
+}
+
+/** After boot: relabel stuck post_boot if still hot; recover from recent p95. */
+function tickLaneHygiene(lane: RpcSpikeLane, buf: LaneBuf, now: number): void {
+  const rec = buf.openSpike;
+  if (!rec) return;
+  const p95 = recentP95(buf, now);
+  const pastBoot = now - startedAt >= BOOT_MS;
+  if (pastBoot && rec.class === 'post_boot') {
+    const recoverAt = recoverThreshold(lane);
+    const hot = p95 != null && p95 > recoverAt;
+    if (hot) {
+      const next = classifySpike(lane, recentSamples(buf, now));
+      rec.class = next;
+      console.warn('[rpc_spike_class]', {
+        id: rec.id,
+        class: rec.class,
+        reason: 'post_boot_reclass',
+      });
+    }
+  }
+  maybeRecover(lane, buf, now, p95);
+}
+
+function tickAllLaneHygiene(): void {
+  const now = Date.now();
+  (['primary', 'secondary', 'watchers', 'utility'] as RpcSpikeLane[]).forEach(
+    (lane) => tickLaneHygiene(lane, lanes[lane], now)
+  );
 }
 
 export function noteRpcCall(opts: {
@@ -387,12 +448,13 @@ export function noteRpcCall(opts: {
   const p95Hot = totals.length >= 8 && p95 != null && p95 > thr;
 
   if (buf.openSpike) {
-    buf.openSpike.peakP95 = Math.max(buf.openSpike.peakP95, p95 ?? 0);
+    const recent = recentP95(buf, now);
+    buf.openSpike.peakP95 = Math.max(buf.openSpike.peakP95, recent ?? p95 ?? 0);
     buf.openSpike.peakInFlight = Math.max(buf.openSpike.peakInFlight, inFlight);
     if (opts.outcome === 'timeout') buf.openSpike.errorCounts.timeout += 1;
     if (opts.outcome === '429') buf.openSpike.errorCounts.rateLimited += 1;
     if (opts.outcome === 'other') buf.openSpike.errorCounts.other += 1;
-    maybeRecover(lane, buf, now, p95);
+    tickLaneHygiene(lane, buf, now);
   } else if (p95Hot || hard || burst429) {
     const reason = burst429
       ? '429_burst'
@@ -448,6 +510,7 @@ export function getSpikeInspectorSnapshot(): {
   spikes: RpcSpikeRecord[];
   openSpikes: RpcSpikeRecord[];
 } {
+  tickAllLaneHygiene();
   return {
     containmentEnabled: isContainmentOn(),
     trading: laneTelemetry('primary'),
@@ -620,6 +683,7 @@ export function buildRpcSpikeDiagnosis(): {
 
 /** Test helper — not used in production paths. */
 export function __resetRpcSpikeInspectorForTests(): void {
+  startedAt = Date.now();
   (['primary', 'secondary', 'watchers', 'utility'] as RpcSpikeLane[]).forEach(
     (lane) => {
       lanes[lane] = emptyBuf();
@@ -628,4 +692,26 @@ export function __resetRpcSpikeInspectorForTests(): void {
   history.length = 0;
   spikeSeq = 0;
   containmentActionsLog.length = 0;
+}
+
+/** Pretend the inspector has been up for `ms` (post-boot hygiene tests). */
+export function __setSpikeInspectorUptimeForTests(ms: number): void {
+  startedAt = Date.now() - Math.max(0, Math.round(ms));
+}
+
+/** Mark an open spike as recovering for `elapsedMs` so the next tick can clear. */
+export function __forceSpikeRecoveringElapsedForTests(
+  lane: RpcSpikeLane,
+  elapsedMs: number
+): void {
+  const buf = lanes[lane];
+  if (!buf.openSpike) return;
+  buf.recoveringSince = Date.now() - Math.max(0, Math.round(elapsedMs));
+}
+
+/** Age lane samples so they fall out of the 30s recovery window. */
+export function __ageLaneSamplesForTests(lane: RpcSpikeLane, ageMs: number): void {
+  const buf = lanes[lane];
+  const d = Math.max(0, Math.round(ageMs));
+  for (const s of buf.samples) s.ts -= d;
 }
