@@ -248,6 +248,7 @@ export type WatchConfluenceInput = {
   indicators?: IndicatorReport | null;
   haState?: HaState | null;
   profileTaIndicators?: ProfileTaIndicatorReport | null;
+  supportPriceSol?: number | null;
 };
 
 export type ConfluenceScore = {
@@ -269,6 +270,8 @@ export function watchHasHardLevel(watch: WatchConfluenceInput): boolean {
   ) {
     return true;
   }
+  const supportPx = Number(watch.supportPriceSol);
+  if (Number.isFinite(supportPx) && supportPx > 0) return true;
   return Array.isArray(watch.supportTfHits) && watch.supportTfHits.length >= 1;
 }
 
@@ -315,7 +318,9 @@ export function scoreTaConfluence(input: {
     watch.nearLevel === true ||
     watch.touchedLevel === true ||
     watch.nearMultiTfSupport === true ||
-    (Array.isArray(watch.supportTfHits) && watch.supportTfHits.length >= 1);
+    (Array.isArray(watch.supportTfHits) && watch.supportTfHits.length >= 1) ||
+    (Number(watch.supportPriceSol) > 0 &&
+      Number.isFinite(Number(watch.supportPriceSol)));
   const nearFib = watchNearFibFlag(watch);
   const volOk = watchVolumeOkFlag(watch);
   const hardLevelEvidence = watchHasHardLevel(watch) || nearFib;

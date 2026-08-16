@@ -17219,6 +17219,52 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<p class="mint mb-2">Catalog Steady 80 / HWR 150. Fake-holder velocity is a max (' +
             (Number(d.fake_holder_velocity_max_15m) || 2000) +
             '/15m), not a min floor.</p>' +
+            (function () {
+              const bands = d.effective_mc_bands && typeof d.effective_mc_bands === 'object'
+                ? d.effective_mc_bands
+                : {};
+              const dipB = bands.dip_buyer || {};
+              const scB = bands.scalper || {};
+              const fmtUsd = function (n) {
+                const x = Number(n);
+                if (!Number.isFinite(x) || x <= 0) return '—';
+                if (x >= 1e6) return '$' + (x / 1e6).toFixed(x % 1e6 === 0 ? 0 : 1) + 'M';
+                if (x >= 1e3) return '$' + Math.round(x / 1e3) + 'k';
+                return '$' + Math.round(x);
+              };
+              return (
+                '<p class="mb-1"><strong>Effective MC bands</strong> Dip ' +
+                fmtUsd(dipB.min) +
+                '–' +
+                fmtUsd(dipB.max) +
+                ' (' +
+                escHtml(String(dipB.source || 'catalog')) +
+                ') · Scalper ' +
+                fmtUsd(scB.min) +
+                '–' +
+                fmtUsd(scB.max) +
+                ' (' +
+                escHtml(String(scB.source || 'catalog')) +
+                ')</p>' +
+                '<p class="mint mb-2">scalper watch/arm/trigger/open ' +
+                (Number(d.scalper_watch) || 0) +
+                '/' +
+                (Number(d.scalper_arm) || 0) +
+                '/' +
+                (Number(d.scalper_trigger) || 0) +
+                '/' +
+                (Number(d.scalper_open) || 0) +
+                ' · dip park/waiting_arm/arm/open ' +
+                (Number(d.dip_park) || 0) +
+                '/' +
+                (Number(d.dip_waiting_arm) || 0) +
+                '/' +
+                (Number(d.dip_arm) || 0) +
+                '/' +
+                (Number(d.dip_open) || 0) +
+                '</p>'
+              );
+            })() +
             '<p class="mb-1"><strong>MC fight none (last)</strong></p>' +
             (examples.length
               ? '<ul class="mb-2">' +

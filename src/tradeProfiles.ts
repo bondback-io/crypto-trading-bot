@@ -1920,23 +1920,100 @@ export const DIP_BUYER_DEFAULT_MAX_MC_USD = 500_000_000;
 /** Quality-park playbook MC floor — Steady/HWR multi-admit heuristic, not a Dip leftover band. */
 export const QUALITY_PARK_MULTI_ADMIT_MIN_MC_USD = 20_000_000;
 
-export function getDipBuyerMcBand(): { min: number; max: number } {
+export type McBandSource = 'micro_bot' | 'catalog';
+
+export interface EffectiveMcBand {
+  min: number;
+  max: number;
+  source: McBandSource;
+  minSource: McBandSource;
+  maxSource: McBandSource;
+}
+
+function overlayPositiveMcUsd(
+  profileId: string,
+  field: 'minMarketCapUsd' | 'maxMarketCapUsd'
+): number | null {
   try {
-    const m = resolveTradeProfileDefinition('dip_buyer').match;
-    const min = Number(m.minMarketCapUsd);
-    const max = Number(m.maxMarketCapUsd);
-    return {
-      min:
-        Number.isFinite(min) && min > 0 ? min : DIP_BUYER_DEFAULT_MIN_MC_USD,
-      max:
-        Number.isFinite(max) && max > 0 ? max : DIP_BUYER_DEFAULT_MAX_MC_USD,
-    };
+    const n = Number(
+      ensureState().overrides?.[profileId as TradeProfileId]?.match?.[field]
+    );
+    if (Number.isFinite(n) && n > 0) return n;
   } catch {
-    return {
-      min: DIP_BUYER_DEFAULT_MIN_MC_USD,
-      max: DIP_BUYER_DEFAULT_MAX_MC_USD,
-    };
+    /* catalog */
   }
+  return null;
+}
+
+function catalogMcFallback(
+  profileId: string,
+  field: 'minMarketCapUsd' | 'maxMarketCapUsd'
+): number {
+  if (profileId === 'dip_buyer') {
+    return field === 'minMarketCapUsd'
+      ? DIP_BUYER_DEFAULT_MIN_MC_USD
+      : DIP_BUYER_DEFAULT_MAX_MC_USD;
+  }
+  if (profileId === 'scalper') {
+    return field === 'minMarketCapUsd'
+      ? SCALPER_DEFAULT_MIN_MC_USD
+      : SCALPER_DEFAULT_MAX_MC_USD;
+  }
+  try {
+    const n = Number(getTradeProfileDefinition(profileId).match[field]);
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch {
+    /* none */
+  }
+  return 0;
+}
+
+/**
+ * Micro Bot min/max when entered (>0) is the only band; empty/0 uses catalog.
+ * Does not ease. Global Risk-On $8k still raise-only at fight/fill.
+ */
+export function getEffectiveMcBand(
+  profileId: string | null | undefined
+): EffectiveMcBand {
+  const id = String(profileId || '').trim();
+  const ovMin = overlayPositiveMcUsd(id, 'minMarketCapUsd');
+  const ovMax = overlayPositiveMcUsd(id, 'maxMarketCapUsd');
+  let catMin = 0;
+  let catMax = 0;
+  try {
+    const m = getTradeProfileDefinition(id).match;
+    catMin = Number(m.minMarketCapUsd);
+    catMax = Number(m.maxMarketCapUsd);
+  } catch {
+    /* fallbacks */
+  }
+  const minSource: McBandSource = ovMin != null ? 'micro_bot' : 'catalog';
+  const maxSource: McBandSource = ovMax != null ? 'micro_bot' : 'catalog';
+  const min =
+    ovMin ??
+    (Number.isFinite(catMin) && catMin > 0
+      ? catMin
+      : catalogMcFallback(id, 'minMarketCapUsd'));
+  const max =
+    ovMax ??
+    (Number.isFinite(catMax) && catMax > 0
+      ? catMax
+      : catalogMcFallback(id, 'maxMarketCapUsd'));
+  return {
+    min,
+    max,
+    minSource,
+    maxSource,
+    source:
+      minSource === 'micro_bot' || maxSource === 'micro_bot'
+        ? 'micro_bot'
+        : 'catalog',
+  };
+}
+
+export function getDipBuyerMcBand(): { min: number; max: number } {
+  const b = getEffectiveMcBand('dip_buyer');
+  return { min: b.min, max: b.max };
 }
 
 export function isInDipBuyerMcBand(
@@ -1981,24 +2058,10 @@ export function isMcOverMigrationSniperMax(
   return n > getMigrationSniperMaxMcUsd();
 }
 
-/** Resolved Scalper Mode B band (catalog + user overrides). */
+/** Resolved Scalper Mode B band (Micro Bot overlay if >0, else catalog). */
 export function getScalperMcBand(): { min: number; max: number } {
-  try {
-    const m = resolveTradeProfileDefinition('scalper').match;
-    const min = Number(m.minMarketCapUsd);
-    const max = Number(m.maxMarketCapUsd);
-    return {
-      min:
-        Number.isFinite(min) && min > 0 ? min : SCALPER_DEFAULT_MIN_MC_USD,
-      max:
-        Number.isFinite(max) && max > 0 ? max : SCALPER_DEFAULT_MAX_MC_USD,
-    };
-  } catch {
-    return {
-      min: SCALPER_DEFAULT_MIN_MC_USD,
-      max: SCALPER_DEFAULT_MAX_MC_USD,
-    };
-  }
+  const b = getEffectiveMcBand('scalper');
+  return { min: b.min, max: b.max };
 }
 
 export interface McHandoffContinuity {
@@ -2041,10 +2104,8 @@ export function getMcHandoffContinuity(): McHandoffContinuity {
       : scalper.min > scalperFloor && lowerMax >= scalperFloor
         ? Math.min(scalper.min, scalperFloor)
         : scalper.min;
-  const dipMinEffective =
-    dip.min > scalper.max && scalper.max >= SCALPER_DEFAULT_MIN_MC_USD
-      ? Math.min(dip.min, scalper.max)
-      : dip.min;
+  // Overlap $500k–$1.5M is intended — never pull Dip min down to Scalper max.
+  const dipMinEffective = dip.min;
   return {
     scalperMinEffective,
     dipMinEffective,
@@ -2072,9 +2133,53 @@ export interface McBandOwner {
   overflow?: McBandOwnerId;
 }
 
+function isDipOverlapDna(ctx?: TradeProfileMatchContext): boolean {
+  if (!ctx) return false;
+  if (String(ctx.hmcSetup || '').toLowerCase() === 'dip') return true;
+  const style = String(
+    ctx.detectedEntryStyle || ctx.entryStyleHint || ''
+  ).toLowerCase();
+  if (style === 'support_dip_reclaim') return true;
+  const fam = String(ctx.setupWatchFamily || '').toLowerCase();
+  if (fam === 'dip') return true;
+  return false;
+}
+
+function isScalperOverlapDna(ctx?: TradeProfileMatchContext): boolean {
+  if (!ctx) return false;
+  const style = String(
+    ctx.detectedEntryStyle || ctx.entryStyleHint || ''
+  ).toLowerCase();
+  if (style === 'scalp_reclaim_burst') return true;
+  const fam = String(ctx.setupWatchFamily || '').toLowerCase();
+  if (fam === 'mode_b' || fam === 'modeb' || fam === 'scalper') return true;
+  return false;
+}
+
+function scalperOwnerWithMbOverflow(
+  n: number,
+  ctx?: TradeProfileMatchContext
+): McBandOwner {
+  let mbMax = 400_000;
+  try {
+    const m = resolveTradeProfileDefinition('momentum_burst').match;
+    const x = Number(m.maxMarketCapUsd);
+    if (Number.isFinite(x) && x > 0) mbMax = x;
+  } catch {
+    /* catalog */
+  }
+  const overflow =
+    ctx && hasMomentumLaneSignals(ctx) && n <= mbMax
+      ? ('momentum_burst' as const)
+      : undefined;
+  return { primary: 'scalper', overflow };
+}
+
 /**
- * Who owns this MC from resolved bands. $150k–Scalper max is Scalper Mode B
- * (watch/arm), not a catalog hole. Does not reopen discretionary Scalper.
+ * Who owns this MC from effective bands. Overlap (both bands contain MC):
+ * dip / support_dip_reclaim / Fib dip watch → Dip; scalp_reclaim_burst /
+ * Mode B S/R → Scalper; no DNA → Scalper (Mode B park). Never none from
+ * band conflict. Does not reopen discretionary Scalper.
  */
 export function resolveMcBandOwner(
   mc: number,
@@ -2092,30 +2197,38 @@ export function resolveMcBandOwner(
     }
     return { primary: 'reversal_scalper', overflow: 'momentum_burst' };
   }
-  if (n <= scalper.max) {
-    let mbMax = 400_000;
-    try {
-      const m = resolveTradeProfileDefinition('momentum_burst').match;
-      const x = Number(m.maxMarketCapUsd);
-      if (Number.isFinite(x) && x > 0) mbMax = x;
-    } catch {
-      /* catalog */
-    }
-    const overflow =
-      ctx && hasMomentumLaneSignals(ctx) && n <= mbMax
-        ? ('momentum_burst' as const)
-        : undefined;
-    return { primary: 'scalper', overflow };
-  }
-  if (n >= dip.min && n <= dip.max) {
-    const dipDna =
-      ctx != null &&
-      (ctx.hmcSetup === 'dip' ||
-        String(ctx.detectedEntryStyle || '') === 'support_dip_reclaim' ||
-        String(ctx.setupWatchFamily || '').toLowerCase() === 'dip');
-    if (dipDna || n >= dip.min) {
+  const inScalper = n <= scalper.max;
+  const inDip = n >= dip.min && n <= dip.max;
+  if (inScalper && inDip) {
+    const dipDna = isDipOverlapDna(ctx);
+    const scalperDna = isScalperOverlapDna(ctx);
+    if (dipDna && !scalperDna) {
       return { primary: 'dip_buyer', overflow: 'trend_rider' };
     }
+    if (scalperDna && !dipDna) {
+      return scalperOwnerWithMbOverflow(n, ctx);
+    }
+    if (dipDna && scalperDna) {
+      const style = String(
+        ctx?.detectedEntryStyle || ctx?.entryStyleHint || ''
+      ).toLowerCase();
+      if (style === 'support_dip_reclaim') {
+        return { primary: 'dip_buyer', overflow: 'trend_rider' };
+      }
+      if (style === 'scalp_reclaim_burst') {
+        return scalperOwnerWithMbOverflow(n, ctx);
+      }
+      if (isDipOverlapDna(ctx)) {
+        return { primary: 'dip_buyer', overflow: 'trend_rider' };
+      }
+    }
+    return scalperOwnerWithMbOverflow(n, ctx);
+  }
+  if (inScalper) {
+    return scalperOwnerWithMbOverflow(n, ctx);
+  }
+  if (inDip) {
+    return { primary: 'dip_buyer', overflow: 'trend_rider' };
   }
   if (n >= 80_000_000) return { primary: 'high_win_rate' };
   if (n >= 20_000_000) return { primary: 'steady_compounder' };
@@ -2133,7 +2246,7 @@ export function resolveContinuousLaneMinMcUsd(
       return Math.min(catalogMin > 0 ? catalogMin : c.scalperMin, c.scalperMinEffective);
     }
     if (profileId === 'dip_buyer') {
-      return Math.min(catalogMin > 0 ? catalogMin : c.dipMin, c.dipMinEffective);
+      return catalogMin > 0 ? catalogMin : c.dipMinEffective;
     }
   } catch {
     /* catalog */
@@ -2201,7 +2314,7 @@ export function remapPreferredToMcBandOwner(
   const mc = Number(marketCapUsd);
   const pid = remapOverMigrationSniperMax(profileId, marketCapUsd);
   if (!Number.isFinite(mc) || mc <= 0) return pid;
-  // Dip eased floors may pass below catalog min — Mode B owns that gap.
+  // Below effective Dip min (card or catalog) — Mode B owns that gap.
   if (pid === 'dip_buyer' && mc < getDipBuyerMcBand().min) {
     const owner = resolveMcBandOwner(mc, ctx);
     if (
@@ -2695,6 +2808,10 @@ export function getTradeProfilesStatus(): {
   /** High Win-Rate Quality Filter defaults (also on high_win_rate.match.qualityFilter) */
   hwrQualityFilter: typeof DEFAULT_HWR_QUALITY_FILTER;
   recentDecisions: TradeProfileDecisionLog[];
+  effectiveBand: {
+    dip_buyer: EffectiveMcBand;
+    scalper: EffectiveMcBand;
+  };
 } {
   const state = ensureState();
   const {
@@ -2770,6 +2887,10 @@ export function getTradeProfilesStatus(): {
     patternAssignments: DEFAULT_PATTERN_PROFILE_ASSIGNMENTS,
     hwrQualityFilter: DEFAULT_HWR_QUALITY_FILTER,
     recentDecisions: getRecentTradeProfileDecisions(),
+    effectiveBand: {
+      dip_buyer: getEffectiveMcBand('dip_buyer'),
+      scalper: getEffectiveMcBand('scalper'),
+    },
   };
 }
 
@@ -4107,17 +4228,30 @@ export function evaluateLaneEntryFloors(
   // Legacy alias used below
   const armedDipSoft = armedSetupWatchSoft;
 
-  const eased = dipBuyerEasedFloors(def, ctx);
+  const band = getEffectiveMcBand(def.id);
+  const defMin = Number(m.minMarketCapUsd);
+  const defMax = Number(m.maxMarketCapUsd);
+  // Overlay 0 merges as 0 — fall back to catalog. Positive def min is card or catalog.
   const rawProfileMin =
-    eased?.minMarketCapUsd ??
-    (m.minMarketCapUsd != null &&
-    Number.isFinite(m.minMarketCapUsd) &&
-    m.minMarketCapUsd > 0
-      ? Number(m.minMarketCapUsd)
-      : 0);
-  const profileMin = resolveContinuousLaneMinMcUsd(def.id, rawProfileMin);
+    Number.isFinite(defMin) && defMin > 0
+      ? defMin
+      : band.min > 0
+        ? band.min
+        : 0;
+  // Scalper may still fill the gap below card min (MS/Reversal → Scalper).
+  // Dip min is the card/catalog value — never eased, never pulled to Scalper max.
+  const profileMin =
+    def.id === 'scalper'
+      ? resolveContinuousLaneMinMcUsd(def.id, rawProfileMin)
+      : rawProfileMin;
   const globalMin = effectiveMinMarketCapUsd();
   const laneMinMc = Math.max(globalMin, profileMin);
+  const laneMaxMc =
+    Number.isFinite(defMax) && defMax > 0
+      ? defMax
+      : band.max > 0
+        ? band.max
+        : 0;
 
   // Hard lane MC floor. Unknown MC + profile Min MC Override → hard fail on
   // discretionary. Dip / Trend never soft-pass unknown MC even when armed
@@ -4136,21 +4270,17 @@ export function evaluateLaneEntryFloors(
     } else if (mc != null && mc > 0 && mc < laneMinMc) {
       return {
         ok: false,
-        reason: `${def.name} MC $${Math.round(mc)} < lane min $${Math.round(laneMinMc)}`,
+        reason: `${def.name} MC $${Math.round(mc)} < lane min $${Math.round(laneMinMc)} (${band.minSource})`,
       };
     }
   }
 
-  if (
-    m.maxMarketCapUsd != null &&
-    Number.isFinite(m.maxMarketCapUsd) &&
-    m.maxMarketCapUsd > 0
-  ) {
+  if (laneMaxMc > 0) {
     // Known-only: unknown MC does not fail Max MC (global gates still apply)
-    if (mc != null && mc > 0 && mc > m.maxMarketCapUsd) {
+    if (mc != null && mc > 0 && mc > laneMaxMc) {
       return {
         ok: false,
-        reason: `${def.name} MC $${Math.round(mc)} > max $${Math.round(m.maxMarketCapUsd)}`,
+        reason: `${def.name} MC $${Math.round(mc)} > max $${Math.round(laneMaxMc)} (${band.maxSource})`,
       };
     }
   }
@@ -4274,9 +4404,7 @@ export function swingLaneFillMinMarketCapUsd(
 ): number {
   if (!isSwingLaneMustKnowMc(profileId)) return 0;
   try {
-    const n = Number(
-      resolveTradeProfileDefinition(profileId).match?.minMarketCapUsd
-    );
+    const n = Number(getEffectiveMcBand(String(profileId || '')).min);
     return n > 0 && Number.isFinite(n) ? n : 0;
   } catch {
     return 0;
@@ -4318,28 +4446,20 @@ function isDipBuyerEasePath(ctx: TradeProfileMatchContext): boolean {
   return false;
 }
 
-/** Eased MC / H1 floors for dip_buyer on classified or structural dip paths. */
+/** Eased H1 volume for dip_buyer on classified or structural dip paths. MC is never eased. */
 function dipBuyerEasedFloors(
   def: TradeProfileDefinition,
   ctx: TradeProfileMatchContext
-): { minMarketCapUsd: number; minVolumeH1Usd: number } | null {
+): { minVolumeH1Usd: number } | null {
   if (def.id !== 'dip_buyer' || !isDipBuyerEasePath(ctx)) return null;
   const m = def.match;
-  const baseMc =
-    m.minMarketCapUsd != null &&
-    Number.isFinite(m.minMarketCapUsd) &&
-    m.minMarketCapUsd > 0
-      ? Number(m.minMarketCapUsd)
-      : 1_000_000;
   const baseH1 =
     m.minVolumeH1Usd != null &&
     Number.isFinite(m.minVolumeH1Usd) &&
     m.minVolumeH1Usd > 0
       ? Number(m.minVolumeH1Usd)
       : 8_000;
-  // ~30% ease so mid-MC classified dips convert instead of scalper-only.
   return {
-    minMarketCapUsd: Math.round(baseMc * 0.7),
     minVolumeH1Usd: Math.round(baseH1 * 0.7),
   };
 }
@@ -5063,35 +5183,33 @@ function scoreProfile(
 
   if (m.preferScalp) {
     // Hard gate: Scalper mid-band when preferSmallMc + max/min MC set
-    if (m.preferSmallMc && m.maxMarketCapUsd != null) {
-      if (mc == null || mc <= 0 || mc > m.maxMarketCapUsd) {
+    const scalperBand = getEffectiveMcBand('scalper');
+    if (m.preferSmallMc && scalperBand.max > 0) {
+      if (mc == null || mc <= 0 || mc > scalperBand.max) {
         return {
           score: 0,
           reason:
             mc == null
               ? 'need MC for scalper'
-              : `MC $${Math.round(mc)} above scalper max $${m.maxMarketCapUsd}`,
+              : `MC $${Math.round(mc)} above scalper max $${scalperBand.max} (${scalperBand.maxSource})`,
         };
       }
-      if (
-        m.minMarketCapUsd != null &&
-        Number.isFinite(m.minMarketCapUsd) &&
-        m.minMarketCapUsd > 0 &&
-        mc < resolveContinuousLaneMinMcUsd('scalper', Number(m.minMarketCapUsd))
-      ) {
+      const scalperMin = resolveContinuousLaneMinMcUsd(
+        'scalper',
+        scalperBand.min
+      );
+      if (scalperMin > 0 && mc < scalperMin) {
         return {
           score: 0,
-          reason: `MC $${Math.round(mc)} below scalper min $${Math.round(
-            resolveContinuousLaneMinMcUsd('scalper', Number(m.minMarketCapUsd))
-          )}`,
+          reason: `MC $${Math.round(mc)} below scalper min $${Math.round(scalperMin)} (${scalperBand.minSource})`,
         };
       }
     }
     const smallMc =
       mc != null &&
-      m.maxMarketCapUsd != null &&
+      scalperBand.max > 0 &&
       mc > 0 &&
-      mc <= m.maxMarketCapUsd;
+      mc <= scalperBand.max;
     const genericScalp =
       isScalp &&
       (ctx.shortTermStrategyId === 'quick_scalper' ||

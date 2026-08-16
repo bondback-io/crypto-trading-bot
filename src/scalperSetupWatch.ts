@@ -104,11 +104,32 @@ const TRIGGER_RECLAIM_PCT = 0.9;
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
 const TERMINAL_UI_MS = 60_000;
-/** Dip mutual exclusion is by active dip watch — Scalper owns mid-band up to $1M. */
+/** Catalog fallback — live admit uses getEffectiveMcBand('scalper'). */
 const SCALPER_MC_MIN = 150_000;
 const SCALPER_MC_MAX = 1_000_000;
-/** Below this → Migration / Reversal own microcaps (not Scalper). */
-const SCALPER_MICROCAP_BELOW = 150_000;
+
+function scalperLiveBand(): { min: number; max: number } {
+  try {
+    const { getEffectiveMcBand } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const b = getEffectiveMcBand('scalper');
+    return {
+      min: b.min > 0 ? b.min : SCALPER_MC_MIN,
+      max: b.max > 0 ? b.max : SCALPER_MC_MAX,
+    };
+  } catch {
+    return { min: SCALPER_MC_MIN, max: SCALPER_MC_MAX };
+  }
+}
+
+export function isMcInScalperWatchBand(
+  mc: number | null | undefined
+): boolean {
+  const n = Number(mc);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const live = scalperLiveBand();
+  return n >= live.min && n <= live.max;
+}
 
 const watches = new Map<string, ScalperWatchEntry>();
 const lastMcRefreshAt = new Map<string, number>();
@@ -385,14 +406,14 @@ function pickPreferredProfile(input: {
   ) {
     const mcEarly = input.marketCapUsd ?? 0;
     // Never keep sticky Scalper prefer on microcaps
-    if (pref === 'scalper' && mcEarly > 0 && mcEarly < SCALPER_MICROCAP_BELOW) {
+    if (pref === 'scalper' && mcEarly > 0 && mcEarly < scalperLiveBand().min) {
       /* fall through to microcap / playbook routing */
     } else {
       // Re-route mid-air MB stamps toward Scalper only at true reclaim in mid-band
       if (
         pref !== 'scalper' &&
         atReclaim &&
-        mcEarly >= SCALPER_MC_MIN &&
+        mcEarly >= scalperLiveBand().min &&
         !isReversalDominant(input) &&
         !isMomentumBurstDominant(input)
       ) {
@@ -426,7 +447,7 @@ function pickPreferredProfile(input: {
   // True support reclaim in Scalper mid-band → Scalper.
   // Microcap (<150k) → Reversal (or MB); never stamp Scalper from MC alone.
   const mc = input.marketCapUsd ?? 0;
-  if (mc > 0 && mc < SCALPER_MICROCAP_BELOW) {
+  if (mc > 0 && mc < scalperLiveBand().min) {
     if (isReversalDominant(input)) {
       try {
         if (
@@ -441,10 +462,11 @@ function pickPreferredProfile(input: {
     }
     return 'momentum_burst';
   }
-  if (atReclaim && mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX) {
+  const live = scalperLiveBand();
+  if (atReclaim && mc >= live.min && mc <= live.max) {
     return 'scalper';
   }
-  if (mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX) {
+  if (mc >= live.min && mc <= live.max) {
     return 'scalper';
   }
   return 'momentum_burst';
@@ -620,8 +642,15 @@ export function considerScalperWatchSetup(input: {
   source?: string;
   nearKeyFib?: boolean;
 }): ScalperWatchEntry | null {
-  if (!isScalperFamilyEnabled()) return null;
-  if (!input.mint) return null;
+  lastScalperAdmitReject = '';
+  if (!isScalperFamilyEnabled()) {
+    lastScalperAdmitReject = 'profile_off';
+    return null;
+  }
+  if (!input.mint) {
+    lastScalperAdmitReject = 'no_mint';
+    return null;
+  }
   if (isManualUnwatchCooldown(input.mint)) {
     noteModeBFunnel('rejected_cooldown');
     return null;
@@ -651,15 +680,16 @@ export function considerScalperWatchSetup(input: {
   }
 
   const mc = input.marketCapUsd;
+  const live = scalperLiveBand();
   // Above Scalper mid-band ceiling — leave to Dip / quality lanes
-  if (mc != null && mc > 0 && mc > SCALPER_MC_MAX) {
+  if (mc != null && mc > 0 && mc > live.max) {
     noteModeBFunnel('rejected_mc');
     return null;
   }
 
   const midBand =
-    mc != null && mc > 0 && mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX;
-  const microcap = mc != null && mc > 0 && mc < SCALPER_MICROCAP_BELOW;
+    mc != null && mc > 0 && mc >= live.min && mc <= live.max;
+  const microcap = mc != null && mc > 0 && mc < live.min;
   const chg = input.priceChangeH1Pct ?? input.priceChangePct ?? 0;
   const mbOrReversal =
     chg >= 10 ||
@@ -1049,7 +1079,7 @@ export async function tickScalperSetupWatches(opts?: {
     w.targetEntries = buildTargetEntries(w);
 
     // Invalidate: graduated past Scalper mid-band ceiling
-    if (w.marketCapUsd != null && w.marketCapUsd > SCALPER_MC_MAX) {
+    if (w.marketCapUsd != null && w.marketCapUsd > scalperLiveBand().max) {
       w.status = 'invalidated';
       w.updatedAt = now;
       w.lastReason = 'MC > Scalper mid-band';

@@ -12,6 +12,7 @@ import {
 import { trimMapToCap, registerCacheSweep } from './mapCap';
 import { isStrategyEnabledGlobal } from './strategies';
 import {
+  getEffectiveMcBand,
   isAboveDipBuyerMaxMc,
   isInDipBuyerMcBand,
   isSmartBotProfilesEnabled,
@@ -1620,8 +1621,9 @@ export function considerDipWatchSetup(input: {
     return null;
   }
   const m = dipMatch();
-  const minMc = m.minMarketCapUsd ?? 1_000_000;
-  const maxMc = m.maxMarketCapUsd ?? 500_000_000;
+  const dipBand = getEffectiveMcBand('dip_buyer');
+  const minMc = dipBand.min > 0 ? dipBand.min : 1_000_000;
+  const maxMc = dipBand.max > 0 ? dipBand.max : 500_000_000;
   const minHolders = m.minHolders ?? 80;
   const minVol = m.minVolumeH1Usd ?? 8_000;
   const minDrop = m.minDropFromPeakPct ?? 8;

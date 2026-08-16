@@ -527,27 +527,42 @@ export function canTriggerArmed(opts: {
   if (score.confluenceCount >= min) {
     return { ok: true, reason: 'confluence_met', score };
   }
-  const volOk =
-    watch.volOk === true ||
-    watch.volumeExpanding === true ||
-    watch.volumeState === 'expanding' ||
-    watch.volumeState === 'stable' ||
-    watch.volumeState === 'ok';
-  if (
-    score.confluenceCount === 0 &&
-    score.hardLevelEvidence &&
-    volOk &&
-    !score.lateChase
-  ) {
-    const credited = Math.min(
-      min,
-      1 + (watch.nearFib === true || watch.nearKeyFib === true ? 1 : 0)
-    );
-    return {
-      ok: true,
-      reason: 'confluence_fallback_level_evidence',
-      score: { ...score, confluenceCount: credited, fallbackUsed: true },
-    };
+  const hasLevel =
+    score.hardLevelEvidence ||
+    watch.nearSupport === true ||
+    watch.hasLevel === true ||
+    watch.nearMultiTfSupport === true ||
+    watch.nearLevel === true ||
+    watch.touchedLevel === true ||
+    (Number(watch.supportPriceSol) > 0 &&
+      Number.isFinite(Number(watch.supportPriceSol))) ||
+    (Array.isArray(watch.supportTfHits) && watch.supportTfHits.length >= 1);
+  if (hasLevel && !score.lateChase) {
+    const extraFib =
+      watch.nearFib === true || watch.nearKeyFib === true ? 1 : 0;
+    const withLevel = Math.max(score.confluenceCount, 1 + extraFib);
+    if (withLevel >= min) {
+      return {
+        ok: true,
+        reason: 'confluence_fallback_level_evidence',
+        score: {
+          ...score,
+          confluenceCount: withLevel,
+          fallbackUsed: true,
+        },
+      };
+    }
+    if (score.confluenceCount === 0) {
+      return {
+        ok: false,
+        reason: `need ${min} TA confluences (have ${withLevel})`,
+        score: {
+          ...score,
+          confluenceCount: withLevel,
+          fallbackUsed: true,
+        },
+      };
+    }
   }
   return {
     ok: false,
@@ -603,13 +618,52 @@ export function shouldParkUnarmedOpen(opts: {
   if (!id || id === 'default' || id === 'zion') {
     return { park: false, reason: 'no_arming_profile' };
   }
-  if (!isProfileWatchEnabled(id) || !isProfileArmingEnabled(id)) {
+  if (!isProfileWatchEnabled(id)) {
+    return { park: false, reason: 'watch_off' };
+  }
+  if (!isProfileArmingEnabled(id)) {
     return { park: false, reason: 'arming_off' };
   }
   return {
     park: true,
     reason: `Arming ON — ${id} waits for watch→arm→trigger`,
   };
+}
+
+/**
+ * Precise park-failed copy: watch_off, or last Dip/Scalper admit reject.
+ * Never a silent false.
+ */
+export function formatArmingParkFailedReason(
+  profileId: string | null | undefined
+): string {
+  const pid = String(profileId || '').trim();
+  if (pid && !isProfileWatchEnabled(pid)) {
+    return `Arming ON — watch_off for ${pid}`;
+  }
+  let why = 'admit_failed';
+  try {
+    if (
+      pid === 'dip_buyer' ||
+      pid === 'steady_compounder' ||
+      pid === 'high_win_rate'
+    ) {
+      const { getLastDipAdmitReject } =
+        require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+      why = getLastDipAdmitReject() || why;
+    } else if (
+      pid === 'scalper' ||
+      pid === 'momentum_burst' ||
+      pid === 'reversal_scalper'
+    ) {
+      const { getLastScalperAdmitReject } =
+        require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+      why = getLastScalperAdmitReject() || why;
+    }
+  } catch {
+    /* keep admit_failed */
+  }
+  return `Arming ON — park failed for ${pid || 'profile'} (${why})`;
 }
 
 /** Stamp eligibleProfileIds on a family watch row (exclusive Steady/HWR). */

@@ -1246,6 +1246,7 @@ function maybeParkArmingOpen(
       shouldParkUnarmedOpen,
       parkSignalOnProfileWatch,
       noteProfileWatchFunnel,
+      formatArmingParkFailedReason,
     } = require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
     const reasonBits = Array.isArray(signal.scannerReasons)
       ? signal.scannerReasons.join(' ')
@@ -1287,7 +1288,7 @@ function maybeParkArmingOpen(
       park: true,
       reason: parked
         ? gate.reason
-        : `Arming ON — park failed for ${profileId || 'profile'}`,
+        : formatArmingParkFailedReason(profileId),
     };
   } catch {
     return { park: false, reason: 'park_eval_fail_open' };

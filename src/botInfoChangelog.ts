@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.385',
+    title: 'Micro Bot MC bands apply to fight, watch, and arm',
+    sections: ['microbots', 'scanners', 'execution'],
+    items: [
+      'Min/Max MC on a Micro Bot card is the only band when entered; empty fields keep catalog. Dip no longer eases MC to $700k or inherits Scalper max — overlap $500k–$1.5M is Dip on dip/reclaim and Scalper on Mode B S/R.',
+      'Watch/arm use the same effective bands (Scalper max can be $1.5M). Park failed now prints the admit reason. Conversion proof shows effective bands plus scalper watch/arm/trigger/open and dip park/waiting_arm/arm/open. Discretionary Scalper stays blocked.',
+    ],
+  },
+  {
     version: '1.2.384',
     title: 'RPC hard-call anti-flap: ignore one-off slow probes',
     sections: ['knobs', 'execution'],

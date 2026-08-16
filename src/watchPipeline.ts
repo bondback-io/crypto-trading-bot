@@ -87,6 +87,30 @@ export interface ConversionDiagnosticsSnapshot {
   hwr_block_reasons: Record<string, number>;
   resolved_min_holders: Record<string, number>;
   fake_holder_velocity_max_15m: number;
+  effective_mc_bands: {
+    dip_buyer: {
+      min: number;
+      max: number;
+      source: string;
+      minSource: string;
+      maxSource: string;
+    };
+    scalper: {
+      min: number;
+      max: number;
+      source: string;
+      minSource: string;
+      maxSource: string;
+    };
+  };
+  scalper_watch: number;
+  scalper_arm: number;
+  scalper_trigger: number;
+  scalper_open: number;
+  dip_park: number;
+  dip_waiting_arm: number;
+  dip_arm: number;
+  dip_open: number;
 }
 
 export interface WatchPipelineSnapshot {
@@ -637,6 +661,70 @@ export function getConversionDiagnostics(): ConversionDiagnosticsSnapshot {
   const sourceRows = buildSourceFunnelRows();
   const source_counts: Record<string, number> = {};
   for (const row of sourceRows) source_counts[row.source] = row.candidates_in;
+  let effective_mc_bands: ConversionDiagnosticsSnapshot['effective_mc_bands'] = {
+    dip_buyer: {
+      min: 1_000_000,
+      max: 500_000_000,
+      source: 'catalog',
+      minSource: 'catalog',
+      maxSource: 'catalog',
+    },
+    scalper: {
+      min: 150_000,
+      max: 1_000_000,
+      source: 'catalog',
+      minSource: 'catalog',
+      maxSource: 'catalog',
+    },
+  };
+  try {
+    const { getEffectiveMcBand } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    effective_mc_bands = {
+      dip_buyer: getEffectiveMcBand('dip_buyer'),
+      scalper: getEffectiveMcBand('scalper'),
+    };
+  } catch {
+    /* catalog defaults above */
+  }
+  let scalper_watch = 0;
+  let scalper_arm = 0;
+  let scalper_trigger = 0;
+  let scalper_open = 0;
+  let dip_park = 0;
+  let dip_arm = 0;
+  let dip_open = 0;
+  try {
+    const { getProfileWatchFunnels } =
+      require('./profileWatchRegistry') as typeof import('./profileWatchRegistry');
+    const funnels = getProfileWatchFunnels();
+    const s = funnels.scalper;
+    if (s) {
+      scalper_watch = s.sent_to_watch;
+      scalper_arm = s.armed;
+      scalper_trigger = s.trigger_ready;
+      scalper_open = s.opened;
+    }
+    const d = funnels.dip_buyer;
+    if (d) {
+      dip_park = d.sent_to_watch;
+      dip_arm = d.armed;
+      dip_open = d.opened;
+    }
+  } catch {
+    /* optional */
+  }
+  let dip_waiting_arm = 0;
+  try {
+    const { getDipSetupWatchStatus } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const st = getDipSetupWatchStatus(200);
+    dip_waiting_arm = (st.entries || []).filter(
+      (e: { status?: string }) => String(e.status || '') === 'watching'
+    ).length;
+  } catch {
+    /* optional */
+  }
   return {
     mc_gap_orphan_count: mcGapOrphanCount,
     none_mc_gap_count: noneMcGapCount,
@@ -652,6 +740,15 @@ export function getConversionDiagnostics(): ConversionDiagnosticsSnapshot {
     hwr_block_reasons: topReasons(hwrBlockReasons),
     resolved_min_holders: resolvedMinHolders,
     fake_holder_velocity_max_15m: fakeHolderMax15m,
+    effective_mc_bands,
+    scalper_watch,
+    scalper_arm,
+    scalper_trigger,
+    scalper_open,
+    dip_park,
+    dip_waiting_arm,
+    dip_arm,
+    dip_open,
   };
 }
 
