@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.387',
+    title: 'Watcher cards show live Micro Bot MC bands',
+    sections: ['microbots', 'scanners'],
+    items: [
+      'Each setup watchlist (Dip, Steady, HWR, Scalper, MB, Reversal, Trend, Migration) now prints the same min/max MC as that Micro Bot’s Settings card. Overlay >0 wins; empty fields keep catalog.',
+      'Dip no longer hardcodes $1M–$500M. Mode B / microcap notes use the live Dip min and Scalper min so watcher copy matches Conversion proof.',
+    ],
+  },
+  {
     version: '1.2.386',
     title: 'Trading spike recovers; exits stay on Helius',
     sections: ['knobs', 'execution'],

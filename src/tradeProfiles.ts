@@ -2011,6 +2011,26 @@ export function getEffectiveMcBand(
   };
 }
 
+/** Watcher cards that should show the same min/max MC as Micro Bot settings. */
+export const WATCHER_MC_BAND_PROFILE_IDS = [
+  'dip_buyer',
+  'scalper',
+  'steady_compounder',
+  'high_win_rate',
+  'momentum_burst',
+  'reversal_scalper',
+  'trend_rider',
+  'migration_sniper',
+] as const;
+
+export function getWatcherEffectiveMcBands(): Record<string, EffectiveMcBand> {
+  const out: Record<string, EffectiveMcBand> = {};
+  for (const id of WATCHER_MC_BAND_PROFILE_IDS) {
+    out[id] = getEffectiveMcBand(id);
+  }
+  return out;
+}
+
 export function getDipBuyerMcBand(): { min: number; max: number } {
   const b = getEffectiveMcBand('dip_buyer');
   return { min: b.min, max: b.max };
@@ -2808,10 +2828,7 @@ export function getTradeProfilesStatus(): {
   /** High Win-Rate Quality Filter defaults (also on high_win_rate.match.qualityFilter) */
   hwrQualityFilter: typeof DEFAULT_HWR_QUALITY_FILTER;
   recentDecisions: TradeProfileDecisionLog[];
-  effectiveBand: {
-    dip_buyer: EffectiveMcBand;
-    scalper: EffectiveMcBand;
-  };
+  effectiveBand: Record<string, EffectiveMcBand>;
 } {
   const state = ensureState();
   const {
@@ -2887,10 +2904,7 @@ export function getTradeProfilesStatus(): {
     patternAssignments: DEFAULT_PATTERN_PROFILE_ASSIGNMENTS,
     hwrQualityFilter: DEFAULT_HWR_QUALITY_FILTER,
     recentDecisions: getRecentTradeProfileDecisions(),
-    effectiveBand: {
-      dip_buyer: getEffectiveMcBand('dip_buyer'),
-      scalper: getEffectiveMcBand('scalper'),
-    },
+    effectiveBand: getWatcherEffectiveMcBands(),
   };
 }
 

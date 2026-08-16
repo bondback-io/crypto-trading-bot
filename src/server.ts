@@ -4969,8 +4969,18 @@ export function createServer(): express.Application {
               high_win_rate: getMinTaPlaybookConfluences('high_win_rate'),
               scalper: getMinTaPlaybookConfluences('scalper'),
               momentum_burst: getMinTaPlaybookConfluences('momentum_burst'),
+              reversal_scalper: getMinTaPlaybookConfluences('reversal_scalper'),
               trend_rider: getMinTaPlaybookConfluences('trend_rider'),
             };
+          } catch {
+            return null;
+          }
+        })(),
+        effectiveBand: (() => {
+          try {
+            const { getWatcherEffectiveMcBands } =
+              require('./tradeProfiles') as typeof import('./tradeProfiles');
+            return getWatcherEffectiveMcBands();
           } catch {
             return null;
           }
