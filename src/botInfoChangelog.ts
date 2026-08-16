@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.400',
+    title: 'Unstick scanner feed after Alchemy CU/s cooldown',
+    sections: ['scanners', 'execution'],
+    items: [
+      'Alchemy CU/s cooldown no longer restacks when scanners skip a cooling endpoint (that looked like another 429 and stretched polls toward 90s). HTTP Dexscreener/pump ingest keeps ticking; RPC enrich sheds until the window ends. Scanner/watcher lane defaults restored to 6 rps / 3 concurrent. Exits stay on Trading.',
+    ],
+  },
+  {
     version: '1.2.399',
     title: 'Dip tab lists in-band family watches',
     sections: ['microbots', 'scanners', 'knobs'],

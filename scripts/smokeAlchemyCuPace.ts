@@ -54,15 +54,22 @@ check('cooldown in 15–60s', (() => {
   const ms = alchemyCooldownRemainingMs();
   return ms >= 14_000 && ms <= 60_000;
 })());
+const firstCool = alchemyCooldownRemainingMs();
+noteAlchemyCuLimit('https://solana-mainnet.g.alchemy.com/v2/secret');
+check(
+  'repeat CU note does not stack cooldown',
+  alchemyCooldownRemainingMs() <= firstCool + 80
+);
 
 __resetAlchemyPaceForTests();
-const a = acquireAlchemyPaceSlot('market_scanner');
-const b = acquireAlchemyPaceSlot('market_scanner');
-const c = acquireAlchemyPaceSlot('market_scanner');
-check('first pace slot allowed', a.allowed === true);
-check('in-flight cap 2', b.allowed === true && c.allowed === false);
-a.release();
-b.release();
+const slots = Array.from({ length: 7 }, () =>
+  acquireAlchemyPaceSlot('market_scanner')
+);
+check(
+  'in-flight cap 6',
+  slots.slice(0, 6).every((s) => s.allowed) && slots[6].allowed === false
+);
+slots.forEach((s) => s.release());
 
 check(
   'share-on migration is scanners not Trading',
@@ -88,8 +95,9 @@ check(
   critBlock.includes('trade_exit') && !critBlock.includes("'migration'")
 );
 check(
-  'secondary default rps lowered',
-  /RPC_LANE_RPS_SECONDARY',\s*4/.test(gate)
+  'secondary default rps restored (not 4)',
+  /RPC_LANE_RPS_SECONDARY',\s*6/.test(gate) &&
+    !/RPC_LANE_RPS_SECONDARY',\s*4/.test(gate)
 );
 
 const mig = readSrc('src/migrationListener.ts');
@@ -109,8 +117,16 @@ check(
   /rateLimitHits >= 2/.test(conn)
 );
 check(
-  'compute units treated as rate limit',
-  /compute units per second/.test(conn)
+  'cooldown skip throws RpcGateSkipError not fake 429',
+  /shouldSkipAlchemyRpc\(feature\)/.test(conn) &&
+    /RpcGateSkipError/.test(conn) &&
+    !/throw new Error\(\s*'429 Too Many Requests: compute units per second capacity'/.test(
+      conn
+    )
+);
+check(
+  'scanner interval is not stretched to cooldown\+5s',
+  !/cool \+ 5_000/.test(readSrc('src/rpcLoadControl.ts'))
 );
 
 if (failed > 0) {

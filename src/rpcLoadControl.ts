@@ -148,9 +148,11 @@ function recompute(external?: {
       require('./rpcProviderPace') as typeof import('./rpcProviderPace');
     const cool = alchemyCooldownRemainingMs(now);
     if (cool > 0) {
-      scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-      shedBackground = true;
-      reasons.push(`alchemy CU/s cooldown ${Math.round(cool / 1000)}s`);
+      // Shed RPC enrich only — do not stall Dexscreener/pump HTTP ingest.
+      scannerSlowFactor = Math.max(scannerSlowFactor, 1.5);
+      reasons.push(
+        `alchemy CU/s cooldown ${Math.round(cool / 1000)}s (enrich shed)`
+      );
     }
   } catch {
     /* optional */
@@ -197,16 +199,7 @@ export function getRpcLoadControlSnapshot(): RpcLoadControlSnapshot {
 /** Effective scanner poll interval after adaptive slowdown. */
 export function adaptiveScannerIntervalMs(baseMs: number): number {
   const f = getRpcLoadControlSnapshot().scannerSlowFactor;
-  let ms = Math.round(Math.max(baseMs, baseMs * f));
-  try {
-    const { alchemyCooldownRemainingMs } =
-      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
-    const cool = alchemyCooldownRemainingMs();
-    if (cool > 0) ms = Math.max(ms, Math.min(90_000, cool + 5_000));
-  } catch {
-    /* optional */
-  }
-  return ms;
+  return Math.round(Math.max(baseMs, baseMs * f));
 }
 
 function secondarySpikeDegradesEnrich(): boolean {
@@ -232,6 +225,13 @@ function utilitySpikeSlowsPolls(): boolean {
 /** True when scanners should skip heavy enrich/curve and use crude rank. */
 export function shouldDegradeScannerEnrich(): boolean {
   if (getRpcLoadControlSnapshot().scannerSlowFactor >= 3) return true;
+  try {
+    const { alchemyCooldownRemainingMs } =
+      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
+    if (alchemyCooldownRemainingMs() > 0) return true;
+  } catch {
+    /* optional */
+  }
   return secondarySpikeDegradesEnrich();
 }
 

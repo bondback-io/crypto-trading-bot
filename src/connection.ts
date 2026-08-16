@@ -374,8 +374,10 @@ function meteredFetch(endpointLabel: string) {
       throw new Error('Insufficient credits for this request');
     }
     if (alchemy && shouldSkipAlchemyRpc(feature)) {
-      throw new Error(
-        '429 Too Many Requests: compute units per second capacity'
+      throw new RpcGateSkipError(
+        'rate',
+        rpcRoleAls.getStore() || 'secondary',
+        feature
       );
     }
     const pace = alchemy
@@ -1682,6 +1684,7 @@ async function withRpcInner<T>(
 
   let attempts = 0;
   let rateLimitHits = 0;
+  let skippedAlchemyCooling = 0;
   for (let oi = 0; oi < order.length && attempts < maxAttempts; oi++) {
     const index = order[oi];
     const state = endpoints[index];
@@ -1692,6 +1695,7 @@ async function withRpcInner<T>(
       isAlchemyRpcUrl(state.endpoint.url) &&
       shouldSkipAlchemyRpc(feature)
     ) {
+      skippedAlchemyCooling += 1;
       continue;
     }
 
@@ -1763,7 +1767,7 @@ async function withRpcInner<T>(
       if (!exitSend && isRpcRateLimitMessage(message)) {
         rateLimitHits += 1;
         if (
-          isAlchemyCuLimitMessage(message) ||
+          isAlchemyCuLimitMessage(message) &&
           isAlchemyRpcUrl(state.endpoint.url)
         ) {
           noteAlchemyCuLimit(state.endpoint.url);
@@ -1771,6 +1775,10 @@ async function withRpcInner<T>(
         if (rateLimitHits >= 2) break;
       }
     }
+  }
+
+  if (attempts === 0 && skippedAlchemyCooling > 0 && lastError == null) {
+    throw new RpcGateSkipError('rate', r, feature);
   }
 
   logger.error('RPC', `${label} all endpoints failed`, errorToMeta(lastError));

@@ -7,7 +7,8 @@ import { computeCooldownMs, QuietLogGate } from './httpProviderGate';
 
 const BACKOFF_MIN_MS = 15_000;
 const BACKOFF_MAX_MS = 60_000;
-const MAX_IN_FLIGHT = 2;
+/** Shared Alchemy in-flight across scanners+watchers. Lane RPS is the finer cap. */
+const MAX_IN_FLIGHT = 6;
 
 let cooldownUntil = 0;
 let backoffMs = BACKOFF_MIN_MS;
@@ -47,6 +48,8 @@ function isExitLikeFeature(feature?: string): boolean {
 /** Returns true if this is the first log for the current cooldown window. */
 export function noteAlchemyCuLimit(endpoint?: string): boolean {
   const now = Date.now();
+  // Already cooling — do not reset the timer or double backoff on skip/retry.
+  if (alchemyCooldownRemainingMs(now) > 0) return false;
   const wait = Math.min(BACKOFF_MAX_MS, backoffMs);
   cooldownUntil = now + wait;
   backoffMs = Math.min(BACKOFF_MAX_MS, wait * 2);
