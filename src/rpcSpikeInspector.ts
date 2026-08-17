@@ -713,6 +713,22 @@ export function shouldShedPrimaryMonitoring(): boolean {
   return isLaneSpiking('primary') || entryPauseActiveState;
 }
 
+/**
+ * Shed droppable secondary getParsedTransaction enrich without pausing Trading.
+ * Engages on secondary spike or gate inFlight breach — containment may stay OFF.
+ */
+export function shouldShedSecondaryTxEnrich(): boolean {
+  if (isLaneSpiking('secondary')) return true;
+  try {
+    const { getRpcGateSnapshot } =
+      require('./rpcGate') as typeof import('./rpcGate');
+    const snap = getRpcGateSnapshot();
+    return (snap.lanes.secondary?.inFlight ?? 0) >= 3;
+  } catch {
+    return false;
+  }
+}
+
 export function getLastRpcSpikeRecoverReason(): string | null {
   return lastRecoverReason;
 }

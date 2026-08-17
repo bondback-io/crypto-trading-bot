@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.410',
+    title: 'Cap Alchemy getTransaction storms on scanners',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Secondary/utility getParsedTransaction capped (enrich 1 / discovery 2) with in-flight signature dedupe. Secondary spike sheds enrich getTx and crude-ranks scanners without pausing Trading exits (containment may stay OFF).',
+      'Favourites parse bursts yield when secondary is hot. Sticky Alchemy 429 cooldown unchanged; exits stay on Trading Critical only.',
+    ],
+  },
+  {
     version: '1.2.409',
     title: 'Exclusive RPC lanes: share/containment off, less lag',
     sections: ['execution', 'knobs'],

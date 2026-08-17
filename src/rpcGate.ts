@@ -403,6 +403,97 @@ export function acquireSpikeAccountInfoCap(
   };
 }
 
+const PARSED_TX_ENRICH_CAP = envInt('RPC_PARSED_TX_ENRICH_CAP', 1, 1, 4);
+const PARSED_TX_TOTAL_CAP = envInt('RPC_PARSED_TX_TOTAL_CAP', 2, 1, 8);
+const parsedTxInFlight: Record<'secondary' | 'utility', number> = {
+  secondary: 0,
+  utility: 0,
+};
+
+function isParsedTxCapLane(
+  role: RpcGateRole | undefined
+): role is 'secondary' | 'utility' {
+  return role === 'secondary' || role === 'utility';
+}
+
+function isParsedTxMethod(methods: string[]): boolean {
+  return methods.some(
+    (m) => m === 'getParsedTransaction' || m === 'getTransaction'
+  );
+}
+
+/**
+ * Droppable enrich/history getTx — anti-rug, Favourites parse, ungated.
+ * Discovery (migration/zion/market/alpha) uses the higher total cap.
+ */
+export function isParsedTxEnrichFeature(feature?: string): boolean {
+  const f = String(feature || 'ungated');
+  if (CRITICAL_FEATURES.has(f) || f.startsWith('trade_')) return false;
+  if (/send_tx|confirm_tx|trade_exit|health_probe/i.test(f)) return false;
+  if (
+    /^(migration|zion|market_scanner|alpha_scan|bonding_curve)$/i.test(f)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function getParsedTxInFlight(role: 'secondary' | 'utility'): number {
+  return parsedTxInFlight[role];
+}
+
+export function __resetParsedTxCapForTests(): void {
+  parsedTxInFlight.secondary = 0;
+  parsedTxInFlight.utility = 0;
+}
+
+/**
+ * Always-on cap for concurrent getParsedTransaction / getTransaction on
+ * secondary + utility. Primary / exits are never gated here.
+ */
+export function acquireParsedTxCap(
+  role: RpcGateRole | undefined,
+  methods: string[],
+  feature?: string
+): { allowed: boolean; release: () => void } {
+  const noop = { allowed: true, release: () => {} };
+  if (!isParsedTxCapLane(role)) return noop;
+  if (!isParsedTxMethod(methods)) return noop;
+  const enrich = isParsedTxEnrichFeature(feature);
+  const cap = enrich ? PARSED_TX_ENRICH_CAP : PARSED_TX_TOTAL_CAP;
+  if (parsedTxInFlight[role] >= cap) {
+    lanes[role].skipped += 1;
+    try {
+      const { noteBackgroundRpcSkip } =
+        require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+      noteBackgroundRpcSkip(role, feature);
+    } catch {
+      /* */
+    }
+    logGate(
+      role,
+      enrich
+        ? `getParsedTransaction enrich dropped (cap ${cap})`
+        : `getParsedTransaction discovery dropped (cap ${cap})`,
+      {
+        feature: feature || 'ungated',
+        inFlight: parsedTxInFlight[role],
+      }
+    );
+    return { allowed: false, release: () => {} };
+  }
+  parsedTxInFlight[role] += 1;
+  let released = false;
+  return {
+    allowed: true,
+    release: () => {
+      if (released) return;
+      released = true;
+      parsedTxInFlight[role] = Math.max(0, parsedTxInFlight[role] - 1);
+    },
+  };
+}
+
 /** In-flight dedupe: same key shares one promise; later callers await or skip. */
 const inflightJobs = new Map<string, Promise<unknown>>();
 

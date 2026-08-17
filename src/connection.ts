@@ -32,7 +32,9 @@ import {
 import {
   acquireRpcLane,
   acquireSpikeAccountInfoCap,
+  acquireParsedTxCap,
   getRpcGateSnapshot,
+  isParsedTxEnrichFeature,
   isRpcGateSkipError,
   runDedupedRpcJob,
   RpcGateSkipError,
@@ -44,6 +46,7 @@ import {
   noteRpcCall,
   runWithSpikeCallContext,
   shouldShedPrimaryMonitoring,
+  shouldShedSecondaryTxEnrich,
   withRpcAttemptCap,
 } from './rpcSpikeInspector';
 import {
@@ -309,6 +312,36 @@ function parseRpcMethodsFromBody(body: unknown): string[] {
   }
 }
 
+/** First signature param from getParsedTransaction / getTransaction body. */
+function parseTxSignatureFromBody(body: unknown): string | null {
+  try {
+    let raw = '';
+    if (typeof body === 'string') raw = body;
+    else if (
+      body != null &&
+      typeof (body as { toString?: () => string }).toString === 'function'
+    ) {
+      raw = String(body);
+    }
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as
+      | { method?: string; params?: unknown[] }
+      | Array<{ method?: string; params?: unknown[] }>;
+    const one = Array.isArray(parsed) ? parsed[0] : parsed;
+    const method = String(one?.method || '');
+    if (method !== 'getParsedTransaction' && method !== 'getTransaction') {
+      return null;
+    }
+    const params = one?.params;
+    if (Array.isArray(params) && typeof params[0] === 'string' && params[0]) {
+      return params[0];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const PRIMARY_MONITOR_METHODS = new Set([
   'getSignaturesForAddress',
   'getTransaction',
@@ -473,10 +506,24 @@ function meteredFetch(endpointLabel: string) {
     const feature = rpcFeatureAls.getStore() || 'ungated';
     const monitor = methods.some((m) => PRIMARY_MONITOR_METHODS.has(m));
     const txMonitor = methods.some((m) => PRIMARY_TX_MONITOR_METHODS.has(m));
+    const parsedTx = methods.some(
+      (m) => m === 'getParsedTransaction' || m === 'getTransaction'
+    );
     const accountCap = acquireSpikeAccountInfoCap(role, methods, feature);
     if (!accountCap.allowed) {
       throw new RpcGateSkipError('busy', role || 'watchers', feature);
     }
+    const runCappedFetch = async (): Promise<Response> => {
+      const txCap = acquireParsedTxCap(role, methods, feature);
+      if (!txCap.allowed) {
+        throw new RpcGateSkipError('busy', role || 'secondary', feature);
+      }
+      try {
+        return await doFetch(input, init);
+      } finally {
+        txCap.release();
+      }
+    };
     try {
       if (
         role === 'primary' &&
@@ -512,6 +559,49 @@ function meteredFetch(endpointLabel: string) {
           join: true,
         });
         if (joined) return joined;
+      }
+      // Secondary enrich shed: join in-flight only; never start new enrich getTx.
+      if (
+        role === 'secondary' &&
+        parsedTx &&
+        !isExitRpcFeature(feature) &&
+        isParsedTxEnrichFeature(feature) &&
+        shouldShedSecondaryTxEnrich()
+      ) {
+        const sig = parseTxSignatureFromBody(init?.body);
+        const raw =
+          typeof init?.body === 'string'
+            ? init.body
+            : String(init?.body || '');
+        const key = sig
+          ? `secondary:tx:${sig}`
+          : `secondary:tx:${methods.slice().sort().join('+')}:${raw.slice(0, 240)}`;
+        const joined = await runDedupedRpcJob(key, runCappedFetch, {
+          join: true,
+          startIfMissing: false,
+        });
+        if (joined) return joined;
+        throw new RpcGateSkipError('busy', 'secondary', feature);
+      }
+      // Always dedupe in-flight getParsedTransaction on secondary/utility by sig.
+      if (
+        (role === 'secondary' || role === 'utility') &&
+        parsedTx &&
+        !isExitRpcFeature(feature)
+      ) {
+        const sig = parseTxSignatureFromBody(init?.body);
+        const raw =
+          typeof init?.body === 'string'
+            ? init.body
+            : String(init?.body || '');
+        const key = sig
+          ? `${role}:tx:${sig}`
+          : `${role}:tx:${methods.slice().sort().join('+')}:${raw.slice(0, 240)}`;
+        const joined = await runDedupedRpcJob(key, runCappedFetch, {
+          join: true,
+        });
+        if (joined) return joined;
+        throw new RpcGateSkipError('busy', role, feature);
       }
       return await doFetch(input, init);
     } finally {

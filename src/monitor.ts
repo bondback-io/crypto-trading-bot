@@ -1986,12 +1986,32 @@ function getWalletPollThrottle(rpcUrl: string): {
     };
   }
   // Exclusive Favourites key (ALCHEMY_API_KEY_BACKUP) — full pace.
+  // Yield parse bursts when secondary scanners are spiked / congested.
+  let batchSize = 4;
+  let maxParse = 6;
+  let batchGapMs = Math.round(80 * scale.gapScale);
+  try {
+    const { isLaneSpiking } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    const { getRpcGateSnapshot } =
+      require('./rpcGate') as typeof import('./rpcGate');
+    const secondaryHot =
+      isLaneSpiking('secondary') ||
+      (getRpcGateSnapshot().lanes.secondary?.inFlight ?? 0) >= 3;
+    if (secondaryHot) {
+      batchSize = 1;
+      maxParse = 1;
+      batchGapMs = Math.round(400 * scale.gapScale);
+    }
+  } catch {
+    /* optional */
+  }
   return {
     soft: false,
-    batchSize: 4,
-    batchGapMs: Math.round(80 * scale.gapScale),
+    batchSize,
+    batchGapMs,
     sigLimit: 15,
-    maxParse: 6,
+    maxParse,
     pause429Ms: 400,
     maxWalletsPerCycle: hardCycleCap,
     abortCycleOn429: false,

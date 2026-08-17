@@ -201,9 +201,10 @@ export function adaptiveScannerIntervalMs(baseMs: number): number {
 
 function secondarySpikeDegradesEnrich(): boolean {
   try {
-    const { isRpcContainmentEnabled, isLaneSpiking } =
+    const { isLaneSpiking } =
       require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
-    return isRpcContainmentEnabled() && isLaneSpiking('secondary');
+    // Independent of containment — keep discovery, crude enrich on secondary spike.
+    return isLaneSpiking('secondary');
   } catch {
     return false;
   }
