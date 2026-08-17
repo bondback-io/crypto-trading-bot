@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.403',
+    title: 'Primary-lane soft 429/403 no longer error-loud',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Soft Alchemy 429 and Helius 403 Request blocked on the primary lane no longer hit logger.error (1.2.402 still treated primary as critical). Soft skips log once to stdout so Render level:error stays clean. Exit/send failures remain loud.',
+    ],
+  },
+  {
     version: '1.2.402',
     title: 'Quiet soft RPC errors on Render',
     sections: ['execution', 'scanners'],

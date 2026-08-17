@@ -1794,14 +1794,24 @@ async function withRpcInner<T>(
       const message = err instanceof Error ? err.message : String(err);
       const alreadyCooling = isEndpointRateLimited(state);
       recordFailure(index, message);
-      if (!(isRpcRateLimitMessage(message) && alreadyCooling)) {
+      const softAttempt =
+        !exitSend &&
+        (isRpcSoftFailureMessage(message) || isAlchemyCuLimitMessage(message));
+      if (softAttempt) {
+        if (!(isRpcRateLimitMessage(message) && alreadyCooling) && softRpcFailLog.allow()) {
+          console.log(
+            `[rpc] soft fail ${label} endpoint=${state.endpoint.label} ` +
+              `attempt=${attempts}/${maxAttempts} ${message.slice(0, 140)}`
+          );
+        }
+      } else if (!(isRpcRateLimitMessage(message) && alreadyCooling)) {
         logger.warn('RPC', `${label} failed`, {
           role: r,
           endpoint: state.endpoint.label,
           attempt: attempts,
           maxAttempts,
           latencyMs: Date.now() - t0,
-          ...errorToMeta(err),
+          errorMessage: message.slice(0, 180),
         });
       }
       if (!exitSend && isRpcRateLimitMessage(message)) {
@@ -1827,19 +1837,17 @@ async function withRpcInner<T>(
 
   const failMsg =
     lastError instanceof Error ? lastError.message : String(lastError ?? '');
+  // Soft 429/403/CU must not require !critical — primary-lane soft work
+  // (migration Share OFF, mirror holdings, polls) was still logger.error.
   const soft =
     !exitSend &&
-    !critical &&
-    (isRpcSoftFailureMessage(failMsg) ||
-      isAlchemyCuLimitMessage(failMsg) ||
-      isRpcGateSkipError(lastError));
+    (isRpcSoftFailureMessage(failMsg) || isAlchemyCuLimitMessage(failMsg));
 
   if (soft) {
     if (softRpcFailLog.allow()) {
-      logger.warn('RPC', `${label} soft fail (no stack)`, {
-        role: r,
-        errorMessage: failMsg.slice(0, 180),
-      });
+      console.log(
+        `[rpc] soft fail ${label} role=${r} (no stack) ${failMsg.slice(0, 180)}`
+      );
     }
     throw lastError instanceof Error
       ? lastError

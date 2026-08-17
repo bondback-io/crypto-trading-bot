@@ -184,13 +184,30 @@ check(
 );
 check(
   'withRpc soft-fails without logger.error',
-  /soft fail \(no stack\)/.test(conn) &&
-    /isRpcSoftBlockedMessage/.test(conn) &&
-    /isRpcGateSkipError\(lastError\)/.test(conn)
+  /soft fail \$\{label\}/.test(conn) ||
+    (/\[rpc\] soft fail/.test(conn) && /console\.log\(/.test(conn))
+);
+check(
+  'soft fail does not require !critical',
+  /!exitSend &&\s*\(isRpcSoftFailureMessage/.test(conn) ||
+    (!/!exitSend &&\s*!critical &&/.test(conn) &&
+      /isRpcSoftFailureMessage\(failMsg\)/.test(conn))
+);
+check(
+  'soft fail uses console.log stdout',
+  /console\.log\(\s*\n?\s*`\[rpc\] soft fail/.test(conn) ||
+    /console\.log\(\s*\n?\s*'\[rpc\] soft fail/.test(conn) ||
+    (/\[rpc\] soft fail/.test(conn) &&
+      conn.includes('console.log') &&
+      !/logger\.warn\('RPC', `\$\{label\} soft fail/.test(conn))
 );
 check(
   'soft blocked classifier exported',
   /export function isRpcSoftBlockedMessage/.test(conn)
+);
+check(
+  'exit-send still logger.error on hard fail',
+  /logger\.error\('RPC', `\$\{label\} all endpoints failed`/.test(conn)
 );
 
 const rpcUrl = readSrc('src/rpcUrl.ts');

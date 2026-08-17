@@ -196,7 +196,7 @@ function armRateLimitBackoff(err: unknown): void {
   }
   if (Date.now() - lastRateLimitLogAt > 15_000) {
     lastRateLimitLogAt = Date.now();
-    console.warn(
+    console.log(
       `[migration] RPC rate-limited — pausing polls ${RATE_LIMIT_BACKOFF_MS / 1000}s ` +
         `and marking active endpoint for failover. Set HELIUS_API_KEY / ALCHEMY_API_KEY.`
     );
