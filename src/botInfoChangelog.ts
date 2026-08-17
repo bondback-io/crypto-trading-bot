@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.417',
+    title: 'Restore 1.2.414 classic RPC routing',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Rolled back 1.2.415–416 Alchemy-slot remaps. Critical is Helius again, Scanners Alchemy, Utility public/mainnet-beta, with RPC_URL and publicnode as emergency fallbacks — the 1.2.414 layout that was stable.',
+    ],
+  },
+  {
     version: '1.2.416',
     title: 'RPC table shows assigned Alchemy slots only',
     sections: ['execution', 'knobs'],

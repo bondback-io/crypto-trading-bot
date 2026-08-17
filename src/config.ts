@@ -2743,7 +2743,7 @@ export const config: BotConfig = {
           process.env.RPC_SHARE_LOAD === 'true' ||
           // Classic: ON when Helius + Alchemy exist (Critical / Scanners / Utility).
           Boolean(
-            process.env.ALCHEMY_API_KEY_BACKUP?.trim() &&
+            process.env.HELIUS_API_KEY?.trim() &&
               process.env.ALCHEMY_API_KEY?.trim()
           ),
     containmentEnabled: false,
@@ -6011,7 +6011,7 @@ export function setRpcShareLoad(enabled: boolean): boolean {
   console.log(
     `[rpc] Share RPC load ${config.rpc.shareLoad ? 'ON' : 'OFF'} — ` +
       (config.rpc.shareLoad
-        ? 'critical→BACKUP, scanners/Zion→ALCHEMY_API_KEY, wallet-watch+utility→BACKUP2'
+        ? 'critical→Helius, scanners/Zion→Alchemy, wallet-watch+utility→public'
         : 'legacy primary/secondary routing')
   );
   return config.rpc.shareLoad;
