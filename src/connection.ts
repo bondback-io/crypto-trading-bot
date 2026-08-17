@@ -27,6 +27,7 @@ import {
   isQuicknodeRpcUrl,
   isOfficialMainnetBetaRpcUrl,
   buildAlchemyRpcUrl,
+  isAlchemyScannerCapacityLabel,
   type RpcLaneRole,
 } from './rpcUrl';
 import {
@@ -58,10 +59,12 @@ import {
 import { guardRpcWebSocket } from './rpcWsGuard';
 import {
   acquireAlchemyPaceSlot,
+  getAlchemyPaceStatus,
   isAlchemyCuLimitMessage,
   isAlchemyRpcUrl,
   noteAlchemyCuLimit,
   noteAlchemyOk,
+  pickNextAlchemyScannerUrl,
   shouldSkipAlchemyRpc,
 } from './rpcProviderPace';
 
@@ -373,7 +376,7 @@ function meteredFetch(endpointLabel: string) {
     ) {
       throw new Error('Insufficient credits for this request');
     }
-    if (alchemy && shouldSkipAlchemyRpc(feature)) {
+    if (alchemy && shouldSkipAlchemyRpc(feature, url)) {
       throw new RpcGateSkipError(
         'rate',
         rpcRoleAls.getStore() || 'secondary',
@@ -381,7 +384,7 @@ function meteredFetch(endpointLabel: string) {
       );
     }
     const pace = alchemy
-      ? acquireAlchemyPaceSlot(feature)
+      ? acquireAlchemyPaceSlot(feature, url)
       : { allowed: true, release: () => undefined };
     if (alchemy && !pace.allowed) {
       throw new RpcGateSkipError(
@@ -432,7 +435,7 @@ function meteredFetch(endpointLabel: string) {
           noteAlchemyCuLimit(url);
         }
       } else if (res.ok && alchemy) {
-        noteAlchemyOk();
+        noteAlchemyOk(url);
       }
       return res;
     } catch (err) {
@@ -1665,6 +1668,24 @@ async function withRpcInner<T>(
   };
   pushUnique(startIndex);
   if (!exitSend) {
+    // Scanners/migration: rotate healthy Alchemy capacity keys (serial, not fan-out).
+    if (r === 'secondary') {
+      const scannerIdxs = endpoints
+        .map((e, i) => ({ e, i }))
+        .filter(
+          ({ e }) =>
+            isAlchemyRpcUrl(e.endpoint.url) &&
+            isAlchemyScannerCapacityLabel(e.endpoint.label)
+        );
+      const picked = pickNextAlchemyScannerUrl(
+        scannerIdxs.map(({ e }) => e.endpoint.url)
+      );
+      if (picked) {
+        const prefI = scannerIdxs.find(({ e }) => e.endpoint.url === picked)?.i;
+        if (prefI != null) pushUnique(prefI);
+      }
+      for (const { i } of scannerIdxs) pushUnique(i);
+    }
     for (const other of piggybackOrder(r)) {
       pushUnique(preferredIndexFor(other));
     }
@@ -1693,7 +1714,7 @@ async function withRpcInner<T>(
     if (
       !exitSend &&
       isAlchemyRpcUrl(state.endpoint.url) &&
-      shouldSkipAlchemyRpc(feature)
+      shouldSkipAlchemyRpc(feature, state.endpoint.url)
     ) {
       skippedAlchemyCooling += 1;
       continue;
@@ -1822,6 +1843,7 @@ export function getRpcStats(): {
   shareLoad: boolean;
   heliusExtraFallbackEnabled: boolean;
   heliusExtraFallbackTarget: 'backup2' | 'public';
+  alchemyPace: ReturnType<typeof getAlchemyPaceStatus>;
   shareSupports: typeof RPC_SHARE_LOAD_SUPPORTS;
   failoverDownMs: number;
   /** True when primary and secondary prefer the same endpoint (Zion shares CU with copy). */
@@ -2001,6 +2023,7 @@ export function getRpcStats(): {
     'public'
       ? 'public'
       : 'backup2') as 'backup2' | 'public',
+    alchemyPace: getAlchemyPaceStatus(),
     shareSupports: RPC_SHARE_LOAD_SUPPORTS,
     failoverDownMs: failoverDownMs(),
     lanesShareEndpoint: share,

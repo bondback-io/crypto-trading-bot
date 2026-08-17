@@ -10991,15 +10991,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
             <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade (<code>ALCHEMY_API_KEY</code> + optional <code>ALCHEMY_API_KEY_BACKUP3</code> capacity)</div>
             <div class="mb-1"><strong style="color:#a78bfa">Watchers → Alchemy backup</strong> — setup watch / arm / trigger (<code>ALCHEMY_API_KEY_BACKUP</code>)</div>
             <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
             <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy. Extra CU capacity: <code>ALCHEMY_API_KEY_BACKUP3</code> (per-key 429 cooldown; one key cooling does not silence scanners).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Watchers</strong> — Setup watch / arm / trigger. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>. Emergency public/utility if unset — never Trading or Scanners.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Critical extra</strong> — Lazy Helius fallback target <code>ALCHEMY_API_KEY_BACKUP2</code> (not used for scanner round-robin).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
             <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
@@ -28256,6 +28257,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       document.getElementById('rpc-summary').textContent =
         'Primary active: ' + (rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
+        ' · Alchemy keys: ' + (function () {
+          const ap = rpc.alchemyPace || {};
+          if (ap.keysConfigured == null) return '—';
+          return String(ap.keysConfigured) +
+            ' (' + (ap.keysHealthy != null ? ap.keysHealthy : '—') + ' healthy' +
+            (ap.scannerConfigured != null
+              ? '; scanners ' + (ap.scannerHealthy != null ? ap.scannerHealthy : '—') +
+                '/' + ap.scannerConfigured
+              : '') +
+            ')';
+        })() +
         ' · Share load: ' + (rpc.shareLoad ? 'ON' : 'OFF') +
         ' · Soft watch: ' + (function () {
           const sw = rpc.softWatch || {};
@@ -28374,6 +28386,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               return row.label + ' ' + Math.ceil((row.remainingMs || 0) / 1000) + 's';
             }).join(', ')
           );
+        }
+        if (rpc.alchemyPace && rpc.alchemyPace.keysCooling > 0) {
+          const coolKeys = (rpc.alchemyPace.keys || [])
+            .filter(function (k) { return k && !k.healthy; })
+            .map(function (k) {
+              return (k.label || 'alchemy') +
+                ' ' + Math.ceil((k.cooldownMs || 0) / 1000) + 's';
+            })
+            .slice(0, 4);
+          if (coolKeys.length) parts.push('Alchemy cool: ' + coolKeys.join(', '));
         }
         if (lc.reasons && lc.reasons.length) {
           parts.push(lc.reasons[0]);

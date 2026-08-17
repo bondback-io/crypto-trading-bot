@@ -28,7 +28,7 @@ import {
 import { isPublicRpcUrl, isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
 import { isRpcGateSkipError } from './rpcGate';
-import { alchemyCooldownRemainingMs } from './rpcProviderPace';
+import { allScannerAlchemyKeysCooling } from './rpcProviderPace';
 import {
   getLogsSubscribeDisableReason,
   isLogsSubscribeDisabled,
@@ -136,7 +136,7 @@ function resolveMigrationRpcRole(): 'primary' | 'secondary' | 'utility' | 'watch
   } catch {
     /* optional */
   }
-  if (role === 'secondary' && alchemyCooldownRemainingMs() > 0) {
+  if (role === 'secondary' && allScannerAlchemyKeysCooling()) {
     return null;
   }
   return role;

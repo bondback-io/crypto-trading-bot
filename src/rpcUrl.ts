@@ -101,6 +101,93 @@ export function buildAlchemyBackupRpcUrl(apiKey?: string | null): string | null 
   return buildAlchemyRpcUrl(apiKey ?? process.env.ALCHEMY_API_KEY_BACKUP);
 }
 
+/** Scanner capacity Alchemy URL (BACKUP3). Null if unset. */
+export function buildAlchemyBackup3RpcUrl(apiKey?: string | null): string | null {
+  return buildAlchemyRpcUrl(apiKey ?? process.env.ALCHEMY_API_KEY_BACKUP3);
+}
+
+export type AlchemyKeyRole = 'scanner' | 'watchers' | 'critical_extra' | 'other';
+
+export type AlchemyEnvKey = {
+  env: string;
+  key: string;
+  label: string;
+  role: AlchemyKeyRole;
+  url: string;
+};
+
+const ALCHEMY_ENV_ROLE: Record<string, AlchemyKeyRole> = {
+  ALCHEMY_API_KEY: 'scanner',
+  ALCHEMY_API_KEY_BACKUP: 'watchers',
+  ALCHEMY_API_KEY_BACKUP2: 'critical_extra',
+  ALCHEMY_API_KEY_BACKUP3: 'scanner',
+};
+
+const ALCHEMY_ENV_LABEL: Record<string, string> = {
+  ALCHEMY_API_KEY: 'alchemy',
+  ALCHEMY_API_KEY_BACKUP: 'alchemy-backup',
+  ALCHEMY_API_KEY_BACKUP2: 'alchemy-backup2',
+  ALCHEMY_API_KEY_BACKUP3: 'alchemy-backup3',
+};
+
+/** Discover all usable ALCHEMY_API_KEY* env vars (deduped by key string). */
+export function listAlchemyApiKeysFromEnv(): AlchemyEnvKey[] {
+  const names = new Set<string>([
+    'ALCHEMY_API_KEY',
+    'ALCHEMY_API_KEY_BACKUP',
+    'ALCHEMY_API_KEY_BACKUP2',
+    'ALCHEMY_API_KEY_BACKUP3',
+  ]);
+  for (const k of Object.keys(process.env)) {
+    if (/^ALCHEMY_API_KEY(_|$)/i.test(k)) names.add(k);
+  }
+  const ordered = [...names].sort((a, b) => {
+    const rank = (n: string) => {
+      if (n === 'ALCHEMY_API_KEY') return 0;
+      if (n === 'ALCHEMY_API_KEY_BACKUP') return 1;
+      if (n === 'ALCHEMY_API_KEY_BACKUP2') return 2;
+      if (n === 'ALCHEMY_API_KEY_BACKUP3') return 3;
+      return 10;
+    };
+    const d = rank(a) - rank(b);
+    return d !== 0 ? d : a.localeCompare(b);
+  });
+  const seenKeys = new Set<string>();
+  const out: AlchemyEnvKey[] = [];
+  for (const env of ordered) {
+    const key = String(process.env[env] || '').trim();
+    if (!isUsableApiKey(key) || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    const url = buildAlchemyRpcUrl(key);
+    if (!url) continue;
+    const role = ALCHEMY_ENV_ROLE[env] || 'other';
+    const label =
+      ALCHEMY_ENV_LABEL[env] ||
+      `alchemy-${env.replace(/^ALCHEMY_API_KEY_?/i, '').toLowerCase() || 'extra'}`;
+    out.push({ env, key, label, role, url });
+  }
+  return out;
+}
+
+/** Scanner-capacity Alchemy URLs (primary + BACKUP3 + other scanner-role keys). */
+export function listAlchemyScannerUrlsFromEnv(): string[] {
+  return listAlchemyApiKeysFromEnv()
+    .filter((k) => k.role === 'scanner')
+    .map((k) => k.url);
+}
+
+/** True when label is a scanner-capacity Alchemy endpoint (not watchers/BACKUP2). */
+export function isAlchemyScannerCapacityLabel(label: string | null | undefined): boolean {
+  const l = String(label || '').toLowerCase();
+  return (
+    l === 'alchemy' ||
+    l === 'alchemy-backup3' ||
+    (l.startsWith('alchemy-') &&
+      l !== 'alchemy-backup' &&
+      l !== 'alchemy-backup2')
+  );
+}
+
 /** True for QuickNode hosted Solana HTTP endpoints. */
 export function isQuicknodeRpcUrl(url: string | null | undefined): boolean {
   const u = (url || '').toLowerCase();
@@ -466,6 +553,15 @@ export function rpcEndpointsFromEnv(
     add(alchemyBackup, 'alchemy-backup', 'watchers');
   }
 
+  // Scanner capacity: BACKUP3 (+ any other scanner-role Alchemy keys) as
+  // secondary fallbacks so withRpc can rotate without merging lanes.
+  const alchemyKeys = listAlchemyApiKeysFromEnv();
+  for (const k of alchemyKeys) {
+    if (k.role !== 'scanner') continue;
+    if (k.url === alchemy || k.url === alchemyBackup) continue;
+    add(k.url, k.label, 'fallback');
+  }
+
   for (const c of pool) {
     add(c.url, c.label, 'fallback', c.wsUrl);
   }
@@ -486,6 +582,19 @@ export function rpcEndpointsFromEnv(
             ? ' (publicnode utility)'
             : '')
   );
+  const scanners = alchemyKeys.filter((k) => k.role === 'scanner').map((k) => k.label);
+  const watchersK = alchemyKeys.filter((k) => k.role === 'watchers').map((k) => k.label);
+  const critK = alchemyKeys
+    .filter((k) => k.role === 'critical_extra')
+    .map((k) => k.label);
+  if (alchemyKeys.length) {
+    console.log(
+      `[rpc] Alchemy keys configured: ${alchemyKeys.length}` +
+        ` (scanners: ${scanners.join(',') || '—'};` +
+        ` watchers: ${watchersK.join(',') || '—'};` +
+        ` critical-extra: ${critK.join(',') || '—'})`
+    );
+  }
   if (!helius && !alchemy) {
     console.warn(
       '[rpc] HELIUS_API_KEY / ALCHEMY_API_KEY unset — using RPC_URL / public. ' +
@@ -509,7 +618,7 @@ export const RPC_LANE_SUPPORTS = {
     'Migration poll fallback (Share ON)',
     'Zion micro-bot + KOL Token Scanner',
     'Zion Place Trade on-chain bits',
-    'Preferred: Alchemy → Helius → QuickNode → public',
+    'Preferred: Alchemy (+ ALCHEMY_API_KEY_BACKUP3 capacity) → Helius → QuickNode → public',
   ],
   utility: [
     'Wallet favourites / import on-chain checks (Share ON)',
@@ -534,7 +643,7 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Helius — trade entries, turbo profiles, migration sniper/parses',
   ],
   scanners: [
-    'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
+    'Alchemy — Market Scanner, AlphaScan, Zion KOL + Place Trade. Capacity: ALCHEMY_API_KEY + ALCHEMY_API_KEY_BACKUP3 (per-key CU/s cooldown).',
   ],
   watchers: [
     'Alchemy backup (ALCHEMY_API_KEY_BACKUP) — setup watch / arm / trigger. Trading stays Helius.',

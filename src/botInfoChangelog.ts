@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.401',
+    title: 'Alchemy BACKUP3 capacity + per-key CU/s cooldown',
+    sections: ['scanners', 'execution'],
+    items: [
+      'ALCHEMY_API_KEY_BACKUP3 adds scanner CU capacity beside ALCHEMY_API_KEY. A 429 on one Alchemy key soft-cools that key only and switches reads to another; scanners stay alive. Watchers keep BACKUP; BACKUP2 stays Critical lazy. Exits stay on Helius/Trading. RPC Status shows Alchemy keys configured/healthy.',
+    ],
+  },
+  {
     version: '1.2.400',
     title: 'Unstick scanner feed after Alchemy CU/s cooldown',
     sections: ['scanners', 'execution'],

@@ -1,5 +1,5 @@
 /**
- * Smoke: Alchemy CU/s pace + migration not treated as Trading-critical.
+ * Smoke: Alchemy per-key CU/s pace + BACKUP3 scanner capacity.
  * Run: npx tsx scripts/smokeAlchemyCuPace.ts
  */
 import fs from 'node:fs';
@@ -7,12 +7,20 @@ import path from 'node:path';
 import {
   __resetAlchemyPaceForTests,
   acquireAlchemyPaceSlot,
+  allScannerAlchemyKeysCooling,
   alchemyCooldownRemainingMs,
+  getAlchemyPaceStatus,
   isAlchemyCuLimitMessage,
   isAlchemyRpcUrl,
   noteAlchemyCuLimit,
+  pickNextAlchemyScannerUrl,
   shouldSkipAlchemyRpc,
 } from '../src/rpcProviderPace';
+import {
+  buildAlchemyBackup3RpcUrl,
+  isAlchemyScannerCapacityLabel,
+  listAlchemyApiKeysFromEnv,
+} from '../src/rpcUrl';
 import { getRpcRoleFor } from '../src/rpcRouting';
 
 let failed = 0;
@@ -46,30 +54,58 @@ check(
   isAlchemyRpcUrl('https://mainnet.helius-rpc.com/?api-key=x') === false
 );
 
-check('no skip initially', shouldSkipAlchemyRpc('market_scanner') === false);
-noteAlchemyCuLimit('https://solana-mainnet.g.alchemy.com/v2/secret');
-check('skip after CU limit', shouldSkipAlchemyRpc('market_scanner') === true);
-check('exit/send not skipped', shouldSkipAlchemyRpc('trade_exit') === false);
-check('cooldown in 15–60s', (() => {
-  const ms = alchemyCooldownRemainingMs();
-  return ms >= 14_000 && ms <= 60_000;
+const urlA = 'https://solana-mainnet.g.alchemy.com/v2/keyAAAA1111';
+const urlB = 'https://solana-mainnet.g.alchemy.com/v2/keyBBBB2222';
+
+check('no skip initially', shouldSkipAlchemyRpc('market_scanner', urlA) === false);
+noteAlchemyCuLimit(urlA);
+check('skip after CU limit on A', shouldSkipAlchemyRpc('market_scanner', urlA) === true);
+check(
+  'B still allowed after A 429',
+  shouldSkipAlchemyRpc('market_scanner', urlB) === false
+);
+check('exit/send not skipped', shouldSkipAlchemyRpc('trade_exit', urlA) === false);
+check('cooldown in 15–60s on A', (() => {
+  const st = getAlchemyPaceStatus();
+  const a = st.keys.find((k) => !k.healthy);
+  return a != null && a.cooldownMs >= 14_000 && a.cooldownMs <= 60_000;
 })());
 const firstCool = alchemyCooldownRemainingMs();
-noteAlchemyCuLimit('https://solana-mainnet.g.alchemy.com/v2/secret');
+noteAlchemyCuLimit(urlA);
 check(
   'repeat CU note does not stack cooldown',
   alchemyCooldownRemainingMs() <= firstCool + 80
 );
+check(
+  'not all scanner keys cooling while B healthy',
+  allScannerAlchemyKeysCooling() === false
+);
 
 __resetAlchemyPaceForTests();
-const slots = Array.from({ length: 7 }, () =>
-  acquireAlchemyPaceSlot('market_scanner')
+const slots = Array.from({ length: 5 }, () =>
+  acquireAlchemyPaceSlot('market_scanner', urlA)
 );
 check(
-  'in-flight cap 6',
-  slots.slice(0, 6).every((s) => s.allowed) && slots[6].allowed === false
+  'per-key in-flight cap 4',
+  slots.slice(0, 4).every((s) => s.allowed) && slots[4].allowed === false
 );
 slots.forEach((s) => s.release());
+
+const slotB = acquireAlchemyPaceSlot('market_scanner', urlB);
+check('other key not blocked by A in-flight', slotB.allowed === true);
+slotB.release();
+
+__resetAlchemyPaceForTests();
+noteAlchemyCuLimit(urlA);
+const next = pickNextAlchemyScannerUrl([urlA, urlB]);
+check('pickNext prefers non-cooling B', next === urlB, String(next));
+check(
+  'scanner capacity labels',
+  isAlchemyScannerCapacityLabel('alchemy') &&
+    isAlchemyScannerCapacityLabel('alchemy-backup3') &&
+    !isAlchemyScannerCapacityLabel('alchemy-backup') &&
+    !isAlchemyScannerCapacityLabel('alchemy-backup2')
+);
 
 check(
   'share-on migration is scanners not Trading',
@@ -110,6 +146,10 @@ check(
   /noteMigrationBusySkip/.test(mig) &&
     /poll skipped \(lane busy\)/.test(mig)
 );
+check(
+  'migration pauses only when all scanner keys cool',
+  /allScannerAlchemyKeysCooling/.test(mig)
+);
 
 const conn = readSrc('src/connection.ts');
 check(
@@ -118,19 +158,59 @@ check(
 );
 check(
   'cooldown skip throws RpcGateSkipError not fake 429',
-  /shouldSkipAlchemyRpc\(feature\)/.test(conn) &&
+  /shouldSkipAlchemyRpc\(feature/.test(conn) &&
     /RpcGateSkipError/.test(conn) &&
     !/throw new Error\(\s*'429 Too Many Requests: compute units per second capacity'/.test(
       conn
     )
 );
 check(
-  'scanner interval is not stretched to cooldown\+5s',
+  'scanner interval is not stretched to cooldown+5s',
   !/cool \+ 5_000/.test(readSrc('src/rpcLoadControl.ts'))
 );
+check(
+  'serial scanner Alchemy pick in withRpc',
+  /pickNextAlchemyScannerUrl/.test(conn)
+);
+check(
+  'alchemyPace exposed in getRpcStats',
+  /alchemyPace:\s*getAlchemyPaceStatus/.test(conn)
+);
+
+const rpcUrl = readSrc('src/rpcUrl.ts');
+check(
+  'BACKUP3 builder + discovery present',
+  /buildAlchemyBackup3RpcUrl/.test(rpcUrl) &&
+    /listAlchemyApiKeysFromEnv/.test(rpcUrl) &&
+    /ALCHEMY_API_KEY_BACKUP3/.test(rpcUrl)
+);
+check(
+  'alchemy_key_429 log format',
+  /alchemy_key_429/.test(readSrc('src/rpcProviderPace.ts'))
+);
+
+// Env discovery (may be empty in CI)
+const keys = listAlchemyApiKeysFromEnv();
+const b3 = buildAlchemyBackup3RpcUrl();
+if (process.env.ALCHEMY_API_KEY_BACKUP3?.trim()) {
+  check('BACKUP3 URL when env set', Boolean(b3), String(b3));
+  check(
+    'BACKUP3 in discovered keys',
+    keys.some((k) => k.env === 'ALCHEMY_API_KEY_BACKUP3' || k.label === 'alchemy-backup3')
+  );
+} else {
+  check('BACKUP3 unset → null URL', b3 == null);
+  console.log('INFO BACKUP3 not in env — discovery checked empty path');
+}
 
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed`);
   process.exit(1);
 }
 console.log('\nAll alchemy CU pace smoke checks passed');
+console.log(
+  `Alchemy keys from env: ${keys.length}` +
+    (keys.length
+      ? ` [${keys.map((k) => `${k.label}:${k.role}`).join(', ')}]`
+      : '')
+);

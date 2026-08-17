@@ -144,15 +144,12 @@ function recompute(external?: {
   }
 
   try {
-    const { alchemyCooldownRemainingMs } =
+    const { allScannerAlchemyKeysCooling } =
       require('./rpcProviderPace') as typeof import('./rpcProviderPace');
-    const cool = alchemyCooldownRemainingMs(now);
-    if (cool > 0) {
+    if (allScannerAlchemyKeysCooling(now)) {
       // Shed RPC enrich only — do not stall Dexscreener/pump HTTP ingest.
       scannerSlowFactor = Math.max(scannerSlowFactor, 1.5);
-      reasons.push(
-        `alchemy CU/s cooldown ${Math.round(cool / 1000)}s (enrich shed)`
-      );
+      reasons.push('alchemy CU/s — all scanner keys cooling (enrich shed)');
     }
   } catch {
     /* optional */
@@ -226,9 +223,9 @@ function utilitySpikeSlowsPolls(): boolean {
 export function shouldDegradeScannerEnrich(): boolean {
   if (getRpcLoadControlSnapshot().scannerSlowFactor >= 3) return true;
   try {
-    const { alchemyCooldownRemainingMs } =
+    const { allScannerAlchemyKeysCooling } =
       require('./rpcProviderPace') as typeof import('./rpcProviderPace');
-    if (alchemyCooldownRemainingMs() > 0) return true;
+    if (allScannerAlchemyKeysCooling()) return true;
   } catch {
     /* optional */
   }
