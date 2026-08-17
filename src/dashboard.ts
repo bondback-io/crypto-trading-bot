@@ -5015,7 +5015,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <!-- Tabs -->
     <nav class="nav-tabs" aria-label="Dashboard sections">
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Live ops: balance, risk, positions, signals, migrations">Overview</button>
-      <button data-tab="upgrades" onclick="showTab('upgrades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Post-1.2.21 feature packs — toggle then Save &amp; reboot. Default all off keeps the restored core stable."><span class="btn-label-short">Upg</span><span class="btn-label-full">Upgrades</span></button>
+      <button data-tab="upgrades" onclick="showTab('upgrades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Post-1.2.21 feature packs — toggle then Save &amp; apply. Default all off keeps the restored core stable."><span class="btn-label-short">Upg</span><span class="btn-label-full">Upgrades</span></button>
       <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn nav-tab-microbots text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
@@ -5240,12 +5240,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <!-- ========== TAB: Upgrades ========== -->
     <section data-tab-panel="upgrades" class="upgrades-panel hidden space-y-4">
       <div class="card">
-        <div class="section-title">Upgrades <span class="tip" tabindex="0" data-tip="Restored 1.2.21 core. Every pack is pre-built and default off. Check packs, then Save &amp; reboot. RPC lane maps are exclusive (one at a time)."></span></div>
-        <p class="text-sm text-slate-400 mb-2">Baseline is <strong style="color:#a7f3d0">1.2.21</strong> (pre-1.2.22). Packs are pre-built and default off. Check one or more, then Save &amp; reboot. RPC lane maps are exclusive (one at a time). Containment can stack on a lane map.</p>
+        <div class="section-title">Upgrades <span class="tip" tabindex="0" data-tip="Restored 1.2.21 core. Every pack is pre-built and default off. Check packs, then Save &amp; apply. RPC lane maps are exclusive (one at a time)."></span></div>
+        <p class="text-sm text-slate-400 mb-2">Baseline is <strong style="color:#a7f3d0">1.2.21</strong> (pre-1.2.22). Packs are pre-built and default off. Check one or more, then Save &amp; apply (process stays up). RPC lane maps are exclusive (one at a time). Containment can stack on a lane map.</p>
         <div class="mint text-xs mb-3" id="upgrades-status">Loading…</div>
         <div id="upgrades-list" class="upgrade-groups">Loading packs…</div>
         <div class="mt-3 flex flex-wrap gap-2 items-center">
-          <button type="button" class="btn btn-primary" onclick="saveUpgradesAndReboot()" title="Save selected packs and restart the process">Save &amp; reboot</button>
+          <button type="button" class="btn btn-primary" onclick="saveUpgradesAndReboot()" title="Save selected packs and apply them without restarting">Save &amp; apply</button>
           <button type="button" class="btn btn-secondary" onclick="loadUpgrades()" title="Reload pack state from the server">Refresh</button>
           <span class="mint text-xs" id="upgrades-save-msg"></span>
         </div>
@@ -11397,7 +11397,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const el = document.createElement('div');
           el.id = 'upgrade-load-mode';
           el.className = 'card';
-          el.innerHTML = '<div class="section-title">System Load Mode</div><p class="text-xs text-slate-400 mb-2">Extra services only. Trading path unchanged. Save &amp; reboot after changing mode if extras were already running.</p>' +
+          el.innerHTML = '<div class="section-title">System Load Mode</div><p class="text-xs text-slate-400 mb-2">Extra services only. Trading path unchanged. Save &amp; apply after changing mode if extras were already running.</p>' +
             '<div class="flex flex-wrap gap-2">' +
             '<button type="button" class="btn btn-secondary text-xs" data-load-mode="basic">Basic</button>' +
             '<button type="button" class="btn btn-secondary text-xs" data-load-mode="premium">Premium</button>' +
@@ -11431,7 +11431,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           el.className = 'card';
           el.innerHTML =
             '<div class="section-title">Bot Learning (1.2.421)</div>' +
-            '<p class="text-xs text-slate-400 mb-2">400-episode film and 1.2.421 self-learn settings. Pack is on after Save &amp; reboot; toggles below save immediately.</p>' +
+            '<p class="text-xs text-slate-400 mb-2">400-episode film and 1.2.421 self-learn settings. Pack is on after Save &amp; apply; toggles below save immediately.</p>' +
             '<div class="flex flex-wrap gap-2 text-xs mb-2">' +
             '<label class="toggle-row" style="margin:0"><span>Live Mode film</span><label class="switch"><input type="checkbox" data-bl="live"><span class="slider"></span></label></label>' +
             '<label class="toggle-row" style="margin:0"><span>Reset episodes</span><label class="switch"><input type="checkbox" data-bl="reset"><span class="slider"></span></label></label>' +
@@ -11588,7 +11588,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const msg = document.getElementById('upgrades-save-msg');
       const ids = selectedUpgradeIds();
       const ok = confirm(
-        'Reboot applies the selected upgrades and stops the process; Render will start a fresh 1.2.21 core with only those packs on.\\n\\n' +
+        'Apply the selected upgrades now? The process stays up — Render will not restart.\\n\\n' +
         (ids.length ? ('On: ' + ids.join(', ')) : 'All packs off (stable core).')
       );
       if (!ok) return;
@@ -11605,7 +11605,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (d.droppedLaneMaps && d.droppedLaneMaps.length) {
           extra = ' Kept one RPC lane map (dropped ' + d.droppedLaneMaps.join(', ') + ').';
         }
-        if (msg) msg.textContent = 'Saved. Rebooting… refresh in a few seconds.' + extra;
+        if (msg) msg.textContent = 'Saved and applied.' + extra;
+        loadUpgrades();
       } catch (err) {
         if (msg) msg.textContent = 'Save failed: ' + (err.message || err);
       }

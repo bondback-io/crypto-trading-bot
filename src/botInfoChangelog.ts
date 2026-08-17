@@ -1,8 +1,16 @@
 /**
- * Bot Info What's New — 1.2.424 Bot Learning pack.
+ * Bot Info What's New — 1.2.425 in-process upgrades + 4-lane RPC.
  */
 
 export const BOT_INFO_CHANGELOG = [
+  {
+    version: '1.2.425',
+    title: 'Save upgrades in-process; 4-lane RPC no key stampede',
+    items: [
+      'Save & apply keeps the process up. Render no longer treats the old Save & reboot exit as Instance failed.',
+      '4-Lane RPC probes preferred lanes only and fails over to idle emergency — sibling keys are not retried on the same call (stops 429 bursts on getTokenLargestAccounts).',
+    ],
+  },
   {
     version: '1.2.424',
     title: 'Bot Learning pack (1.2.421 stack)',

@@ -243,6 +243,16 @@ export async function runWithRpcRole<T>(
   return rpcRoleAls.run(role, async () => await fn());
 }
 
+function rpcLaneMapActive(): boolean {
+  try {
+    const { getActiveRpcLaneMap } =
+      require('./upgrades/registry') as typeof import('./upgrades/registry');
+    return Boolean(getActiveRpcLaneMap());
+  } catch {
+    return false;
+  }
+}
+
 function preferredIndexFor(role: RpcRole): number {
   ensureEndpoints();
   if (role === 'primary') return preferredPrimary;
@@ -250,9 +260,28 @@ function preferredIndexFor(role: RpcRole): number {
     return preferredUtility >= 0 ? preferredUtility : preferredSecondary;
   }
   if (role === 'data') {
-    return preferredData >= 0 ? preferredData : preferredSecondary;
+    // Missing Data slot stays on Trading (primary), not Scanner — avoids Helius key steal.
+    return preferredData >= 0 ? preferredData : preferredPrimary;
   }
   return preferredSecondary;
+}
+
+function preferredLaneIndexes(): number[] {
+  const idxs: number[] = [];
+  const add = (i: number) => {
+    if (i >= 0 && !idxs.includes(i)) idxs.push(i);
+  };
+  add(preferredPrimary);
+  add(preferredSecondary);
+  if (preferredUtility >= 0) add(preferredUtility);
+  if (preferredData >= 0) add(preferredData);
+  return idxs;
+}
+
+async function probePreferredLanes(): Promise<void> {
+  for (const i of preferredLaneIndexes()) {
+    await probeEndpoint(i);
+  }
 }
 
 function downForMs(state: EndpointState | undefined): number {
@@ -262,8 +291,8 @@ function downForMs(state: EndpointState | undefined): number {
 
 /**
  * Resolve which endpoint index should serve a lane.
- * Preferred stays sticky until unhealthy for failoverDownMs, then piggybacks
- * on the other lane (or any healthy fallback).
+ * Preferred stays sticky until unhealthy for failoverDownMs. Dual-lane then
+ * piggybacks the other lane. Lane maps fail over to emergency only.
  */
 function resolveIndexForRole(role: RpcRole): number {
   ensureEndpoints();
@@ -285,6 +314,25 @@ function resolveIndexForRole(role: RpcRole): number {
     return preferred;
   }
 
+  const assignActive = (i: number) => {
+    if (role === 'primary') {
+      activePrimary = i;
+      activeIndex = i;
+    } else if (role === 'secondary') {
+      activeSecondary = i;
+    }
+  };
+
+  // Lane maps keep keys exclusive: after grace, emergency only — never sibling preferred keys.
+  if (rpcLaneMapActive()) {
+    const em = endpoints.findIndex((e) => e.emergency && e.healthy);
+    if (em >= 0) {
+      assignActive(em);
+      return em;
+    }
+    return preferred;
+  }
+
   const otherPreferred = preferredIndexFor(
     role === 'primary' ? 'secondary' : 'primary'
   );
@@ -300,23 +348,13 @@ function resolveIndexForRole(role: RpcRole): number {
           `(preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s)`
       );
     }
-    if (role === 'primary') {
-      activePrimary = otherPreferred;
-      activeIndex = otherPreferred;
-    } else {
-      activeSecondary = otherPreferred;
-    }
+    assignActive(otherPreferred);
     return otherPreferred;
   }
 
   for (let i = 0; i < endpoints.length; i++) {
     if (endpoints[i]?.healthy) {
-      if (role === 'primary') {
-        activePrimary = i;
-        activeIndex = i;
-      } else {
-        activeSecondary = i;
-      }
+      assignActive(i);
       return i;
     }
   }
@@ -340,8 +378,13 @@ export function getConnection(role?: RpcRole): Connection {
 
 /** Rebuild lanes after an RPC upgrade pack is toggled. */
 export function rebuildRpcEndpoints(): void {
+  const wasStarted = started;
+  stopRpcHealthMonitor();
   endpoints = [];
+  preferredUtility = -1;
+  preferredData = -1;
   ensureEndpoints();
+  if (wasStarted) startRpcHealthMonitor();
 }
 
 export function getActiveEndpointLabel(role?: RpcRole): string {
@@ -443,14 +486,21 @@ export async function withRpc<T>(
   const startIndex = resolveIndexForRole(r);
   let lastError: unknown;
 
-  // Build attempt order: lane preferred → other lane → remaining
+  // Dual-lane: preferred → other lane → remaining. Lane map: this lane → emergency only.
   const order: number[] = [];
   const pushUnique = (i: number) => {
     if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
   };
   pushUnique(startIndex);
-  pushUnique(preferredIndexFor(r === 'primary' ? 'secondary' : 'primary'));
-  for (let i = 0; i < endpoints.length; i++) pushUnique(i);
+  if (rpcLaneMapActive()) {
+    // Exclusive keys: retry this lane, then idle emergency — never sibling preferred keys.
+    for (let i = 0; i < endpoints.length; i++) {
+      if (endpoints[i]?.emergency) pushUnique(i);
+    }
+  } else {
+    pushUnique(preferredIndexFor(r === 'primary' ? 'secondary' : 'primary'));
+    for (let i = 0; i < endpoints.length; i++) pushUnique(i);
+  }
 
   logger.info('RPC', `start: ${label}`, {
     role: r,
@@ -913,13 +963,11 @@ export function startRpcHealthMonitor(): void {
   ensureEndpoints();
 
   const interval = config.rpc?.healthIntervalMs ?? 30_000;
-  void Promise.all(endpoints.map((_, i) => probeEndpoint(i)));
+  void probePreferredLanes();
 
   healthTimer = setInterval(() => {
     void (async () => {
-      for (let i = 0; i < endpoints.length; i++) {
-        await probeEndpoint(i);
-      }
+      await probePreferredLanes();
       await maybeSwitchEndpoints();
     })();
   }, interval);

@@ -1,6 +1,6 @@
 /**
  * Upgrade packs rebuilt on the 1.2.21 core. All start OFF.
- * Toggle in the Upgrades tab, then Save & reboot.
+ * Toggle in the Upgrades tab, then Save & apply.
  */
 
 export type UpgradeCategory =
@@ -203,7 +203,7 @@ export const UPGRADE_PACKS: readonly UpgradePackMeta[] = [
     title: '1.2.421 Bot Learning stack',
     sinceVersion: '1.2.421',
     summary:
-      'Full 400-episode film, Live Mode / dashboard-reset episode toggles, Learning Mode (stricter/middle/looser), MARL + Profile RL + accelerator settings, quality-weighted self-learn, ML auto-advance, and the enhancements scheduler (replay/quality/dual-reward/explore/watchdog). Default off until Save & reboot.',
+      'Full 400-episode film, Live Mode / dashboard-reset episode toggles, Learning Mode (stricter/middle/looser), MARL + Profile RL + accelerator settings, quality-weighted self-learn, ML auto-advance, and the enhancements scheduler (replay/quality/dual-reward/explore/watchdog). Default off until Save & apply.',
     category: 'bot_learning',
     status: 'ready',
   },
@@ -242,7 +242,7 @@ export const UPGRADE_PACKS: readonly UpgradePackMeta[] = [
     title: '4-Lane RPC',
     sinceVersion: '1.2.423',
     summary:
-      'Trading BACKUP, Scanner HELIUS_BACKUP, Data BACKUP2, Utility BACKUP3. Emergency publicnode / RPC_URL idle until failover.',
+      'Trading BACKUP, Scanner HELIUS_BACKUP, Data BACKUP2, Utility BACKUP3. Each lane stays on its own key; emergency publicnode / RPC_URL idle until that lane’s preferred is down. Health probes preferred lanes only.',
     category: 'rpc',
     status: 'ready',
     laneMap: true,

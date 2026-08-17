@@ -29,7 +29,7 @@ export interface UpgradePackRuntime {
 const RUNTIMES: Record<string, UpgradePackRuntime> = {
   watchlist_tab: makeFlagPack(
     'watchlist_tab',
-    'Live Feed becomes Watchlist after reboot'
+    'Live Feed becomes Watchlist after apply'
   ),
   majors_dip_watch: {
     enable: enableMajorsDipWatch,

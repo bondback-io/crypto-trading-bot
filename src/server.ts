@@ -569,19 +569,21 @@ export function createServer(): express.Application {
     try {
       const { setEnabledUpgradeIds } =
         require('./upgrades/registry') as typeof import('./upgrades/registry');
-      const { scheduleUpgradeReboot } =
-        require('./upgrades/reboot') as typeof import('./upgrades/reboot');
+      const { applyEnabledUpgrades } =
+        require('./upgrades/apply') as typeof import('./upgrades/apply');
       const body = (req.body ?? {}) as { enabled?: unknown };
       const result = setEnabledUpgradeIds(body.enabled);
+      const applied = applyEnabledUpgrades();
       res.json({
         ok: true,
         enabled: result.enabled,
         droppedLaneMaps: result.droppedLaneMaps,
-        rebooting: true,
+        skippedPending: applied.skippedPending,
+        rebooting: false,
+        applied: true,
         message:
-          'Saved. Process will exit so Render/PM2 starts a fresh 1.2.21 core with only these packs on.',
+          'Saved and applied. Process stays up — no Render restart.',
       });
-      scheduleUpgradeReboot();
     } catch (err) {
       res.status(400).json({
         ok: false,
