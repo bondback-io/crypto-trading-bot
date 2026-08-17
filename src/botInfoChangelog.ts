@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.413',
+    title: 'Utility light on PUBLICNODE + public latency failover',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Utility light preferred key is PUBLICNODE_URL (not slow RPC_URL/mainnet-beta). Sticky latency failover between publicnode ↔ rpc-url for utility_light only when EWMA stays hot.',
+      'Mirror holdings getParsedTokenAccountsByOwner soft-timeout 2.5s and sheds on utility spike / official mainnet-beta. Diagnosis tips say Trading Alchemy (not Helius).',
+    ],
+  },
+  {
     version: '1.2.412',
     title: 'RPC spike labels + always-on accountInfo shed + quiet 503/WS',
     sections: ['execution', 'knobs'],

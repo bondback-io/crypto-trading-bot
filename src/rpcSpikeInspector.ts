@@ -926,7 +926,7 @@ export function buildRpcSpikeDiagnosis(): {
     `- Scanners / Alchemy-backup3+: status ${snap.scanners.status} · p95 ${fmtMs(snap.scanners.p95)}`
   );
   lines.push(
-    `- Utility / RPC_URL: status ${snap.utility.status} · p95 ${fmtMs(snap.utility.p95)}`
+    `- Utility / PUBLICNODE: status ${snap.utility.status} · p95 ${fmtMs(snap.utility.p95)}`
   );
   lines.push('');
   lines.push('## 2. Last 10 spikes');
@@ -971,14 +971,14 @@ export function buildRpcSpikeDiagnosis(): {
   for (const row of rankCauses(snap)) lines.push(`- ${row}`);
   lines.push('');
   lines.push('## 5. Safe additive recommendations');
-  lines.push('- Keep Trading exits on Critical/Helius (`send_tx`); never route sells onto Watchers/Utility.');
+  lines.push('- Keep Trading exits on Trading Critical / Alchemy (`send_tx`); never route sells onto Watchers/Utility.');
   lines.push('- During Watchers spike: shed enrich / slow reprice; do not pause SL / peak-protection / exits.');
   lines.push('- During Trading spike: soft-pause new entries only; cap retries at 1–2 with backoff.');
   lines.push('- Dedupe identical in-flight reads; keep 429 provider cooldown sticky (do not shorten).');
   lines.push('- Reversible via Stats → RPC containment toggle.');
   lines.push('');
   lines.push('## 6. Non-goals');
-  lines.push('- Do not rewrite RPC architecture or merge Trading Helius with Watchers Alchemy.');
+  lines.push('- Do not rewrite RPC architecture or merge Trading Alchemy with Watchers Alchemy.');
   lines.push('- Do not loosen trade strategy, late-chase, or profile floors.');
   lines.push('- Do not auto-commit, auto-deploy, or mutate open trades from this report.');
 

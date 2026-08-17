@@ -919,9 +919,15 @@ check(
       /Trading \/ Alchemy/.test(d.reportText) &&
       !/Trading \/ Helius/.test(d.reportText) &&
       /Watchers \/ Alchemy-backup2/.test(d.reportText) &&
-      /Utility \/ RPC_URL/.test(d.reportText)
+      /Utility \/ PUBLICNODE/.test(d.reportText)
     );
   })()
+);
+check(
+  'diagnosis tip Trading Alchemy not Helius',
+  /Trading Critical \/ Alchemy/.test(
+    buildRpcSpikeDiagnosis().reportText
+  ) && !/Critical\/Helius/.test(buildRpcSpikeDiagnosis().reportText)
 );
 check(
   'safeProviderLabel distinguishes backup3',

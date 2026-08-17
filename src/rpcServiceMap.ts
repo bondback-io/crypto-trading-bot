@@ -1,7 +1,7 @@
 /**
  * Exclusive Solana RPC service → preferred env key map.
  * Preferred keys never share with each other; failover is RPC_URL → PUBLICNODE_URL
- * (RPC_URL is also Utility light's preferred public endpoint).
+ * (PUBLICNODE is Utility light's preferred public endpoint).
  */
 
 export type RpcExclusiveService =
@@ -126,13 +126,13 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
   },
   {
     service: 'utility_light',
-    label: 'rpc-url',
-    envKey: 'RPC_URL',
+    label: 'publicnode',
+    envKey: 'PUBLICNODE_URL',
     gateRole: 'utility',
     title: 'Utility light',
     intensity: 'low',
     exclusive: true,
-    blurb: 'Health probes, priority fees, ungated reads (public RPC_URL)',
+    blurb: 'Health probes, priority fees, ungated reads (PUBLICNODE)',
   },
 ] as const;
 
@@ -140,24 +140,24 @@ export const RPC_EMERGENCY_SERVICES = [
   {
     label: 'rpc-url',
     envKey: 'RPC_URL',
-    title: 'RPC_URL (Utility light + emergency)',
+    title: 'Emergency RPC_URL',
     intensity: 'emergency' as const,
     exclusive: false,
-    blurb: 'Preferred for Utility light; emergency failover for other services',
+    blurb: 'Emergency failover for exclusives (often slow from Render)',
   },
   {
     label: 'publicnode',
     envKey: 'PUBLICNODE_URL',
-    title: 'Emergency PUBLICNODE',
+    title: 'PUBLICNODE (Utility light + emergency)',
     intensity: 'emergency' as const,
     exclusive: false,
-    blurb: 'Last-resort public failover after RPC_URL',
+    blurb: 'Preferred for Utility light; emergency failover after RPC_URL',
   },
 ] as const;
 
 /**
  * Failover labels for non-utility exclusives.
- * `rpc-url` is also Utility light's preferred key (shared only on emergency).
+ * `publicnode` is also Utility light's preferred key (shared only on emergency).
  */
 export const RPC_EMERGENCY_LABELS = ['rpc-url', 'publicnode'] as const;
 

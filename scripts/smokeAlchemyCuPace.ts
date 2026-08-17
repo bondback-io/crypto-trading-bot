@@ -321,12 +321,12 @@ check(
     /ALCHEMY_API_KEY_BACKUP3/.test(rpcUrl)
 );
 check(
-  'exclusive service map BACKUP4–7 + PUBLICNODE (utility → RPC_URL)',
+  'exclusive service map BACKUP4–7 + PUBLICNODE (utility → PUBLICNODE)',
   /alchemy-backup4/.test(rpcUrl) &&
     /alchemy-backup7/.test(rpcUrl) &&
     /resolvePublicnodeRpcUrl/.test(rpcUrl) &&
     /Exclusive multi-RPC chain/.test(rpcUrl) &&
-    /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(
+    /utility_light[\s\S]*?envKey: 'PUBLICNODE_URL'/.test(
       readSrc('src/rpcServiceMap.ts')
     )
 );
@@ -344,15 +344,25 @@ check(
   })()
 );
 check(
-  'utility exclusive map uses RPC_URL (not HELIUS_BACKUP)',
+  'utility exclusive map uses PUBLICNODE_URL (not RPC_URL preferred)',
   (() => {
     const m = readSrc('src/rpcServiceMap.ts');
-    return (
-      /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(m) &&
-      /label: 'rpc-url'/.test(m) &&
-      !/label: 'helius-backup'/.test(m)
-    );
+    const block =
+      /service: 'utility_light',\s*label: 'publicnode',\s*envKey: 'PUBLICNODE_URL'/.test(
+        m
+      );
+    return block && !/service: 'utility_light',\s*label: 'rpc-url'/.test(m);
   })()
+);
+check(
+  'utility_light latency failover between publicnode and rpc-url',
+  /pickUtilityLightLatencyAlternate/.test(readSrc('src/connection.ts')) &&
+    /utility_light latency failover/.test(readSrc('src/connection.ts'))
+);
+check(
+  'mirror holdings timeout + utility spike shed',
+  /HOLDINGS_TIMEOUT_MS/.test(readSrc('src/influencerMirrorRuntime.ts')) &&
+    /isLaneSpiking\('utility'\)/.test(readSrc('src/influencerMirrorRuntime.ts'))
 );
 check(
   'alchemy_key_429 log format',

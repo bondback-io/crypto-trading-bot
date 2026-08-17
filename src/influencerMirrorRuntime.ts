@@ -681,14 +681,45 @@ async function fetchWalletTokenMints(
     return [];
   }
   try {
+    const { isLaneSpiking } =
+      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
+    const {
+      getRpcUrl,
+      withRpc,
+    } = require('./connection') as typeof import('./connection');
+    const { isOfficialMainnetBetaRpcUrl } =
+      require('./rpcUrl') as typeof import('./rpcUrl');
+    // Shed non-critical holdings on utility spike or chronically slow official public.
+    if (
+      isLaneSpiking('utility') ||
+      isOfficialMainnetBetaRpcUrl(getRpcUrl('utility'))
+    ) {
+      noteHoldingsUnavailable(
+        new Error('utility spike or weak mainnet-beta — holdings shed')
+      );
+      return [];
+    }
     const { PublicKey } = require('@solana/web3.js') as typeof import('@solana/web3.js');
-    const { withRpc } =
-      require('./connection') as typeof import('./connection');
     const owner = new PublicKey(address);
     const programId = new PublicKey(TOKEN_PROGRAM_ID);
+    const HOLDINGS_TIMEOUT_MS = 2_500;
     const resp = await withRpc(
       'mirror_holdings',
-      (conn) => conn.getParsedTokenAccountsByOwner(owner, { programId }),
+      (conn) =>
+        Promise.race([
+          conn.getParsedTokenAccountsByOwner(owner, { programId }),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `getParsedTokenAccountsByOwner timed out after ${HOLDINGS_TIMEOUT_MS}ms`
+                  )
+                ),
+              HOLDINGS_TIMEOUT_MS
+            )
+          ),
+        ]),
       'utility'
     );
     const out: InfluencerTokenSnap[] = [];
@@ -716,6 +747,10 @@ async function fetchWalletTokenMints(
     return out.slice(0, 12);
   } catch (err) {
     if (isMirrorHoldingsUnavailableError(err)) {
+      noteHoldingsUnavailable(err);
+      return [];
+    }
+    if (/timed out after/i.test(err instanceof Error ? err.message : String(err))) {
       noteHoldingsUnavailable(err);
       return [];
     }

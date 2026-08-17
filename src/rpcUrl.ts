@@ -532,7 +532,7 @@ export const RPC_LANE_SUPPORTS = {
   utility: [
     'Favourites soft-watch — ALCHEMY_API_KEY_BACKUP',
     'Activity refresh — HELIUS_API_KEY',
-    'Utility light — RPC_URL (public)',
+    'Utility light — PUBLICNODE_URL (public)',
   ],
   watchers: [
     'Setup watches (Dip/Trend/Scalper/Grad) — ALCHEMY_API_KEY_BACKUP2 (exclusive)',
@@ -556,6 +556,6 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'ALCHEMY_API_KEY_BACKUP2 — setup watch / arm / trigger (exclusive).',
   ],
   utility: [
-    'ALCHEMY_API_KEY_BACKUP Favourites · HELIUS_API_KEY Activity · RPC_URL utility light (public).',
+    'ALCHEMY_API_KEY_BACKUP Favourites · HELIUS_API_KEY Activity · PUBLICNODE_URL utility light.',
   ],
 } as const;

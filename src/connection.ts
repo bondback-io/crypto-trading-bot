@@ -992,7 +992,9 @@ function ensureEndpoints(): void {
     if (fav >= 0) return fav;
     const light = endpoints.findIndex(
       (e) =>
-        e.endpoint.label === 'rpc-url' || e.endpoint.label === 'helius-backup'
+        e.endpoint.label === 'publicnode' ||
+        e.endpoint.label === 'rpc-url' ||
+        e.endpoint.label === 'helius-backup'
     );
     if (light >= 0) return light;
     return pickPreferredUtilityIndex();
@@ -1295,15 +1297,80 @@ function acceptFailoverTarget(
 
 /**
  * Exclusive service preferred index, else -1.
- * Failover only to emergency labels (rpc-url â†’ publicnode) â€” never another exclusive key.
+ * Failover only to emergency labels (rpc-url → publicnode) — never another exclusive key.
+ * Utility light only: sticky latency failover between publicnode and rpc-url.
  */
+function isUtilityLightFeature(feature: string): boolean {
+  const svc = exclusiveServiceForFeature(feature);
+  return svc?.service === 'utility_light';
+}
+
+/** Among publicnode/rpc-url, pick a clearly faster healthy alternate for Utility light. */
+function pickUtilityLightLatencyAlternate(preferredIdx: number): number {
+  const pref = endpoints[preferredIdx];
+  if (!pref) return -1;
+  // Recovered preferred — clear sticky and stay home.
+  if (
+    pref.latencyMs != null &&
+    pref.latencyMs < LATENCY_RECOVER_MS &&
+    pref.healthy &&
+    !isEndpointRateLimited(pref) &&
+    !isEndpointHardFailed(pref)
+  ) {
+    lastUtilityFailoverIdx = -1;
+    return -1;
+  }
+  if (!latencyFailoverReady(pref)) return -1;
+
+  const now = Date.now();
+  if (
+    lastUtilityFailoverIdx >= 0 &&
+    lastUtilityFailoverIdx !== preferredIdx &&
+    now - lastUtilityFailoverAt < UTILITY_FAILOVER_STICKY_MS
+  ) {
+    const sticky = endpoints[lastUtilityFailoverIdx];
+    if (
+      sticky &&
+      sticky.healthy &&
+      !isEndpointRateLimited(sticky) &&
+      !isEndpointHardFailed(sticky) &&
+      isFasterAlternate(pref, sticky)
+    ) {
+      return lastUtilityFailoverIdx;
+    }
+  }
+
+  for (const lab of ['publicnode', 'rpc-url'] as const) {
+    const i = endpoints.findIndex((e) => e.endpoint.label === lab);
+    if (i < 0 || i === preferredIdx) continue;
+    const e = endpoints[i]!;
+    if (!e.healthy || isEndpointRateLimited(e) || isEndpointHardFailed(e)) {
+      continue;
+    }
+    if (!isFasterAlternate(pref, e)) continue;
+    if (
+      lastUtilityFailoverIdx !== i ||
+      now - lastUtilityFailoverAt >= 15_000
+    ) {
+      console.warn(
+        `[rpc] utility_light latency failover ${pref.endpoint.label}→${e.endpoint.label} ` +
+          `(EWMA ${pref.latencyMs ?? '—'}ms → ${e.latencyMs ?? '—'}ms)`
+      );
+      lastUtilityFailoverAt = now;
+      lastUtilityFailoverIdx = i;
+    }
+    return i;
+  }
+  return -1;
+}
+
 function resolveExclusiveServiceIndex(feature: string): number {
   ensureEndpoints();
   const svc = exclusiveServiceForFeature(feature);
   if (!svc) return -1;
   const preferred = endpoints.findIndex((e) => e.endpoint.label === svc.label);
   if (preferred < 0) {
-    // Preferred key unset â€” go straight to emergency.
+    // Preferred key unset — go straight to emergency.
     for (const lab of RPC_EMERGENCY_LABELS) {
       const i = endpoints.findIndex((e) => e.endpoint.label === lab);
       if (i < 0) continue;
@@ -1322,12 +1389,17 @@ function resolveExclusiveServiceIndex(feature: string): number {
   // Stay on exclusive preferred despite mild EWMA — emergency publics from Render
   // are usually slower and caused the latency cascade. Fail over only on
   // rate-limit / hard-fail / unhealthy / Alchemy cooling.
+  // Exception: utility_light may sticky-failover between publicnode ↔ rpc-url.
   if (
     pref.healthy &&
     !isEndpointRateLimited(pref) &&
     !isEndpointHardFailed(pref) &&
     !cooling
   ) {
+    if (isUtilityLightFeature(feature)) {
+      const alt = pickUtilityLightLatencyAlternate(preferred);
+      if (alt >= 0) return alt;
+    }
     return preferred;
   }
   const downMs = downForMs(pref);

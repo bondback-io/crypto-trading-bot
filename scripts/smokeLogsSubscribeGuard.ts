@@ -191,8 +191,8 @@ check(
   /ensureRpcWsConsoleFilterInstalled/.test(readSrc('src/index.ts'))
 );
 check(
-  'Utility light prefers RPC_URL',
-  /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(
+  'Utility light prefers PUBLICNODE_URL',
+  /utility_light[\s\S]*?envKey: 'PUBLICNODE_URL'/.test(
     readSrc('src/rpcServiceMap.ts')
   )
 );
