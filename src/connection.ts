@@ -596,11 +596,28 @@ export function isRpcSoftFailureError(err: unknown): boolean {
   }
 }
 
+/** Short soft-fail text for stdout — never JSON / never the word "error". */
+export function formatSoftRpcFailBrief(err: unknown): string {
+  if (isRpcGateSkipError(err)) return 'gate skip';
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  try {
+    const { isAlchemyCuLimitMessage } =
+      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
+    if (isAlchemyCuLimitMessage(msg)) return '429 CU/s capacity';
+  } catch {
+    /* optional */
+  }
+  if (isRpcSoftBlockedMessage(msg)) return '403 soft blocked';
+  if (isRpcRateLimitMessage(msg) || /\b429\b/.test(msg)) return '429 rate limited';
+  if (isRpcSoftFailureMessage(msg)) return 'soft RPC limited';
+  const flat = msg.replace(/\s+/g, ' ').replace(/[{}"]/g, '').slice(0, 80);
+  return flat || 'soft RPC limited';
+}
+
 /** Throttled stdout log for soft RPC failures (Render level:error ignores stdout). */
 export function logSoftRpcFailure(tag: string, err: unknown): void {
   if (!softRpcFailLog.allow()) return;
-  const msg = err instanceof Error ? err.message : String(err ?? '');
-  console.log(`[${tag}] soft RPC fail (no stack) ${msg.slice(0, 180)}`);
+  console.log(`[${tag}] soft RPC fail (no stack) ${formatSoftRpcFailBrief(err)}`);
 }
 
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {
@@ -1155,6 +1172,12 @@ function resolveIndexForRole(role: RpcRole): number {
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
   const latencySoft = latencyFailoverReady(pref);
+  const feature = rpcFeatureAls.getStore() || 'ungated';
+  const prefAlchemyCooling =
+    role === 'secondary' &&
+    Boolean(pref) &&
+    isAlchemyRpcUrl(pref!.endpoint.url) &&
+    shouldSkipAlchemyRpc(feature, pref!.endpoint.url);
 
   // Utility: if preferred is weak public but a stronger non-public/rpc-url is healthy, prefer it.
   if (role === 'utility' && pref && isWeakPublicUtilityUrl(pref.endpoint.url)) {
@@ -1167,7 +1190,12 @@ function resolveIndexForRole(role: RpcRole): number {
     }
   }
 
-  if (pref?.healthy && !isEndpointRateLimited(pref) && !latencySoft) {
+  if (
+    pref?.healthy &&
+    !isEndpointRateLimited(pref) &&
+    !latencySoft &&
+    !prefAlchemyCooling
+  ) {
     setActiveForRole(role, preferred);
     return preferred;
   }
@@ -1178,6 +1206,7 @@ function resolveIndexForRole(role: RpcRole): number {
   if (
     !latencySoft &&
     !rateLimited &&
+    !prefAlchemyCooling &&
     downMs > 0 &&
     downMs < failoverDownMs()
   ) {
@@ -1186,6 +1215,43 @@ function resolveIndexForRole(role: RpcRole): number {
 
   const shareLoad = Boolean(config.rpc?.shareLoad);
   const avoidPublicForCritical = shareLoad && role === 'primary';
+
+  // Scanners/Zion: rotate Alchemy capacity (BACKUP3) before piggybacking Critical/Helius.
+  if (role === 'secondary') {
+    const scannerIdxs = endpoints
+      .map((e, i) => ({ e, i }))
+      .filter(
+        ({ e }) =>
+          isAlchemyRpcUrl(e.endpoint.url) &&
+          isAlchemyScannerCapacityLabel(e.endpoint.label)
+      );
+    const picked = pickNextAlchemyScannerUrl(
+      scannerIdxs.map(({ e }) => e.endpoint.url)
+    );
+    if (picked) {
+      const hit = scannerIdxs.find(({ e }) => e.endpoint.url === picked);
+      if (
+        hit &&
+        hit.i !== preferred &&
+        hit.e.healthy &&
+        !isEndpointRateLimited(hit.e) &&
+        !isEndpointHardFailed(hit.e) &&
+        !shouldSkipAlchemyRpc(feature, hit.e.endpoint.url)
+      ) {
+        setActiveForRole(role, hit.i);
+        return hit.i;
+      }
+    }
+    for (const { e, i } of scannerIdxs) {
+      if (i === preferred) continue;
+      if (!e.healthy || isEndpointRateLimited(e) || isEndpointHardFailed(e)) {
+        continue;
+      }
+      if (shouldSkipAlchemyRpc(feature, e.endpoint.url)) continue;
+      setActiveForRole(role, i);
+      return i;
+    }
+  }
 
   // Utility + public preferred is slow: try another public/fallback
   // before burning Alchemy/Helius/QuickNode CU on wallet polls.
@@ -1868,7 +1934,7 @@ async function withRpcInner<T>(
   if (soft) {
     if (softRpcFailLog.allow()) {
       console.log(
-        `[rpc] soft fail ${label} role=${r} (no stack) ${failMsg.slice(0, 180)}`
+        `[rpc] soft fail ${label} role=${r} (no stack) ${formatSoftRpcFailBrief(lastError)}`
       );
     }
     throw lastError instanceof Error

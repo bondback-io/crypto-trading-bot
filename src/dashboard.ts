@@ -10991,17 +10991,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
             <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade (<code>ALCHEMY_API_KEY</code> + optional <code>ALCHEMY_API_KEY_BACKUP3</code> capacity)</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade (<code>ALCHEMY_API_KEY</code>; spill to <code>ALCHEMY_API_KEY_BACKUP3</code> before Helius)</div>
             <div class="mb-1"><strong style="color:#a78bfa">Watchers → Alchemy backup</strong> — setup watch / arm / trigger (<code>ALCHEMY_API_KEY_BACKUP</code>)</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → BACKUP3 / public</strong> — Favourites soft-watch prefers <code>ALCHEMY_API_KEY_BACKUP3</code> when set; else public</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
             <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy. Extra CU capacity: <code>ALCHEMY_API_KEY_BACKUP3</code> (per-key 429 cooldown; one key cooling does not silence scanners).</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy; spills to <code>ALCHEMY_API_KEY_BACKUP3</code> before Helius (per-key 429 cooldown).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Watchers</strong> — Setup watch / arm / trigger. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>. Emergency public/utility if unset — never Trading or Scanners.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Critical extra</strong> — Lazy Helius fallback target <code>ALCHEMY_API_KEY_BACKUP2</code> (not used for scanner round-robin).</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites + import + activity (Share ON). Prefers <code>ALCHEMY_API_KEY_BACKUP3</code> when set; else public Solana.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
             <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
           </div>
@@ -37612,7 +37612,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         if (st) {
           st.textContent = data.shareLoad
-            ? 'Share RPC load ON — critical→Helius, scanners→Alchemy, watchers→backup, utility→public'
+            ? 'Share RPC load ON — critical→Helius, scanners→Alchemy(+BACKUP3 spill), watchers→backup, utility→BACKUP3/public'
             : 'Share RPC load OFF — legacy primary/secondary routing';
         }
         const shareAlloc = document.getElementById('rpc-share-alloc');

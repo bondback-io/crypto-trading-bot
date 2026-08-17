@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.406',
+    title: 'BACKUP3 utility + Zion spill before Helius',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Utility prefers ALCHEMY_API_KEY_BACKUP3 when set. Scanners/Zion getConnection spill to BACKUP3 capacity before piggybacking Critical/Helius. Soft RPC stdout lines are short (429 CU/s) with no JSON error substring so Render level:error stays clean. Exits stay on Helius; BACKUP2 stays lazy Critical-extra.',
+    ],
+  },
+  {
     version: '1.2.405',
     title: 'Render level:error no longer treats soft warns as errors',
     sections: ['execution', 'scanners'],

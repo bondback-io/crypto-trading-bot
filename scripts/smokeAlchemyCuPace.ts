@@ -215,7 +215,22 @@ check(
   'isRpcSoftFailureError + logSoftRpcFailure exported',
   /export function isRpcSoftFailureError/.test(conn) &&
     /export function logSoftRpcFailure/.test(conn) &&
+    /formatSoftRpcFailBrief/.test(conn) &&
     /console\.log\(`\[\$\{tag\}\] soft RPC fail/.test(conn)
+);
+check(
+  'soft fail brief has no JSON error substring',
+  /export function formatSoftRpcFailBrief/.test(conn) &&
+    /429 CU\/s capacity/.test(conn) &&
+    /403 soft blocked/.test(conn) &&
+    !/formatSoftRpcFailBrief[\s\S]{0,800}msg\.slice\(0,\s*180\)/.test(conn)
+);
+check(
+  'secondary resolve spills scanner Alchemy before Helius piggyback',
+  /role === 'secondary'/.test(conn) &&
+    /pickNextAlchemyScannerUrl/.test(conn) &&
+    /Scanners\/Zion: rotate Alchemy capacity/.test(conn) &&
+    /prefAlchemyCooling/.test(conn)
 );
 
 const scanner = readSrc('src/marketScanner.ts');
@@ -300,9 +315,29 @@ check(
     /ALCHEMY_API_KEY_BACKUP3/.test(rpcUrl)
 );
 check(
+  'utility prefers BACKUP3 when set',
+  /alchemyBackup3 = buildAlchemyBackup3RpcUrl/.test(rpcUrl) &&
+    /utilityUrl = alchemyBackup3/.test(rpcUrl) &&
+    /\(alchemy-backup3 utility\)/.test(rpcUrl)
+);
+check(
   'alchemy_key_429 log format',
   /alchemy_key_429/.test(readSrc('src/rpcProviderPace.ts'))
 );
+
+// Runtime: formatSoftRpcFailBrief never embeds "error" / JSON
+{
+  const { formatSoftRpcFailBrief } = require('../src/connection') as typeof import('../src/connection');
+  const brief = formatSoftRpcFailBrief(
+    new Error(
+      '429 Too Many Requests: {"jsonrpc":"2.0","error":{"code":429,"message":"compute units per second capacity"}}'
+    )
+  );
+  check(
+    'formatSoftRpcFailBrief strips Alchemy JSON',
+    brief === '429 CU/s capacity' && !/"error"/.test(brief) && !/\{/.test(brief)
+  );
+}
 
 // Env discovery (may be empty in CI)
 const keys = listAlchemyApiKeysFromEnv();

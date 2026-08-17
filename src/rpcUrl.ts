@@ -475,8 +475,16 @@ export function rpcEndpointsFromEnv(
     }
   }
 
-  // Utility lane prefers official mainnet-beta, then publicnode / Triton.
+  // Utility lane: BACKUP3 when set, else official mainnet-beta / publicnode / Triton.
+  const alchemyBackup3 = buildAlchemyBackup3RpcUrl();
   let utilityUrl = '';
+  if (
+    alchemyBackup3 &&
+    alchemyBackup3 !== primaryUrl &&
+    alchemyBackup3 !== secondaryUrl
+  ) {
+    utilityUrl = alchemyBackup3;
+  }
   const utilityPrefs = [
     PUBLIC_SOLANA_RPC_OFFICIAL,
     rpcUrl && isOfficialMainnetBetaRpcUrl(rpcUrl) ? rpcUrl : '',
@@ -485,10 +493,12 @@ export function rpcEndpointsFromEnv(
     rpcSecondary && isTritonMainnetRpcUrl(rpcSecondary) ? rpcSecondary : '',
     rpcSecondary && !isOfficialMainnetBetaRpcUrl(rpcSecondary) ? rpcSecondary : '',
   ].filter((u) => u && isUsableRpcUrl(u));
-  for (const u of utilityPrefs) {
-    if (u !== primaryUrl && u !== secondaryUrl) {
-      utilityUrl = u;
-      break;
+  if (!utilityUrl) {
+    for (const u of utilityPrefs) {
+      if (u !== primaryUrl && u !== secondaryUrl) {
+        utilityUrl = u;
+        break;
+      }
     }
   }
   if (!utilityUrl) {
@@ -530,6 +540,7 @@ export function rpcEndpointsFromEnv(
   const labelFor = (url: string, fallback: string): string => {
     if (url === helius) return 'helius';
     if (url === alchemy) return 'alchemy';
+    if (url === alchemyBackup3) return 'alchemy-backup3';
     if (url === quicknode) return 'quicknode';
     if (url === rpcUrl) return 'rpc-url';
     if (url === rpcSecondary) return 'rpc-secondary';
@@ -545,7 +556,13 @@ export function rpcEndpointsFromEnv(
     add(secondaryUrl, labelFor(secondaryUrl, 'secondary'), 'secondary');
   }
   if (utilityUrl) {
-    add(utilityUrl, labelFor(utilityUrl, 'utility'), 'utility');
+    add(
+      utilityUrl,
+      utilityUrl === alchemyBackup3
+        ? 'alchemy-backup3'
+        : labelFor(utilityUrl, 'utility'),
+      'utility'
+    );
   }
 
   const alchemyBackup = buildAlchemyBackupRpcUrl();
@@ -574,13 +591,15 @@ export function rpcEndpointsFromEnv(
       (helius ? ' (Helius free primary)' : '') +
       (alchemy ? ' (Alchemy free secondary)' : '') +
       (quicknode ? ' (QuickNode mid-tier)' : '') +
-      (utilityUrl && isOfficialMainnetBetaRpcUrl(utilityUrl)
-        ? ' (mainnet-beta utility)'
-        : utilityUrl && isTritonMainnetRpcUrl(utilityUrl)
-          ? ' (Triton api.mainnet.solana.com utility)'
-          : utilityUrl === PUBLIC_SOLANA_RPC
-            ? ' (publicnode utility)'
-            : '')
+      (utilityUrl && utilityUrl === alchemyBackup3
+        ? ' (alchemy-backup3 utility)'
+        : utilityUrl && isOfficialMainnetBetaRpcUrl(utilityUrl)
+          ? ' (mainnet-beta utility)'
+          : utilityUrl && isTritonMainnetRpcUrl(utilityUrl)
+            ? ' (Triton api.mainnet.solana.com utility)'
+            : utilityUrl === PUBLIC_SOLANA_RPC
+              ? ' (publicnode utility)'
+              : '')
   );
   const scanners = alchemyKeys.filter((k) => k.role === 'scanner').map((k) => k.label);
   const watchersK = alchemyKeys.filter((k) => k.role === 'watchers').map((k) => k.label);
@@ -618,13 +637,13 @@ export const RPC_LANE_SUPPORTS = {
     'Migration poll fallback (Share ON)',
     'Zion micro-bot + KOL Token Scanner',
     'Zion Place Trade on-chain bits',
-    'Preferred: Alchemy (+ ALCHEMY_API_KEY_BACKUP3 capacity) → Helius → QuickNode → public',
+    'Preferred: Alchemy → ALCHEMY_API_KEY_BACKUP3 capacity → Helius → QuickNode → public',
   ],
   utility: [
     'Wallet favourites / import on-chain checks (Share ON)',
     'Wallet activity refresh / last-trade polls (Share ON)',
     'Other light non-entry polls',
-    'Preferred: official mainnet-beta → publicnode → Triton → last-resort fallbacks',
+    'Preferred: ALCHEMY_API_KEY_BACKUP3 when set → else official mainnet-beta → publicnode → Triton',
   ],
   watchers: [
     'Setup watch list poll, arm level checks, graduation curve, TA enrich for watch/arm/trigger',
@@ -643,12 +662,12 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Helius — trade entries, turbo profiles, migration sniper/parses',
   ],
   scanners: [
-    'Alchemy — Market Scanner, AlphaScan, Zion KOL + Place Trade. Capacity: ALCHEMY_API_KEY + ALCHEMY_API_KEY_BACKUP3 (per-key CU/s cooldown).',
+    'Alchemy — Market Scanner, AlphaScan, Zion KOL + Place Trade. Capacity: ALCHEMY_API_KEY + ALCHEMY_API_KEY_BACKUP3 (spill to BACKUP3 before Helius; per-key CU/s cooldown).',
   ],
   watchers: [
     'Alchemy backup (ALCHEMY_API_KEY_BACKUP) — setup watch / arm / trigger. Trading stays Helius.',
   ],
   utility: [
-    'mainnet-beta — wallet buy watch (Favourites), import checks, activity refresh, light polls',
+    'ALCHEMY_API_KEY_BACKUP3 when set — Favourites wallet watch, import checks, activity refresh; else public mainnet-beta',
   ],
 } as const;
