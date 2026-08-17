@@ -1921,8 +1921,22 @@ function isRpcRateLimitError(err: unknown): boolean {
     /\b429\b/i.test(msg) ||
     /too many requests/i.test(msg) ||
     /rate.?limit/i.test(msg) ||
-    /-32429/.test(msg)
+    /-32429/.test(msg) ||
+    /compute units per second/i.test(msg)
   );
+}
+
+/** Soft provider block (403 Request blocked / -32602) — warn, do not dump stack. */
+function isRpcSoftBlockedError(err: unknown): boolean {
+  try {
+    const { isRpcSoftBlockedMessage } =
+      require('./connection') as typeof import('./connection');
+    const msg = err instanceof Error ? err.message : String(err ?? '');
+    return isRpcSoftBlockedMessage(msg);
+  } catch {
+    const msg = err instanceof Error ? err.message : String(err ?? '');
+    return /request blocked|-32602|403.*forbidden/i.test(msg);
+  }
 }
 
 /**
@@ -3691,7 +3705,20 @@ async function pollWalletInner(
     // If every parse failed, leave lastSeen unchanged so we retry the same tip
   } catch (err) {
     if (isRpcRateLimitError(err)) throw err;
-    console.error(`[monitor] Error polling ${wallet.name}:`, err);
+    if (isRpcSoftBlockedError(err)) {
+      if (Date.now() - lastSoftThrottleLogAt > 60_000) {
+        lastSoftThrottleLogAt = Date.now();
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(
+          `[monitor] soft-blocked polling ${wallet.name} — ${msg.slice(0, 120)}`
+        );
+      }
+      return;
+    }
+    console.error(
+      `[monitor] Error polling ${wallet.name}:`,
+      err instanceof Error ? err.message : String(err)
+    );
   }
 }
 

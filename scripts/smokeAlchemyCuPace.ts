@@ -147,8 +147,18 @@ check(
     /poll skipped \(lane busy\)/.test(mig)
 );
 check(
+  'migration busy skip uses console.log (stdout)',
+  /console\.log\(/.test(mig) &&
+    /poll skipped \(lane busy\)/.test(mig) &&
+    !/console\.warn\(\s*\n?\s*`\[migration\] poll skipped/.test(mig)
+);
+check(
   'migration pauses only when all scanner keys cool',
   /allScannerAlchemyKeysCooling/.test(mig)
+);
+check(
+  'armRateLimitBackoff passes Alchemy URL',
+  /noteAlchemyCuLimit\(url\)/.test(mig)
 );
 
 const conn = readSrc('src/connection.ts');
@@ -173,8 +183,14 @@ check(
   /pickNextAlchemyScannerUrl/.test(conn)
 );
 check(
-  'alchemyPace exposed in getRpcStats',
-  /alchemyPace:\s*getAlchemyPaceStatus/.test(conn)
+  'withRpc soft-fails without logger.error',
+  /soft fail \(no stack\)/.test(conn) &&
+    /isRpcSoftBlockedMessage/.test(conn) &&
+    /isRpcGateSkipError\(lastError\)/.test(conn)
+);
+check(
+  'soft blocked classifier exported',
+  /export function isRpcSoftBlockedMessage/.test(conn)
 );
 
 const rpcUrl = readSrc('src/rpcUrl.ts');

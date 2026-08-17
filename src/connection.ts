@@ -57,6 +57,7 @@ import {
   shouldSkipCreditsProvider,
 } from './creditsGuard';
 import { guardRpcWebSocket } from './rpcWsGuard';
+import { QuietLogGate } from './httpProviderGate';
 import {
   acquireAlchemyPaceSlot,
   getAlchemyPaceStatus,
@@ -67,6 +68,8 @@ import {
   pickNextAlchemyScannerUrl,
   shouldSkipAlchemyRpc,
 } from './rpcProviderPace';
+
+const softRpcFailLog = new QuietLogGate(60_000);
 
 dotenv.config();
 
@@ -560,6 +563,22 @@ function isRpcRateLimitMessage(error: string): boolean {
   return /429|rate.?limit|-32429|too many requests|insufficient credits|credit usage limit|compute units per second/i.test(
     error
   );
+}
+
+/** Provider soft-block (Helius 403 / -32602 Request blocked) — not a hard outage. */
+export function isRpcSoftBlockedMessage(error: string): boolean {
+  const s = String(error || '');
+  if (!s) return false;
+  return (
+    /request blocked/i.test(s) ||
+    /-32602/.test(s) ||
+    (/403/.test(s) && /forbidden|blocked|jsonrpc/i.test(s))
+  );
+}
+
+/** Soft RPC failure suitable for warn-once (not Trading-critical dump). */
+export function isRpcSoftFailureMessage(error: string): boolean {
+  return isRpcRateLimitMessage(error) || isRpcSoftBlockedMessage(error);
 }
 
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {
@@ -1800,6 +1819,31 @@ async function withRpcInner<T>(
 
   if (attempts === 0 && skippedAlchemyCooling > 0 && lastError == null) {
     throw new RpcGateSkipError('rate', r, feature);
+  }
+
+  if (isRpcGateSkipError(lastError)) {
+    throw lastError;
+  }
+
+  const failMsg =
+    lastError instanceof Error ? lastError.message : String(lastError ?? '');
+  const soft =
+    !exitSend &&
+    !critical &&
+    (isRpcSoftFailureMessage(failMsg) ||
+      isAlchemyCuLimitMessage(failMsg) ||
+      isRpcGateSkipError(lastError));
+
+  if (soft) {
+    if (softRpcFailLog.allow()) {
+      logger.warn('RPC', `${label} soft fail (no stack)`, {
+        role: r,
+        errorMessage: failMsg.slice(0, 180),
+      });
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(String(lastError ?? 'All RPC endpoints failed'));
   }
 
   logger.error('RPC', `${label} all endpoints failed`, errorToMeta(lastError));

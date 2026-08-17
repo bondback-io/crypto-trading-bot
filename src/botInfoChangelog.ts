@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.402',
+    title: 'Quiet soft RPC errors on Render',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Alchemy 429 CU/s, Helius 403 Request blocked, and migration lane-busy skips no longer flood Render as level:error with stacks. Soft fails warn once/60s; busy skips go to stdout. Trading exit failures stay loud. Per-key Alchemy cooldown unchanged.',
+    ],
+  },
+  {
     version: '1.2.401',
     title: 'Alchemy BACKUP3 capacity + per-key CU/s cooldown',
     sections: ['scanners', 'execution'],

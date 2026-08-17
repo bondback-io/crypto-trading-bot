@@ -121,6 +121,18 @@ function isRpcRateLimitError(err: unknown): boolean {
   );
 }
 
+function isRpcSoftBlockedError(err: unknown): boolean {
+  try {
+    const { isRpcSoftBlockedMessage } =
+      require('./connection') as typeof import('./connection');
+    const msg = err instanceof Error ? err.message : String(err);
+    return isRpcSoftBlockedMessage(msg);
+  } catch {
+    const msg = err instanceof Error ? err.message : String(err);
+    return /request blocked|-32602|403.*forbidden/i.test(msg);
+  }
+}
+
 function resolveMigrationRpcRole(): 'primary' | 'secondary' | 'utility' | 'watchers' | null {
   const share = Boolean(config.rpc?.shareLoad);
   let role = getRpcRoleFor('migration', share);
@@ -147,7 +159,8 @@ function noteMigrationBusySkip(err: unknown): void {
   if (Date.now() - lastBusySkipLogAt < 60_000) return;
   lastBusySkipLogAt = Date.now();
   const msg = err instanceof Error ? err.message : String(err);
-  console.warn(
+  // stdout so Render level:error filters do not treat this as an error
+  console.log(
     `[migration] poll skipped (lane busy) — retrying on scanners/watchers, not an error (${msg.slice(0, 120)})`
   );
 }
@@ -157,9 +170,27 @@ function armRateLimitBackoff(err: unknown): void {
   noteActiveRpcFailure(err, 'primary');
   const msg = err instanceof Error ? err.message : String(err);
   try {
-    const { isAlchemyCuLimitMessage, noteAlchemyCuLimit } =
+    const { isAlchemyCuLimitMessage, noteAlchemyCuLimit, isAlchemyRpcUrl } =
       require('./rpcProviderPace') as typeof import('./rpcProviderPace');
-    if (isAlchemyCuLimitMessage(msg)) noteAlchemyCuLimit();
+    if (isAlchemyCuLimitMessage(msg)) {
+      let url = '';
+      try {
+        url = String(getConnection().rpcEndpoint || '');
+      } catch {
+        url = '';
+      }
+      if (url && isAlchemyRpcUrl(url)) noteAlchemyCuLimit(url);
+      else {
+        try {
+          const { listAlchemyScannerUrlsFromEnv } =
+            require('./rpcUrl') as typeof import('./rpcUrl');
+          const scanners = listAlchemyScannerUrlsFromEnv();
+          if (scanners[0]) noteAlchemyCuLimit(scanners[0]);
+        } catch {
+          /* optional */
+        }
+      }
+    }
   } catch {
     /* optional */
   }
@@ -626,7 +657,21 @@ async function pollMigrations(): Promise<void> {
       armRateLimitBackoff(err);
       return;
     }
-    console.error('[migration] Poll error:', err);
+    if (isRpcSoftBlockedError(err)) {
+      if (Date.now() - lastRateLimitLogAt > 60_000) {
+        lastRateLimitLogAt = Date.now();
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(
+          `[migration] poll soft-blocked — skipping (${msg.slice(0, 120)})`
+        );
+      }
+      rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + 8_000);
+      return;
+    }
+    console.error(
+      '[migration] Poll error:',
+      err instanceof Error ? err.message : String(err)
+    );
   }
 }
 
