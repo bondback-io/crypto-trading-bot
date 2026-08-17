@@ -50,6 +50,7 @@ type LaneState = {
 
 const CRITICAL_FEATURES = new Set([
   'trade_entry',
+  'trade_exit',
   'migration',
   'mev_sandwich',
   'send_tx',
@@ -88,10 +89,33 @@ function laneLimits(role: RpcGateRole): {
     };
   }
   return {
-    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
-    maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
+    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 3, 1, 12),
+    maxRps: envInt('RPC_LANE_RPS_UTILITY', 6, 1, 40),
     maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
     maxWaitMs: 2_000,
+  };
+}
+
+/** Lane caps (concurrency / RPS / queue). Used to split across a key pool. */
+export function getRpcLaneLimits(role: RpcGateRole): {
+  maxConcurrent: number;
+  maxRps: number;
+  maxQueue: number;
+  maxWaitMs: number;
+} {
+  return laneLimits(role);
+}
+
+/** Per-key share of the lane cap so 3 Helius URLs do not all sit at 8 concurrent. */
+export function splitLaneKeyCap(
+  role: RpcGateRole,
+  poolSize: number
+): { maxConcurrent: number; maxRps: number } {
+  const limits = laneLimits(role);
+  const n = Math.max(1, Math.round(poolSize) || 1);
+  return {
+    maxConcurrent: Math.max(1, Math.ceil(limits.maxConcurrent / n)),
+    maxRps: Math.max(1, Math.ceil(limits.maxRps / n)),
   };
 }
 

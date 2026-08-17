@@ -10967,7 +10967,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (ALCHEMY_API_KEY_BACKUP). Extra Alchemy BACKUP2–4 sit as fallbacks with rpc-url / publicnode. Only preferred/active lanes are probed."></span></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Spillover-first 3-lane RPC: Critical (Helius pool + BACKUP/BACKUP2), Scanners (Alchemy + BACKUP2), Utility (ALCHEMY_API_KEY_BACKUP). Public/Triton/QuickNode are emergency-only. Preferred/active probed every ~12s; idle pool keys ~48s."></span></div>
           <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
@@ -10978,17 +10978,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Alchemy BACKUP</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
+            <div class="mb-1"><strong style="color:#34d399">Critical → Helius pool</strong> — trades / turbo / migration. Spillover HELIUS_API_KEY_BACKUP + BACKUP2. 40ms hedge on send.</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy pool</strong> — Market / Alpha / Zion. Spillover ALCHEMY_API_KEY_BACKUP2.</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Alchemy BACKUP</strong> — Favourites / import / activity. Never public while BACKUP is healthy.</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers <code>ALCHEMY_API_KEY_BACKUP</code>.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Keyed pools (20–40ms target)</strong> — Critical: Helius + Helius backups. Scanners: Alchemy + BACKUP2. Utility: ALCHEMY_API_KEY_BACKUP. Least-conn spillover stays in-pool.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration + send. Prefers Helius; hedges send/blockhash after 40ms onto the next Helius key.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy; spills to BACKUP2.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites + import + activity. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>. Public is emergency-only.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
+            <div class="mint">Spillover at 80ms EWMA or 75% key concurrency. Failover at 120ms for 5s, or immediately on 429. Emergency: Triton → publicnode → mainnet-beta.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -28236,8 +28236,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (rpcLatEl) {
         const ms = activeEp.latencyMs != null ? Number(activeEp.latencyMs) : null;
         rpcLatEl.textContent = ms != null && Number.isFinite(ms) ? Math.round(ms) + 'ms' : '—';
-        rpcLatEl.classList.toggle('is-slow', ms != null && ms >= 400 && ms < 1200);
-        rpcLatEl.classList.toggle('is-bad', ms != null && ms >= 1200);
+        rpcLatEl.classList.toggle('is-slow', ms != null && ms >= 80 && ms < 120);
+        rpcLatEl.classList.toggle('is-bad', ms != null && ms >= 120);
       }
       document.getElementById('rpc-summary').textContent =
         'Primary active: ' + (rpc.active || '—') +
@@ -28287,13 +28287,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const u = rpc.utility || {};
         laneSt.textContent =
           'Critical: ' + (p.label || '—') +
-          (p.failover ? ' (FAILOVER)' : '') +
+          (p.failover ? ' (SPILLOVER/FAILOVER)' : '') +
           (p.healthy === false ? ' · preferred DOWN' : '') +
           ' · Scanners: ' + (s.label || '—') +
-          (s.failover ? ' (FAILOVER)' : '') +
+          (s.failover ? ' (SPILLOVER/FAILOVER)' : '') +
           (s.healthy === false ? ' · preferred DOWN' : '') +
           ' · Utility: ' + (u.label || '—') +
-          (u.failover ? ' (FAILOVER)' : '') +
+          (u.failover ? ' (SPILLOVER/FAILOVER)' : '') +
           (u.healthy === false ? ' · preferred DOWN' : '') +
           (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
       }
@@ -28376,7 +28376,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : rpc.endpoints.map(function (e) {
               return '<tr>' +
                 '<td title="' + String(e.url || '').replace(/"/g, '&quot;') + '">' + String(e.label || '') + '</td>' +
-                '<td>' + String(e.lane || e.role || '—') + '</td>' +
+                '<td>' + String(e.lane || e.role || '—') +
+                  (e.emergency ? ' · emergency' : (e.pool && e.lane !== e.pool ? '' : '')) +
+                  (e.inFlight ? ' q' + e.inFlight : '') + '</td>' +
                 '<td>' + (e.healthy ? '✅' : '❌') + '</td>' +
                 '<td>' + (e.latencyMs != null ? e.latencyMs + 'ms' : '—') + '</td>' +
                 '<td>' + (e.successRate != null ? Number(e.successRate).toFixed(0) : '—') +

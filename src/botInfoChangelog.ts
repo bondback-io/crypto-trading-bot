@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.419',
+    title: 'RPC spillover pools + 20–40ms SLO',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Helius BACKUP/BACKUP2 join the Critical pool; Alchemy BACKUP2 spills Scanners; Utility stays on ALCHEMY_API_KEY_BACKUP. Public/Triton/QuickNode are emergency-only.',
+      'Least-conn spillover at 80ms EWMA or 75% key concurrency. Failover at 120ms/5s or on 429 (per-key cooldown). Send/blockhash hedges onto the next Helius key after 40ms. Health probes ~12s on preferred lanes.',
+    ],
+  },
+  {
     version: '1.2.418',
     title: 'Utility on Alchemy BACKUP; extra Alchemy fallbacks',
     sections: ['execution', 'knobs'],

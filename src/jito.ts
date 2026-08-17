@@ -11,7 +11,7 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { config } from './config';
-import { getConnection, estimatePriorityFeeMicroLamports } from './connection';
+import { estimatePriorityFeeMicroLamports, withRpc } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
 const DEFAULT_BLOCK_ENGINE = 'https://mainnet.block-engine.jito.wtf';
@@ -106,8 +106,11 @@ export async function buildJitoTipTransaction(
   payer: Keypair,
   tipAmount = effectiveTipLamports()
 ): Promise<VersionedTransaction> {
-  const conn = getConnection();
-  const { blockhash } = await conn.getLatestBlockhash('confirmed');
+  const { blockhash } = await withRpc(
+    'getLatestBlockhash',
+    (c) => c.getLatestBlockhash('confirmed'),
+    'primary'
+  );
 
   const tipIx = SystemProgram.transfer({
     fromPubkey: payer.publicKey,

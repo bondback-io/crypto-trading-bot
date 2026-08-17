@@ -103,12 +103,12 @@ function recompute(external?: {
   }
 
   const pLat = external?.primaryLatencyMs;
-  if (pLat != null && pLat >= 700) {
+  if (pLat != null && pLat >= 120) {
     shedBackground = true;
     scannerSlowFactor = Math.max(scannerSlowFactor, 3);
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
     reasons.push(`Critical latency ${Math.round(pLat)}ms → shed background`);
-  } else if (pLat != null && pLat >= 450) {
+  } else if (pLat != null && pLat >= 80) {
     shedBackground = true;
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
     reasons.push(`Critical latency ${Math.round(pLat)}ms → reduce scanners`);
@@ -129,16 +129,16 @@ function recompute(external?: {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
     reasons.push('Utility failover → reduce utility workload');
   }
-  if (uLat != null && uLat >= 800) {
+  if (uLat != null && uLat >= 120) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
     reasons.push(`Utility latency ${Math.round(uLat)}ms → slow polls`);
-  } else if (uLat != null && uLat >= 500) {
+  } else if (uLat != null && uLat >= 80) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
     reasons.push(`Utility latency ${Math.round(uLat)}ms → soft slowdown`);
   }
 
   const sLat = external?.secondaryLatencyMs;
-  if (sLat != null && sLat >= 600) {
+  if (sLat != null && sLat >= 80) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
     reasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
   }

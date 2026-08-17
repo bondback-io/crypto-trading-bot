@@ -1840,14 +1840,21 @@ export interface BotConfig {
 
   /** Multi-RPC + Jito + priority fees */
   rpc: {
-    endpoints: { url: string; label: string; wsUrl?: string; role?: string }[];
+    endpoints: {
+      url: string;
+      label: string;
+      wsUrl?: string;
+      role?: string;
+      pool?: string;
+      emergency?: boolean;
+    }[];
     healthIntervalMs: number;
     failureThreshold: number;
     /** Prefer other lane only after preferred endpoint is unhealthy this long (ms). */
     failoverDownMs: number;
     /**
-     * When true, split workloads: Helius=critical, Alchemy=scanners/Zion,
-     * public=utility (import/activity).
+     * When true, split workloads: Helius pool=critical, Alchemy pool=scanners,
+     * Alchemy BACKUP=utility. Publics are emergency-only.
      */
     shareLoad: boolean;
     /**
@@ -2732,7 +2739,7 @@ export const config: BotConfig = {
 
   rpc: {
     endpoints: rpcEndpointsFromEnv(),
-    healthIntervalMs: 45_000,
+    healthIntervalMs: 12_000,
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
     shareLoad:
