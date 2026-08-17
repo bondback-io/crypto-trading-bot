@@ -1,10 +1,8 @@
 /**
- * Feature → RPC lane routing for Share RPC load mode.
- * Exclusive preferred keys live in rpcServiceMap; gate roles below stay for concurrency.
+ * Feature → RPC lane routing for Share RPC load mode (classic 3-lane).
  */
 
 import type { RpcRole } from './connection';
-import { exclusiveServiceForFeature } from './rpcServiceMap';
 
 export type RpcFeature =
   | 'trade_entry'
@@ -19,34 +17,51 @@ export type RpcFeature =
   | 'activity'
   | 'setup_watch'
   | 'signal_safety'
+  | 'anti_rug'
+  | 'token_metrics'
+  | 'bonding_curve'
   | 'default';
 
 /**
- * Map a workload feature to a concurrency gate lane.
- * Preferred endpoint is the exclusive key from rpcServiceMap (not this role alone).
+ * Map a workload feature to an RPC lane.
+ * Share OFF: mostly primary; Zion + activity stay secondary (legacy).
+ * Share ON: critical→primary, scanners/Zion/setup→secondary, wallet/activity→utility.
+ * Exclusive-era 'watchers' maps to secondary.
  */
 export function getRpcRoleFor(
   feature: RpcFeature,
-  _shareLoad: boolean
+  shareLoad: boolean
 ): RpcRole {
-  const svc = exclusiveServiceForFeature(feature);
-  if (svc) return svc.gateRole;
+  if (!shareLoad) {
+    if (
+      feature === 'zion' ||
+      feature === 'activity' ||
+      feature === 'setup_watch'
+    ) {
+      return 'secondary';
+    }
+    return 'primary';
+  }
+
   switch (feature) {
+    case 'trade_entry':
+    case 'trade_exit':
+    case 'send_tx':
+    case 'migration':
+      return 'primary';
+    case 'market_scanner':
+    case 'alpha_scan':
+    case 'zion':
     case 'setup_watch':
-      return 'watchers';
+    case 'signal_safety':
+    case 'anti_rug':
+    case 'token_metrics':
+    case 'bonding_curve':
+      return 'secondary';
     case 'wallet_poll':
     case 'wallet_import':
     case 'activity':
       return 'utility';
-    case 'migration':
-    case 'market_scanner':
-    case 'alpha_scan':
-    case 'zion':
-    case 'signal_safety':
-      return 'secondary';
-    case 'trade_entry':
-    case 'trade_exit':
-    case 'send_tx':
     case 'default':
     default:
       return 'primary';
@@ -55,13 +70,12 @@ export function getRpcRoleFor(
 
 /** Human labels for Config → RPC share chips. */
 export function shareLoadLaneTitle(role: RpcRole): string {
-  if (role === 'primary') return 'Trading';
+  if (role === 'primary') return 'Critical';
   if (role === 'secondary') return 'Scanners';
-  if (role === 'watchers') return 'Watchers';
   return 'Utility';
 }
 
-/** Run watch/arm/trigger RPC on the exclusive Setup-watches key. */
+/** Run watch/arm/trigger RPC on the secondary (classic) lane. */
 export async function runSetupWatchLane<T>(
   fn: () => Promise<T> | T
 ): Promise<T> {

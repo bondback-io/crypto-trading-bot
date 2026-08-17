@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.414',
+    title: 'Classic Helius/Alchemy RPC restore + keep post-restore features',
+    sections: ['execution', 'scanners', 'knobs'],
+    items: [
+      'Restored classic three-lane Share RPC load (Critical→Helius, Scanners→Alchemy, Utility→public) from the Aug 15 / 1.2.360 spine. Exclusive 10-key map, containment soft-pause, and Alchemy BACKUP CU storm controls are stubbed off.',
+      'Kept watch/arm/Micro Bot/Dip/Discovery product work. Discovery sources kept: pump_stream, onchain_helius, majors/medium. Stats → RPC shows Share load + classic endpoint table again.',
+    ],
+  },
+  {
     version: '1.2.413',
     title: 'Utility light on PUBLICNODE + public latency failover',
     sections: ['execution', 'knobs'],

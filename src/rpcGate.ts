@@ -4,7 +4,7 @@
  */
 
 /** Mirrors connection.RpcRole — kept local to avoid circular imports. */
-export type RpcGateRole = 'primary' | 'secondary' | 'utility' | 'watchers';
+export type RpcGateRole = 'primary' | 'secondary' | 'utility';
 
 export type RpcGateDecision = 'run' | 'queued' | 'skipped_rate' | 'skipped_busy' | 'deduped';
 
@@ -50,7 +50,7 @@ type LaneState = {
 
 const CRITICAL_FEATURES = new Set([
   'trade_entry',
-  'trade_exit',
+  'migration',
   'mev_sandwich',
   'send_tx',
   'confirm_tx',
@@ -81,27 +81,17 @@ function laneLimits(role: RpcGateRole): {
   }
   if (role === 'secondary') {
     return {
-      // Five exclusive scanner services share this gate — keep headroom.
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 10, 1, 32),
-      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 20, 1, 120),
-      maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 16, 0, 100),
-      maxWaitMs: 4_000,
-    };
-  }
-  if (role === 'watchers') {
-    return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_WATCHERS', 6, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_WATCHERS', 12, 1, 80),
-      maxQueue: envInt('RPC_LANE_QUEUE_WATCHERS', 10, 0, 80),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
+      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
+      maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
       maxWaitMs: 3_000,
     };
   }
   return {
-    // Favourites + activity + utility_light share this gate.
-    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 6, 1, 24),
-    maxRps: envInt('RPC_LANE_RPS_UTILITY', 12, 1, 80),
-    maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 10, 0, 80),
-    maxWaitMs: 3_000,
+    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
+    maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
+    maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
+    maxWaitMs: 2_000,
   };
 }
 
@@ -109,7 +99,6 @@ const lanes: Record<RpcGateRole, LaneState> = {
   primary: emptyLane(),
   secondary: emptyLane(),
   utility: emptyLane(),
-  watchers: emptyLane(),
 };
 
 function emptyLane(): LaneState {
@@ -159,16 +148,10 @@ function logGate(
 export async function acquireRpcLane(
   role: RpcGateRole,
   feature?: string
-): Promise<{
-  release: () => void;
-  decision: RpcGateDecision;
-  queueWaitMs: number;
-  inFlight: number;
-}> {
+): Promise<{ release: () => void; decision: RpcGateDecision }> {
   const limits = laneLimits(role);
   const lane = lanes[role];
   const critical = isCritical(feature);
-  const waitStartedAt = Date.now();
 
   refill(lane, role);
 
@@ -289,12 +272,7 @@ export async function acquireRpcLane(
     if (next) next.resolve();
   };
 
-  return {
-    release,
-    decision: 'run',
-    queueWaitMs: Math.max(0, Date.now() - waitStartedAt),
-    inFlight: lane.inFlight,
-  };
+  return { release, decision: 'run' };
 }
 
 export class RpcGateSkipError extends Error {
@@ -315,208 +293,18 @@ export function isRpcGateSkipError(err: unknown): err is RpcGateSkipError {
   return err instanceof RpcGateSkipError;
 }
 
-const SPIKE_ACCOUNTINFO_ENRICH_CAP = 1;
-const SPIKE_ACCOUNTINFO_TOTAL_CAP = 2;
-const accountInfoInFlight: Record<'watchers' | 'secondary', number> = {
-  watchers: 0,
-  secondary: 0,
-};
-
-function isAccountInfoCapLane(
-  role: RpcGateRole | undefined
-): role is 'watchers' | 'secondary' {
-  return role === 'watchers' || role === 'secondary';
-}
-
-/** Enrich/reprice/curve — droppable when the lane is already at the spike cap. */
-function isAccountInfoEnrichFeature(feature?: string): boolean {
-  const f = String(feature || 'ungated');
-  if (CRITICAL_FEATURES.has(f) || f.startsWith('trade_')) return false;
-  if (/send_tx|confirm_tx|trade_exit|health_probe|arm_|trigger_/i.test(f)) {
-    return false;
-  }
-  return true;
-}
-
-export function getSpikeAccountInfoInFlight(
-  role: 'watchers' | 'secondary'
-): number {
-  return accountInfoInFlight[role];
-}
-
-export function __resetSpikeAccountInfoCapForTests(): void {
-  accountInfoInFlight.watchers = 0;
-  accountInfoInFlight.secondary = 0;
-}
-
-/**
- * During a Watchers/secondary spike, cap concurrent getAccountInfo (enrich 1, total 2).
- * Prefer arm/trigger over optional enrich. Exits are never dropped.
- * Engages on lane spike even when containment is OFF (mirrors always-on getTx caps).
- */
-export function acquireSpikeAccountInfoCap(
-  role: RpcGateRole | undefined,
-  methods: string[],
-  feature?: string
-): { allowed: boolean; release: () => void } {
-  const noop = { allowed: true, release: () => {} };
-  if (!isAccountInfoCapLane(role)) return noop;
-  if (!methods.some((m) => m === 'getAccountInfo')) return noop;
-  try {
-    const { isLaneSpiking } =
-      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
-    if (!isLaneSpiking(role)) return noop;
-  } catch {
-    return noop;
-  }
-  const enrich = isAccountInfoEnrichFeature(feature);
-  const cap = enrich ? SPIKE_ACCOUNTINFO_ENRICH_CAP : SPIKE_ACCOUNTINFO_TOTAL_CAP;
-  if (accountInfoInFlight[role] >= cap) {
-    lanes[role].skipped += 1;
-    try {
-      const { noteBackgroundRpcSkip } =
-        require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-      noteBackgroundRpcSkip(role, feature);
-    } catch {
-      /* */
-    }
-    logGate(
-      role,
-      enrich
-        ? 'getAccountInfo enrich dropped (spike cap 1)'
-        : 'getAccountInfo arm/trigger dropped (spike cap 2)',
-      {
-        feature: feature || 'ungated',
-        inFlight: accountInfoInFlight[role],
-      }
-    );
-    return { allowed: false, release: () => {} };
-  }
-  accountInfoInFlight[role] += 1;
-  let released = false;
-  return {
-    allowed: true,
-    release: () => {
-      if (released) return;
-      released = true;
-      accountInfoInFlight[role] = Math.max(0, accountInfoInFlight[role] - 1);
-    },
-  };
-}
-
-const PARSED_TX_ENRICH_CAP = envInt('RPC_PARSED_TX_ENRICH_CAP', 1, 1, 4);
-const PARSED_TX_TOTAL_CAP = envInt('RPC_PARSED_TX_TOTAL_CAP', 2, 1, 8);
-const parsedTxInFlight: Record<'secondary' | 'utility', number> = {
-  secondary: 0,
-  utility: 0,
-};
-
-function isParsedTxCapLane(
-  role: RpcGateRole | undefined
-): role is 'secondary' | 'utility' {
-  return role === 'secondary' || role === 'utility';
-}
-
-function isParsedTxMethod(methods: string[]): boolean {
-  return methods.some(
-    (m) => m === 'getParsedTransaction' || m === 'getTransaction'
-  );
-}
-
-/**
- * Droppable enrich/history getTx — anti-rug, Favourites parse, ungated.
- * Discovery (migration/zion/market/alpha) uses the higher total cap.
- */
-export function isParsedTxEnrichFeature(feature?: string): boolean {
-  const f = String(feature || 'ungated');
-  if (CRITICAL_FEATURES.has(f) || f.startsWith('trade_')) return false;
-  if (/send_tx|confirm_tx|trade_exit|health_probe/i.test(f)) return false;
-  if (
-    /^(migration|zion|market_scanner|alpha_scan|bonding_curve)$/i.test(f)
-  ) {
-    return false;
-  }
-  return true;
-}
-
-export function getParsedTxInFlight(role: 'secondary' | 'utility'): number {
-  return parsedTxInFlight[role];
-}
-
-export function __resetParsedTxCapForTests(): void {
-  parsedTxInFlight.secondary = 0;
-  parsedTxInFlight.utility = 0;
-}
-
-/**
- * Always-on cap for concurrent getParsedTransaction / getTransaction on
- * secondary + utility. Primary / exits are never gated here.
- */
-export function acquireParsedTxCap(
-  role: RpcGateRole | undefined,
-  methods: string[],
-  feature?: string
-): { allowed: boolean; release: () => void } {
-  const noop = { allowed: true, release: () => {} };
-  if (!isParsedTxCapLane(role)) return noop;
-  if (!isParsedTxMethod(methods)) return noop;
-  const enrich = isParsedTxEnrichFeature(feature);
-  const cap = enrich ? PARSED_TX_ENRICH_CAP : PARSED_TX_TOTAL_CAP;
-  if (parsedTxInFlight[role] >= cap) {
-    lanes[role].skipped += 1;
-    try {
-      const { noteBackgroundRpcSkip } =
-        require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-      noteBackgroundRpcSkip(role, feature);
-    } catch {
-      /* */
-    }
-    logGate(
-      role,
-      enrich
-        ? `getParsedTransaction enrich dropped (cap ${cap})`
-        : `getParsedTransaction discovery dropped (cap ${cap})`,
-      {
-        feature: feature || 'ungated',
-        inFlight: parsedTxInFlight[role],
-      }
-    );
-    return { allowed: false, release: () => {} };
-  }
-  parsedTxInFlight[role] += 1;
-  let released = false;
-  return {
-    allowed: true,
-    release: () => {
-      if (released) return;
-      released = true;
-      parsedTxInFlight[role] = Math.max(0, parsedTxInFlight[role] - 1);
-    },
-  };
-}
-
 /** In-flight dedupe: same key shares one promise; later callers await or skip. */
 const inflightJobs = new Map<string, Promise<unknown>>();
 
 export async function runDedupedRpcJob<T>(
   key: string,
   fn: () => Promise<T>,
-  opts?: {
-    /** If true, join the in-flight job; else skip with undefined */
-    join?: boolean;
-    /** If false and nothing is in-flight, do not start a new job. */
-    startIfMissing?: boolean;
-  }
+  opts?: { /** If true, join the in-flight job; else skip with undefined */ join?: boolean }
 ): Promise<T | undefined> {
   const existing = inflightJobs.get(key);
   if (existing) {
     const roleHint = key.split(':')[0];
-    if (
-      roleHint === 'primary' ||
-      roleHint === 'secondary' ||
-      roleHint === 'utility' ||
-      roleHint === 'watchers'
-    ) {
+    if (roleHint === 'primary' || roleHint === 'secondary' || roleHint === 'utility') {
       lanes[roleHint].deduped += 1;
     } else {
       lanes.utility.deduped += 1;
@@ -524,7 +312,6 @@ export async function runDedupedRpcJob<T>(
     if (opts?.join === false) return undefined;
     return (await existing) as T;
   }
-  if (opts?.startIfMissing === false) return undefined;
   const promise = (async () => {
     try {
       return await fn();
@@ -537,7 +324,7 @@ export async function runDedupedRpcJob<T>(
 }
 
 export function getRpcGateSnapshot(): RpcGateSnapshot {
-  const roles: RpcGateRole[] = ['primary', 'secondary', 'utility', 'watchers'];
+  const roles: RpcGateRole[] = ['primary', 'secondary', 'utility'];
   const out = {} as Record<RpcGateRole, RpcLaneGateStats>;
   let backlog = 0;
   for (const role of roles) {
@@ -569,13 +356,64 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
 }
 
 /**
- * Exclusive map: each service has its own paid key — do not stall scanners/
- * Favourites because Trading's gate is briefly busy.
+ * True when Critical (primary) is busy — scanners / Favourites should yield
+ * so trade entry keeps RPC headroom.
  */
-export function shouldDeferBackgroundForCritical(_kind: 'scanner' | 'utility' = 'scanner'): {
+export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = 'scanner'): {
   defer: boolean;
   reason: string | null;
 } {
+  const snap = getRpcGateSnapshot();
+  const p = snap.lanes.primary;
+  const s = snap.lanes.secondary;
+  const u = snap.lanes.utility;
+
+  try {
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    const load = getRpcLoadControlSnapshot();
+    // Only full shed (Critical latency / queue) hard-skips. Mild scanner×2
+  // uses probabilistic skip in shouldSkipScannerTick — do not hard-block here
+  // or scanners go quiet for the whole process once factor hits 3 once.
+  if (load.shedBackground && kind === 'scanner' && load.scannerSlowFactor >= 3) {
+    return {
+      defer: true,
+      reason: load.reasons[0] || 'adaptive shed for Critical',
+    };
+  }
+  if (kind === 'utility' && load.utilitySlowFactor >= 3) {
+    return {
+      defer: true,
+      reason: `utility adaptive×${load.utilitySlowFactor}`,
+    };
+  }
+  } catch {
+    /* */
+  }
+
+  if (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1)) {
+    return {
+      defer: true,
+      reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
+    };
+  }
+  // Use in-flight/queue only — lane.skipped is a lifetime counter and must NOT
+  // permanently disable scanners after a few early gate skips.
+  if (
+    kind === 'scanner' &&
+    (s.queued >= 2 || s.inFlight >= s.maxConcurrent)
+  ) {
+    return {
+      defer: true,
+      reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
+    };
+  }
+  if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
+    return {
+      defer: true,
+      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued}, skipped ${u.skipped})`,
+    };
+  }
   return { defer: false, reason: null };
 }
 

@@ -133,9 +133,11 @@ function isRpcSoftBlockedError(err: unknown): boolean {
   }
 }
 
-function resolveMigrationRpcRole(): 'primary' | 'secondary' | 'utility' | 'watchers' | null {
+function resolveMigrationRpcRole(): 'primary' | 'secondary' | 'utility' | null {
   const share = Boolean(config.rpc?.shareLoad);
   let role = getRpcRoleFor('migration', share);
+  // Exclusive-era watchers → classic secondary.
+  if ((role as string) === 'watchers') role = 'secondary';
   try {
     const { shouldShedPrimaryMonitoring, isLaneSpiking } =
       require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
@@ -183,7 +185,7 @@ function armRateLimitBackoff(err: unknown): void {
       else {
         try {
           const { listAlchemyScannerUrlsFromEnv } =
-            require('./rpcUrl') as typeof import('./rpcUrl');
+            require('./rpcProviderPace') as typeof import('./rpcProviderPace');
           const scanners = listAlchemyScannerUrlsFromEnv();
           if (scanners[0]) noteAlchemyCuLimit(scanners[0]);
         } catch {

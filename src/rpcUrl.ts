@@ -89,122 +89,11 @@ export function buildHeliusRpcUrl(apiKey?: string | null): string | null {
   return `https://mainnet.helius-rpc.com/?api-key=${key}`;
 }
 
-/** Optional Helius backup URL. Null if HELIUS_API_KEY_BACKUP unset (not an exclusive preferred). */
-export function buildHeliusBackupRpcUrl(apiKey?: string | null): string | null {
-  const key = (apiKey ?? process.env.HELIUS_API_KEY_BACKUP)?.trim();
-  if (!isUsableApiKey(key)) return null;
-  return `https://mainnet.helius-rpc.com/?api-key=${key}`;
-}
-
 /** Build Alchemy Solana mainnet HTTP RPC URL from API key (null if unset/placeholder). */
 export function buildAlchemyRpcUrl(apiKey?: string | null): string | null {
   const key = (apiKey ?? process.env.ALCHEMY_API_KEY)?.trim();
   if (!isUsableApiKey(key)) return null;
   return `https://solana-mainnet.g.alchemy.com/v2/${key}`;
-}
-
-/** Exclusive Favourites-lane Alchemy URL. Null if ALCHEMY_API_KEY_BACKUP unset. */
-export function buildAlchemyBackupRpcUrl(apiKey?: string | null): string | null {
-  return buildAlchemyRpcUrl(apiKey ?? process.env.ALCHEMY_API_KEY_BACKUP);
-}
-
-/** Market Scanner exclusive Alchemy URL (BACKUP3). */
-export function buildAlchemyBackup3RpcUrl(apiKey?: string | null): string | null {
-  return buildAlchemyRpcUrl(apiKey ?? process.env.ALCHEMY_API_KEY_BACKUP3);
-}
-
-/** PUBLICNODE_URL env or hardcoded publicnode default. */
-export function resolvePublicnodeRpcUrl(): string {
-  const fromEnv = String(process.env.PUBLICNODE_URL || '').trim();
-  if (fromEnv && isUsableRpcUrl(fromEnv)) return fromEnv;
-  return PUBLIC_SOLANA_RPC;
-}
-
-export type AlchemyKeyRole = 'scanner' | 'watchers' | 'critical_extra' | 'other';
-
-export type AlchemyEnvKey = {
-  env: string;
-  key: string;
-  label: string;
-  role: AlchemyKeyRole;
-  url: string;
-};
-
-const ALCHEMY_ENV_ROLE: Record<string, AlchemyKeyRole> = {
-  ALCHEMY_API_KEY: 'scanner',
-  ALCHEMY_API_KEY_BACKUP: 'watchers',
-  ALCHEMY_API_KEY_BACKUP2: 'other',
-  ALCHEMY_API_KEY_BACKUP3: 'scanner',
-  ALCHEMY_API_KEY_BACKUP4: 'other',
-  ALCHEMY_API_KEY_BACKUP5: 'other',
-  ALCHEMY_API_KEY_BACKUP6: 'other',
-  ALCHEMY_API_KEY_BACKUP7: 'other',
-};
-
-const ALCHEMY_ENV_LABEL: Record<string, string> = {
-  ALCHEMY_API_KEY: 'alchemy',
-  ALCHEMY_API_KEY_BACKUP: 'alchemy-backup',
-  ALCHEMY_API_KEY_BACKUP2: 'alchemy-backup2',
-  ALCHEMY_API_KEY_BACKUP3: 'alchemy-backup3',
-  ALCHEMY_API_KEY_BACKUP4: 'alchemy-backup4',
-  ALCHEMY_API_KEY_BACKUP5: 'alchemy-backup5',
-  ALCHEMY_API_KEY_BACKUP6: 'alchemy-backup6',
-  ALCHEMY_API_KEY_BACKUP7: 'alchemy-backup7',
-};
-
-/** Discover all usable ALCHEMY_API_KEY* env vars (deduped by key string). */
-export function listAlchemyApiKeysFromEnv(): AlchemyEnvKey[] {
-  const names = new Set<string>([
-    'ALCHEMY_API_KEY',
-    'ALCHEMY_API_KEY_BACKUP',
-    'ALCHEMY_API_KEY_BACKUP2',
-    'ALCHEMY_API_KEY_BACKUP3',
-    'ALCHEMY_API_KEY_BACKUP4',
-    'ALCHEMY_API_KEY_BACKUP5',
-    'ALCHEMY_API_KEY_BACKUP6',
-    'ALCHEMY_API_KEY_BACKUP7',
-  ]);
-  for (const k of Object.keys(process.env)) {
-    if (/^ALCHEMY_API_KEY(_|$)/i.test(k)) names.add(k);
-  }
-  const ordered = [...names].sort((a, b) => {
-    const rank = (n: string) => {
-      if (n === 'ALCHEMY_API_KEY') return 0;
-      const m = /^ALCHEMY_API_KEY_BACKUP(\d*)$/i.exec(n);
-      if (m) return 1 + (m[1] ? Number(m[1]) : 0);
-      return 20;
-    };
-    const d = rank(a) - rank(b);
-    return d !== 0 ? d : a.localeCompare(b);
-  });
-  const seenKeys = new Set<string>();
-  const out: AlchemyEnvKey[] = [];
-  for (const env of ordered) {
-    const key = String(process.env[env] || '').trim();
-    if (!isUsableApiKey(key) || seenKeys.has(key)) continue;
-    seenKeys.add(key);
-    const url = buildAlchemyRpcUrl(key);
-    if (!url) continue;
-    const role = ALCHEMY_ENV_ROLE[env] || 'other';
-    const label =
-      ALCHEMY_ENV_LABEL[env] ||
-      `alchemy-${env.replace(/^ALCHEMY_API_KEY_?/i, '').toLowerCase() || 'extra'}`;
-    out.push({ env, key, label, role, url });
-  }
-  return out;
-}
-
-/** Scanner-capacity Alchemy URLs (primary + BACKUP3 + other scanner-role keys). */
-export function listAlchemyScannerUrlsFromEnv(): string[] {
-  return listAlchemyApiKeysFromEnv()
-    .filter((k) => k.role === 'scanner')
-    .map((k) => k.url);
-}
-
-/** True when label is a paced Alchemy endpoint (per-key CU/s). */
-export function isAlchemyScannerCapacityLabel(label: string | null | undefined): boolean {
-  const l = String(label || '').toLowerCase();
-  return l === 'alchemy' || l.startsWith('alchemy-backup');
 }
 
 /** True for QuickNode hosted Solana HTTP endpoints. */
@@ -280,23 +169,23 @@ export function isPublicRpcUrl(url: string | null | undefined): boolean {
  * (Helius free, Alchemy free, public Solana). Use soft poll concurrency.
  * QuickNode is paid mid-tier — not soft-throttled unless RPC_SOFT_THROTTLE=1.
  */
-/**
- * Soft-throttle only true public RPCs (or RPC_SOFT_THROTTLE=1).
- * Exclusive Alchemy/Helius service keys are paid capacity — do not gentle-poll them.
- */
 export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
-  if (process.env.RPC_SOFT_THROTTLE === '1') return true;
-  if (process.env.RPC_SOFT_THROTTLE === '0') return false;
   if (isPublicRpcUrl(url)) return true;
   const u = (url || '').toLowerCase();
   if (!u) return true;
-  // Helius / Alchemy exclusive keys — full pace.
-  if (u.includes('helius-rpc.com') || u.includes('g.alchemy.com')) return false;
-  if (isQuicknodeRpcUrl(u)) return false;
+  if (isQuicknodeRpcUrl(u)) {
+    return process.env.RPC_SOFT_THROTTLE === '1';
+  }
+  if (u.includes('helius-rpc.com')) return true;
+  if (u.includes('g.alchemy.com')) return true;
+  // Explicit override for paid dedicated URLs that still need gentle polling
+  if (process.env.RPC_SOFT_THROTTLE === '1') return true;
+  // Paid / custom RPC_URL — allow higher concurrency unless forced soft
+  if (process.env.RPC_SOFT_THROTTLE === '0') return false;
   return false;
 }
 
-export type RpcLaneRole = 'primary' | 'secondary' | 'utility' | 'watchers' | 'fallback';
+export type RpcLaneRole = 'primary' | 'secondary' | 'utility' | 'fallback';
 
 export interface NormalizedRpcEndpoint {
   url: string;
@@ -351,11 +240,9 @@ export function normalizeRpcEndpoints(
           ? 'secondary'
           : c.label === 'utility'
             ? 'utility'
-            : c.label === 'watchers' || c.label === 'alchemy-backup'
-              ? 'watchers'
-              : i === 0
-                ? 'primary'
-                : 'fallback');
+            : i === 0
+              ? 'primary'
+              : 'fallback');
     push(
       c.url,
       c.label ||
@@ -365,9 +252,7 @@ export function normalizeRpcEndpoints(
             ? 'secondary'
             : role === 'utility'
               ? 'utility'
-              : role === 'watchers'
-                ? 'watchers'
-                : `rpc-${i + 1}`),
+              : `rpc-${i + 1}`),
       role,
       c.wsUrl
     );
@@ -393,19 +278,20 @@ export function normalizeRpcEndpoints(
 }
 
 /**
- * Resolve exclusive service endpoints + emergency fallbacks from env.
+ * Resolve dual-lane + free-tier multi-RPC list from env.
  *
- * Preferred: one Alchemy/Helius key per service (see rpcServiceMap).
- * Emergency only: RPC_URL → PUBLICNODE_URL (never preferred for exclusives).
+ * Preferred primary:  Helius → else RPC_URL → else Alchemy → else public
+ * Preferred secondary: Alchemy (if ≠ primary) → else RPC_SECONDARY → else next distinct
+ * Failover scan order follows the candidate array (see module header).
  */
 export function rpcEndpointsFromEnv(
   primaryEnv?: string | null,
   fallbacksEnv?: string | null,
   secondaryEnv?: string | null
 ): NormalizedRpcEndpoint[] {
-  const {
-    RPC_EXCLUSIVE_SERVICES,
-  } = require('./rpcServiceMap') as typeof import('./rpcServiceMap');
+  const helius = buildHeliusRpcUrl();
+  const alchemy = buildAlchemyRpcUrl();
+  const quicknode = buildQuicknodeRpcUrl();
 
   const rpcUrlRaw = (
     primaryEnv ??
@@ -414,9 +300,124 @@ export function rpcEndpointsFromEnv(
     ''
   ).trim();
   const rpcUrl = isUsableRpcUrl(rpcUrlRaw) ? rpcUrlRaw : '';
-  const publicnode = resolvePublicnodeRpcUrl();
 
+  const fromRpcSecondary = process.env.RPC_SECONDARY?.trim() || '';
+  const fromAlias = process.env.SECONDARY_RPC?.trim() || '';
+  let rpcSecondary =
+    secondaryEnv != null
+      ? String(secondaryEnv).trim()
+      : fromRpcSecondary || fromAlias;
+  if (!fromRpcSecondary && fromAlias && secondaryEnv == null) {
+    console.warn(
+      '[rpc] Using SECONDARY_RPC as secondary lane — prefer renaming to RPC_SECONDARY'
+    );
+  }
+  if (rpcSecondary && !isUsableRpcUrl(rpcSecondary)) {
+    rpcSecondary = '';
+  }
+
+  const fallbacks = (fallbacksEnv ?? process.env.RPC_FALLBACKS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((u) => u && isUsableRpcUrl(u));
+
+  // Failover priority pool (deduped later by normalizeRpcEndpoints)
   type Cand = { url: string; label: string; role: RpcLaneRole; wsUrl?: string };
+  const pool: Cand[] = [];
+
+  if (helius) pool.push({ url: helius, label: 'helius', role: 'fallback' });
+  if (alchemy) pool.push({ url: alchemy, label: 'alchemy', role: 'fallback' });
+  if (quicknode) {
+    const qnWs = process.env.QUICKNODE_WSS_URL?.trim();
+    pool.push({
+      url: quicknode,
+      label: 'quicknode',
+      role: 'fallback',
+      wsUrl: qnWs && isUsableRpcUrl(qnWs) ? qnWs : undefined,
+    });
+  }
+  if (rpcUrl) pool.push({ url: rpcUrl, label: 'rpc-url', role: 'fallback' });
+  pool.push({
+    url: PUBLIC_SOLANA_RPC,
+    label: 'publicnode',
+    role: 'fallback',
+  });
+  pool.push({
+    url: PUBLIC_SOLANA_RPC_OFFICIAL,
+    label: 'mainnet-beta',
+    role: 'fallback',
+  });
+  if (rpcSecondary) {
+    pool.push({
+      url: rpcSecondary,
+      label: 'rpc-secondary',
+      role: 'fallback',
+    });
+  }
+  for (let i = 0; i < fallbacks.length; i++) {
+    pool.push({
+      url: fallbacks[i],
+      label: `fallback-${i + 1}`,
+      role: 'fallback',
+    });
+  }
+
+  // Pick preferred primary / secondary / utility URLs
+  const primaryUrl =
+    helius || rpcUrl || alchemy || PUBLIC_SOLANA_RPC;
+  let secondaryUrl = '';
+  if (alchemy && alchemy !== primaryUrl) {
+    secondaryUrl = alchemy;
+  } else if (rpcSecondary && rpcSecondary !== primaryUrl) {
+    secondaryUrl = rpcSecondary;
+  } else {
+    for (const c of pool) {
+      if (c.url !== primaryUrl) {
+        secondaryUrl = c.url;
+        break;
+      }
+    }
+  }
+
+  // Utility lane prefers official mainnet-beta, then publicnode / Triton.
+  let utilityUrl = '';
+  const utilityPrefs = [
+    PUBLIC_SOLANA_RPC_OFFICIAL,
+    rpcUrl && isOfficialMainnetBetaRpcUrl(rpcUrl) ? rpcUrl : '',
+    PUBLIC_SOLANA_RPC,
+    rpcUrl && isTritonMainnetRpcUrl(rpcUrl) ? rpcUrl : '',
+    rpcSecondary && isTritonMainnetRpcUrl(rpcSecondary) ? rpcSecondary : '',
+    rpcSecondary && !isOfficialMainnetBetaRpcUrl(rpcSecondary) ? rpcSecondary : '',
+  ].filter((u) => u && isUsableRpcUrl(u));
+  for (const u of utilityPrefs) {
+    if (u !== primaryUrl && u !== secondaryUrl) {
+      utilityUrl = u;
+      break;
+    }
+  }
+  if (!utilityUrl) {
+    for (const c of pool) {
+      if (c.url === primaryUrl || c.url === secondaryUrl) continue;
+      utilityUrl = c.url;
+      break;
+    }
+  }
+  if (!utilityUrl) {
+    utilityUrl =
+      PUBLIC_SOLANA_RPC_OFFICIAL !== primaryUrl &&
+      PUBLIC_SOLANA_RPC_OFFICIAL !== secondaryUrl
+        ? PUBLIC_SOLANA_RPC_OFFICIAL
+        : PUBLIC_SOLANA_RPC !== primaryUrl && PUBLIC_SOLANA_RPC !== secondaryUrl
+          ? PUBLIC_SOLANA_RPC
+          : secondaryUrl || primaryUrl;
+  }
+
+  if (secondaryUrl && secondaryUrl === primaryUrl) {
+    console.warn(
+      '[rpc] Primary and secondary resolve to the same URL — Zion shares CU with copy/signals.'
+    );
+  }
+
   const candidates: Cand[] = [];
   const seen = new Set<string>();
   const add = (
@@ -430,112 +431,76 @@ export function rpcEndpointsFromEnv(
     candidates.push({ url, label, role, wsUrl });
   };
 
-  const urlForEnv = (envKey: string): string | null => {
-    if (envKey === 'ALCHEMY_API_KEY') return buildAlchemyRpcUrl();
-    if (envKey.startsWith('ALCHEMY_API_KEY')) {
-      return buildAlchemyRpcUrl(process.env[envKey]);
-    }
-    if (envKey === 'HELIUS_API_KEY') return buildHeliusRpcUrl();
-    if (envKey === 'HELIUS_API_KEY_BACKUP') return buildHeliusBackupRpcUrl();
-    if (envKey === 'RPC_URL') return rpcUrl || null;
-    if (envKey === 'PUBLICNODE_URL') return publicnode;
-    const raw = String(process.env[envKey] || '').trim();
-    if (raw && isUsableRpcUrl(raw)) return raw;
-    if (raw && isUsableApiKey(raw) && /ALCHEMY/i.test(envKey)) {
-      return buildAlchemyRpcUrl(raw);
-    }
-    if (raw && isUsableApiKey(raw) && /HELIUS/i.test(envKey)) {
-      return buildHeliusRpcUrl(raw);
-    }
-    return null;
+  const labelFor = (url: string, fallback: string): string => {
+    if (url === helius) return 'helius';
+    if (url === alchemy) return 'alchemy';
+    if (url === quicknode) return 'quicknode';
+    if (url === rpcUrl) return 'rpc-url';
+    if (url === rpcSecondary) return 'rpc-secondary';
+    if (url === PUBLIC_SOLANA_RPC) return 'publicnode';
+    if (url === PUBLIC_SOLANA_RPC_OFFICIAL) return 'mainnet-beta';
+    if (isTritonMainnetRpcUrl(url)) return 'mainnet-triton';
+    return fallback;
   };
 
-  // Exclusive preferred endpoints first (gate role from service map).
-  for (const svc of RPC_EXCLUSIVE_SERVICES) {
-    const url = urlForEnv(svc.envKey);
-    if (!url) continue;
-    add(url, svc.label, svc.gateRole);
+  // Preferred lanes first (sticky until unhealthy), then remaining failover order
+  add(primaryUrl, labelFor(primaryUrl, 'primary'), 'primary');
+  if (secondaryUrl) {
+    add(secondaryUrl, labelFor(secondaryUrl, 'secondary'), 'secondary');
+  }
+  if (utilityUrl) {
+    add(utilityUrl, labelFor(utilityUrl, 'utility'), 'utility');
   }
 
-  // Emergency publics (rpc-url may already be Utility light preferred above).
-  if (rpcUrl) add(rpcUrl, 'rpc-url', 'fallback');
-  add(publicnode, 'publicnode', 'fallback');
-
-  // Optional QuickNode — emergency mid-tier only (not exclusive preferred).
-  const quicknode = buildQuicknodeRpcUrl();
-  if (quicknode) {
-    const qnWs = process.env.QUICKNODE_WSS_URL?.trim();
-    add(
-      quicknode,
-      'quicknode',
-      'fallback',
-      qnWs && isUsableRpcUrl(qnWs) ? qnWs : undefined
-    );
-  }
-
-  // Legacy secondary / fallbacks env — emergency only.
-  const fromRpcSecondary = process.env.RPC_SECONDARY?.trim() || '';
-  const fromAlias = process.env.SECONDARY_RPC?.trim() || '';
-  let rpcSecondary =
-    secondaryEnv != null
-      ? String(secondaryEnv).trim()
-      : fromRpcSecondary || fromAlias;
-  if (rpcSecondary && isUsableRpcUrl(rpcSecondary)) {
-    add(rpcSecondary, 'rpc-secondary', 'fallback');
-  }
-  const fallbacks = (fallbacksEnv ?? process.env.RPC_FALLBACKS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((u) => u && isUsableRpcUrl(u));
-  for (let i = 0; i < fallbacks.length; i++) {
-    add(fallbacks[i], `fallback-${i + 1}`, 'fallback');
-  }
-
-  // Absolute last resort if nothing configured.
-  if (!candidates.length) {
-    add(PUBLIC_SOLANA_RPC_OFFICIAL, 'mainnet-beta', 'primary');
+  for (const c of pool) {
+    add(c.url, c.label, 'fallback', c.wsUrl);
   }
 
   const out = normalizeRpcEndpoints(candidates);
-  const chain = out.map((e) => `${e.label}[${e.role}]`).join(' → ');
-  console.log(`[rpc] Exclusive multi-RPC chain: ${chain}`);
-  const missing = RPC_EXCLUSIVE_SERVICES.filter(
-    (s) => !out.some((e) => e.label === s.label)
+
+  const chain = out.map((e) => e.label).join(' → ');
+  console.log(
+    `[rpc] Multi-RPC chain: ${chain}` +
+      (helius ? ' (Helius free primary)' : '') +
+      (alchemy ? ' (Alchemy free secondary)' : '') +
+      (quicknode ? ' (QuickNode mid-tier)' : '') +
+      (utilityUrl && isOfficialMainnetBetaRpcUrl(utilityUrl)
+        ? ' (mainnet-beta utility)'
+        : utilityUrl && isTritonMainnetRpcUrl(utilityUrl)
+          ? ' (Triton api.mainnet.solana.com utility)'
+          : utilityUrl === PUBLIC_SOLANA_RPC
+            ? ' (publicnode utility)'
+            : '')
   );
-  if (missing.length) {
+  if (!helius && !alchemy) {
     console.warn(
-      `[rpc] Exclusive keys unset (will emergency-failover): ` +
-        missing.map((m) => `${m.service}=${m.envKey}`).join(', ')
+      '[rpc] HELIUS_API_KEY / ALCHEMY_API_KEY unset — using RPC_URL / public. ' +
+        'Set free Helius + Alchemy keys for better speed and automatic failover.'
     );
-  }
-  if (!rpcUrl) {
-    console.log('[rpc] RPC_URL unset — emergency failover uses PUBLICNODE_URL only');
   }
 
   return out;
 }
 
-/** Human-readable lane assignments for Config > RPC UI. */
+/** Human-readable lane assignments for Config > RPC UI (Share OFF defaults). */
 export const RPC_LANE_SUPPORTS = {
   primary: [
-    'Trading Critical + MEV — ALCHEMY_API_KEY (exclusive)',
-    'Emergency failover: RPC_URL → PUBLICNODE_URL only',
+    'Critical: trade entries / turbo / migration sniper / copy buys',
+    'Wallet buy detection (signal poll)',
+    'Migration listener parses',
+    'Preferred: Helius → Alchemy → QuickNode → public',
   ],
   secondary: [
-    'Market Scanner — ALCHEMY_API_KEY_BACKUP3',
-    'Zion KOL — ALCHEMY_API_KEY_BACKUP4',
-    'Migration — ALCHEMY_API_KEY_BACKUP5',
-    'AlphaScan — ALCHEMY_API_KEY_BACKUP6',
-    'Anti-rug / holders — ALCHEMY_API_KEY_BACKUP7',
-    'Each exclusive; emergency: RPC_URL → PUBLICNODE_URL',
+    'Market Scanner + AlphaScan (Share ON)',
+    'Zion micro-bot + KOL Token Scanner',
+    'Zion Place Trade on-chain bits',
+    'Preferred: Alchemy → Helius → QuickNode → public',
   ],
   utility: [
-    'Favourites soft-watch — ALCHEMY_API_KEY_BACKUP',
-    'Activity refresh — HELIUS_API_KEY',
-    'Utility light — PUBLICNODE_URL (public)',
-  ],
-  watchers: [
-    'Setup watches (Dip/Trend/Scalper/Grad) — ALCHEMY_API_KEY_BACKUP2 (exclusive)',
+    'Wallet favourites / import on-chain checks (Share ON)',
+    'Wallet activity refresh / last-trade polls (Share ON)',
+    'Other light non-entry polls',
+    'Preferred: official mainnet-beta → publicnode → Triton → last-resort fallbacks',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
@@ -547,15 +512,12 @@ export const RPC_LANE_SUPPORTS = {
 /** Copy when Share RPC load is enabled. */
 export const RPC_SHARE_LOAD_SUPPORTS = {
   critical: [
-    'ALCHEMY_API_KEY — Trading Critical + MEV (exclusive). Emergency: RPC_URL → PUBLICNODE_URL.',
+    'Helius — trade entries, turbo profiles, migration sniper/parses',
   ],
   scanners: [
-    'BACKUP3 Market Scanner · BACKUP4 Zion · BACKUP5 Migration · BACKUP6 AlphaScan · BACKUP7 anti-rug — each exclusive.',
-  ],
-  watchers: [
-    'ALCHEMY_API_KEY_BACKUP2 — setup watch / arm / trigger (exclusive).',
+    'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
   ],
   utility: [
-    'ALCHEMY_API_KEY_BACKUP Favourites · HELIUS_API_KEY Activity · PUBLICNODE_URL utility light.',
+    'mainnet-beta — wallet buy watch (Favourites), import checks, activity refresh, light polls',
   ],
 } as const;

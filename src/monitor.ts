@@ -2029,8 +2029,8 @@ export function resolveSoftWatchCap(): {
   shareLoad: boolean;
   defaultCap: number;
 } {
-  const shareLoad = false;
-  const defaultCap = 24;
+  const shareLoad = Boolean(config.rpc?.shareLoad);
+  const defaultCap = shareLoad ? 12 : 16;
   if (
     process.env.RPC_SOFT_WATCH_CAP != null &&
     process.env.RPC_SOFT_WATCH_CAP !== '' &&

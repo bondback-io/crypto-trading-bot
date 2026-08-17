@@ -2735,10 +2735,18 @@ export const config: BotConfig = {
     healthIntervalMs: 45_000,
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
-    shareLoad: false,
-    containmentEnabled:
-      process.env.RPC_CONTAINMENT === '1' ||
-      process.env.RPC_CONTAINMENT === 'true',
+    shareLoad:
+      process.env.RPC_SHARE_LOAD === '0' ||
+      process.env.RPC_SHARE_LOAD === 'false'
+        ? false
+        : process.env.RPC_SHARE_LOAD === '1' ||
+          process.env.RPC_SHARE_LOAD === 'true' ||
+          // Classic: ON when Helius + Alchemy exist (Critical / Scanners / Utility).
+          Boolean(
+            process.env.HELIUS_API_KEY?.trim() &&
+              process.env.ALCHEMY_API_KEY?.trim()
+          ),
+    containmentEnabled: false,
     softWatchCap:
       process.env.RPC_SOFT_WATCH_CAP != null &&
       process.env.RPC_SOFT_WATCH_CAP !== '' &&
@@ -3159,8 +3167,8 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     bondingCurve: { ...config.bondingCurve },
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
-    rpcShareLoad: false,
-    rpcContainmentEnabled: Boolean(config.rpc.containmentEnabled === true),
+    rpcShareLoad: Boolean(config.rpc.shareLoad),
+    rpcContainmentEnabled: false,
     rpcSoftWatchCap:
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
         ? config.rpc.softWatchCap
@@ -3934,15 +3942,14 @@ function applySettingsSnapshot(
   if (typeof saved.convergenceWindowMs === 'number') {
     config.convergenceWindowMs = saved.convergenceWindowMs;
   }
-  // Exclusive multi-key map: Share load stays OFF; containment only via RPC_CONTAINMENT=1.
-  // Do not restore persisted share/containment toggles — they caused cross-lane lag.
-  config.rpc.shareLoad = false;
-  config.rpc.containmentEnabled =
-    process.env.RPC_CONTAINMENT === '1' ||
-    process.env.RPC_CONTAINMENT === 'true';
   if (typeof saved.pollIntervalMs === 'number') {
     config.pollIntervalMs = saved.pollIntervalMs;
   }
+  if (typeof saved.rpcShareLoad === 'boolean') {
+    config.rpc.shareLoad = saved.rpcShareLoad;
+  }
+  // Containment stays OFF after classic restore (no spike soft-pause control plane).
+  config.rpc.containmentEnabled = false;
   if (typeof saved.rpcHeliusExtraFallbackEnabled === 'boolean') {
     config.rpc.heliusExtraFallbackEnabled = saved.rpcHeliusExtraFallbackEnabled;
   }
@@ -5997,27 +6004,25 @@ export function updateConfig(partial: Partial<BotConfig>): void {
   persistUserSettings();
 }
 
-/** Share RPC load is retired — exclusive keys must not share workload. */
-export function setRpcShareLoad(_enabled: boolean): boolean {
-  config.rpc.shareLoad = false;
+/** Enable/disable Share RPC load mode (Helius/Alchemy/public workload split). */
+export function setRpcShareLoad(enabled: boolean): boolean {
+  config.rpc.shareLoad = Boolean(enabled);
   persistUserSettings();
   console.log(
-    '[rpc] Share RPC load stays OFF — exclusive per-service keys (no shared load)'
+    `[rpc] Share RPC load ${config.rpc.shareLoad ? 'ON' : 'OFF'} — ` +
+      (config.rpc.shareLoad
+        ? 'critical→Helius, scanners/Zion→Alchemy, wallet-watch+utility→public'
+        : 'legacy primary/secondary routing')
   );
-  return false;
+  return config.rpc.shareLoad;
 }
 
-/** Spike containment — opt-in via API or RPC_CONTAINMENT=1 (default OFF). */
-export function setRpcContainmentEnabled(enabled: boolean): boolean {
-  config.rpc.containmentEnabled = Boolean(enabled);
+/** Spike containment disabled on classic restore (always OFF). */
+export function setRpcContainmentEnabled(_enabled: boolean): boolean {
+  config.rpc.containmentEnabled = false;
   persistUserSettings();
-  console.log(
-    `[rpc] Containment ${config.rpc.containmentEnabled ? 'ON' : 'OFF'} — ` +
-      (config.rpc.containmentEnabled
-        ? 'Watchers shed on spike; Trading pauses new entries only'
-        : 'detect/record only — no shedding')
-  );
-  return config.rpc.containmentEnabled;
+  console.log('[rpc] Containment stays OFF — classic three-lane restore');
+  return false;
 }
 
 export function setHeliusExtraFallback(
@@ -6823,8 +6828,8 @@ export function getConfigSnapshot() {
       jitoEnabled: config.rpc.jito.enabled,
       healthIntervalMs: config.rpc.healthIntervalMs,
       failoverDownMs: config.rpc.failoverDownMs,
-      shareLoad: false,
-      containmentEnabled: Boolean(config.rpc.containmentEnabled === true),
+      shareLoad: Boolean(config.rpc.shareLoad),
+      containmentEnabled: false,
       heliusExtraFallbackEnabled: Boolean(
         config.rpc.heliusExtraFallbackEnabled
       ),

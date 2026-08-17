@@ -143,18 +143,6 @@ function recompute(external?: {
     reasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
   }
 
-  try {
-    const { allScannerAlchemyKeysCooling } =
-      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
-    if (allScannerAlchemyKeysCooling(now)) {
-      // Shed RPC enrich only — do not stall Dexscreener/pump HTTP ingest.
-      scannerSlowFactor = Math.max(scannerSlowFactor, 1.5);
-      reasons.push('alchemy CU/s — all scanner keys cooling (enrich shed)');
-    }
-  } catch {
-    /* optional */
-  }
-
   lastSnapshot = {
     scannerSlowFactor: Math.min(4, scannerSlowFactor),
     utilitySlowFactor: Math.min(4, utilitySlowFactor),
@@ -199,40 +187,6 @@ export function adaptiveScannerIntervalMs(baseMs: number): number {
   return Math.round(Math.max(baseMs, baseMs * f));
 }
 
-function secondarySpikeDegradesEnrich(): boolean {
-  try {
-    const { isLaneSpiking } =
-      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
-    // Independent of containment — keep discovery, crude enrich on secondary spike.
-    return isLaneSpiking('secondary');
-  } catch {
-    return false;
-  }
-}
-
-function utilitySpikeSlowsPolls(): boolean {
-  try {
-    const { isRpcContainmentEnabled, isLaneSpiking } =
-      require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
-    return isRpcContainmentEnabled() && isLaneSpiking('utility');
-  } catch {
-    return false;
-  }
-}
-
-/** True when scanners should skip heavy enrich/curve and use crude rank. */
-export function shouldDegradeScannerEnrich(): boolean {
-  if (getRpcLoadControlSnapshot().scannerSlowFactor >= 3) return true;
-  try {
-    const { allScannerAlchemyKeysCooling } =
-      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
-    if (allScannerAlchemyKeysCooling()) return true;
-  } catch {
-    /* optional */
-  }
-  return secondarySpikeDegradesEnrich();
-}
-
 /** True if this scanner tick should skip under adaptive load. */
 export function shouldSkipScannerTick(subsystem: string): {
   skip: boolean;
@@ -240,14 +194,18 @@ export function shouldSkipScannerTick(subsystem: string): {
 } {
   const snap = getRpcLoadControlSnapshot();
   const id = String(subsystem || '').toLowerCase();
-  // Market / Alpha / Zion must keep ticking — degrade enrich at ×3, never drop.
+  // Market / Alpha / Zion must keep ticking when Utility is only on weak public.
   // Slow Favourites via utilitySlowFactor — do not zero signal intake.
   const intakeCritical =
     id.includes('market') || id.includes('zion') || id.includes('alpha');
-  if (intakeCritical) {
+  const utilityOnly =
+    snap.reasons.length > 0 &&
+    snap.reasons.every((r) => /utility|favourites|weak public/i.test(r));
+  if (intakeCritical && (utilityOnly || !snap.shedBackground)) {
     return { skip: false, reason: null };
   }
-  // Non-intake scanners: ×3+ still skips.
+  // ×3+ means Secondary is already shedding — always skip the tick so we
+  // do not keep acquiring (and re-noting skips) every 22s.
   if (snap.scannerSlowFactor >= 3) {
     return {
       skip: true,
@@ -276,13 +234,14 @@ export function utilityPollScale(): {
   skipActivity: boolean;
 } {
   const f = getRpcLoadControlSnapshot().utilitySlowFactor;
-  let cycleCapScale = 1 / f;
-  let gapScale = f;
-  let skipActivity = f >= 2.5;
-  if (utilitySpikeSlowsPolls()) {
-    gapScale = Math.max(gapScale, 2.5);
-    cycleCapScale = Math.min(cycleCapScale, 0.4);
-    skipActivity = true;
-  }
-  return { cycleCapScale, gapScale, skipActivity };
+  return {
+    cycleCapScale: 1 / f,
+    gapScale: f,
+    skipActivity: f >= 2.5,
+  };
+}
+
+/** Classic: no containment-driven enrich shed. */
+export function shouldDegradeScannerEnrich(): boolean {
+  return false;
 }
