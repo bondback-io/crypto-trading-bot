@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.404',
+    title: 'Scanner soft 429 no longer dumps stacks to Render',
+    sections: ['execution', 'scanners'],
+    items: [
+      'MarketScanner, AlphaScan, ZionScanner, and unhandled soft RPC rejections no longer logger.warn with errorToMeta stacks on Alchemy 429 / CU/s / soft 403. Soft catches log once to stdout; hard poll failures stay loud. Exit/send unchanged.',
+    ],
+  },
+  {
     version: '1.2.403',
     title: 'Primary-lane soft 429/403 no longer error-loud',
     sections: ['execution', 'scanners'],

@@ -184,6 +184,16 @@ async function main(): Promise<void> {
     } catch {
       /* optional */
     }
+    try {
+      const { isRpcSoftFailureError, logSoftRpcFailure } =
+        require('./connection') as typeof import('./connection');
+      if (isRpcSoftFailureError(reason)) {
+        logSoftRpcFailure('boot', reason);
+        return;
+      }
+    } catch {
+      /* optional */
+    }
     console.error('[boot] Unhandled rejection (kept alive):', reason);
     try {
       const { pushDashboardNotification } =

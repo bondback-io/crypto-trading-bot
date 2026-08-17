@@ -218,13 +218,20 @@ function sanitizeMeta(meta: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** Normalize unknown thrown values for logging */
-export function errorToMeta(err: unknown): Record<string, unknown> {
+export function errorToMeta(
+  err: unknown,
+  opts?: { stack?: boolean }
+): Record<string, unknown> {
+  const withStack = opts?.stack !== false;
   if (err instanceof Error) {
-    return {
+    const meta: Record<string, unknown> = {
       errorName: err.name,
       errorMessage: err.message,
-      stack: err.stack?.split('\n').slice(0, 8).join('\n'),
     };
+    if (withStack) {
+      meta.stack = err.stack?.split('\n').slice(0, 8).join('\n');
+    }
+    return meta;
   }
   return { error: String(err) };
 }

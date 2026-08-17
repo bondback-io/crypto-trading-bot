@@ -8,7 +8,11 @@
 
 import { config, HARD_FILTER_FLOORS } from './config';
 import { logger, errorToMeta } from './logger';
-import { runWithRpcRole } from './connection';
+import {
+  runWithRpcRole,
+  isRpcSoftFailureError,
+  logSoftRpcFailure,
+} from './connection';
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
@@ -2319,7 +2323,11 @@ export async function runScannerPollOnce(): Promise<number> {
         );
       }
     } catch (err) {
-      logger.warn('MarketScanner', 'Dip watch tick failed', errorToMeta(err));
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn('MarketScanner', 'Dip watch tick failed', errorToMeta(err));
+      }
     }
     try {
       const {
@@ -2355,7 +2363,11 @@ export async function runScannerPollOnce(): Promise<number> {
         );
       }
     } catch (err) {
-      logger.warn('MarketScanner', 'Trend watch tick failed', errorToMeta(err));
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn('MarketScanner', 'Trend watch tick failed', errorToMeta(err));
+      }
     }
     try {
       const {
@@ -2396,11 +2408,15 @@ export async function runScannerPollOnce(): Promise<number> {
         );
       }
     } catch (err) {
-      logger.warn(
-        'MarketScanner',
-        'Scalper watch tick failed',
-        errorToMeta(err)
-      );
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn(
+          'MarketScanner',
+          'Scalper watch tick failed',
+          errorToMeta(err)
+        );
+      }
     }
     try {
       const {
@@ -2431,12 +2447,20 @@ export async function runScannerPollOnce(): Promise<number> {
         );
       }
     } catch (err) {
-      logger.warn('MarketScanner', 'Grad watch tick failed', errorToMeta(err));
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn('MarketScanner', 'Grad watch tick failed', errorToMeta(err));
+      }
     }
     return handed;
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
-    logger.warn('MarketScanner', 'Poll failed', errorToMeta(err));
+    if (isRpcSoftFailureError(err)) {
+      logSoftRpcFailure('MarketScanner', err);
+    } else {
+      logger.warn('MarketScanner', 'Poll failed', errorToMeta(err));
+    }
     return 0;
   } finally {
     pollInFlight = false;

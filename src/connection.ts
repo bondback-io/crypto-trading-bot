@@ -581,6 +581,28 @@ export function isRpcSoftFailureMessage(error: string): boolean {
   return isRpcRateLimitMessage(error) || isRpcSoftBlockedMessage(error);
 }
 
+/** True when err is soft 429 / CU/s / 403 blocked / gate-skip. */
+export function isRpcSoftFailureError(err: unknown): boolean {
+  if (isRpcGateSkipError(err)) return true;
+  try {
+    const { isAlchemyCuLimitMessage } =
+      require('./rpcProviderPace') as typeof import('./rpcProviderPace');
+    const msg = err instanceof Error ? err.message : String(err ?? '');
+    if (isAlchemyCuLimitMessage(msg)) return true;
+    return isRpcSoftFailureMessage(msg);
+  } catch {
+    const msg = err instanceof Error ? err.message : String(err ?? '');
+    return isRpcSoftFailureMessage(msg);
+  }
+}
+
+/** Throttled stdout log for soft RPC failures (Render level:error ignores stdout). */
+export function logSoftRpcFailure(tag: string, err: unknown): void {
+  if (!softRpcFailLog.allow()) return;
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  console.log(`[${tag}] soft RPC fail (no stack) ${msg.slice(0, 180)}`);
+}
+
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {
   return Boolean(state && state.rateLimitedUntil > Date.now());
 }

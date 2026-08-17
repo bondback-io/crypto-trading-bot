@@ -6,7 +6,14 @@
 
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config';
-import { getConnection, lanesShareEndpoint, runWithRpcRole, isRpcGateSkipError } from './connection';
+import {
+  getConnection,
+  lanesShareEndpoint,
+  runWithRpcRole,
+  isRpcGateSkipError,
+  isRpcSoftFailureError,
+  logSoftRpcFailure,
+} from './connection';
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
@@ -767,8 +774,9 @@ export async function runZionScannerPollOnce(): Promise<void> {
       clearRpcCooldownOnSuccess();
     }
   } catch (err) {
-    if (isRpcRateLimitError(err)) {
-      noteRpcRateLimit(err);
+    if (isRpcRateLimitError(err) || isRpcSoftFailureError(err)) {
+      if (isRpcRateLimitError(err)) noteRpcRateLimit(err);
+      else logSoftRpcFailure('ZionScanner', err);
     } else {
       lastError = err instanceof Error ? err.message : String(err);
       logger.warn('ZionScanner', 'Poll failed', errorToMeta(err));

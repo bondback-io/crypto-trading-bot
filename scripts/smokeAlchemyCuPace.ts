@@ -209,6 +209,55 @@ check(
   'exit-send still logger.error on hard fail',
   /logger\.error\('RPC', `\$\{label\} all endpoints failed`/.test(conn)
 );
+check(
+  'isRpcSoftFailureError + logSoftRpcFailure exported',
+  /export function isRpcSoftFailureError/.test(conn) &&
+    /export function logSoftRpcFailure/.test(conn) &&
+    /console\.log\(`\[\$\{tag\}\] soft RPC fail/.test(conn)
+);
+
+const scanner = readSrc('src/marketScanner.ts');
+check(
+  'MarketScanner soft-catches Poll failed',
+  /isRpcSoftFailureError\(err\)[\s\S]{0,80}logSoftRpcFailure\('MarketScanner'[\s\S]{0,200}'Poll failed'/.test(
+    scanner
+  ) ||
+    /'Poll failed'[\s\S]{0,200}isRpcSoftFailureError\(err\)[\s\S]{0,80}logSoftRpcFailure\('MarketScanner'/.test(
+      scanner
+    )
+);
+check(
+  'MarketScanner Poll failed still warns hard errors',
+  /else \{\s*logger\.warn\(\s*'MarketScanner',\s*'Poll failed'/.test(scanner)
+);
+
+const alpha = readSrc('src/alphaScanFeed.ts');
+check(
+  'AlphaScan soft-catches Feed pass failed',
+  /isRpcSoftFailureError\(err\)/.test(alpha) &&
+    /logSoftRpcFailure\('AlphaScan'/.test(alpha)
+);
+
+const zion = readSrc('src/zionKolScanner.ts');
+check(
+  'ZionScanner soft-catches Poll failed',
+  /isRpcSoftFailureError\(err\)/.test(zion) &&
+    /logSoftRpcFailure\('ZionScanner'/.test(zion)
+);
+
+const indexSrc = readSrc('src/index.ts');
+check(
+  'unhandledRejection soft RPC → stdout helper',
+  /isRpcSoftFailureError\(reason\)/.test(indexSrc) &&
+    /logSoftRpcFailure\('boot'/.test(indexSrc)
+);
+
+const loggerSrc = readSrc('src/logger.ts');
+check(
+  'errorToMeta optional stack:false',
+  /opts\?: \{ stack\?: boolean \}/.test(loggerSrc) &&
+    /withStack = opts\?\.stack !== false/.test(loggerSrc)
+);
 
 const rpcUrl = readSrc('src/rpcUrl.ts');
 check(

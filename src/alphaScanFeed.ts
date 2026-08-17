@@ -6,7 +6,11 @@
 
 import { config } from './config';
 import { logger, errorToMeta } from './logger';
-import { isRpcGateSkipError } from './connection';
+import {
+  isRpcGateSkipError,
+  isRpcSoftFailureError,
+  logSoftRpcFailure,
+} from './connection';
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
@@ -634,7 +638,11 @@ export async function runAlphaScanFeedPass(): Promise<number> {
     return handed;
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
-    logger.warn('AlphaScan', 'Feed pass failed', errorToMeta(err));
+    if (isRpcSoftFailureError(err) || isRpcGateSkipError(err)) {
+      logSoftRpcFailure('AlphaScan', err);
+    } else {
+      logger.warn('AlphaScan', 'Feed pass failed', errorToMeta(err));
+    }
     return handed;
   } finally {
     passInFlight = false;
