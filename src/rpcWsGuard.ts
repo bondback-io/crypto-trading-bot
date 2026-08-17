@@ -204,6 +204,11 @@ function installConsoleErrorFilter(): void {
   };
 }
 
+/** Install WS noise filter before any web3.js Connection is constructed. */
+export function ensureRpcWsConsoleFilterInstalled(): void {
+  installConsoleErrorFilter();
+}
+
 /**
  * Patch a web3.js Connection so logsSubscribe -32601 cannot tight-loop
  * `_updateSubscriptions` (library retries with no delay).
@@ -343,7 +348,8 @@ export function __resetLogsSubscribeGuardForTests(): void {
   lastErrorLogAt.clear();
 }
 
+// Boot-early: suppress web3.js `ws error: 429` before any Connection is built.
+installConsoleErrorFilter();
 if (envDisableLogsSubscribe()) {
   disableLogsSubscribe('*', 'env');
-  installConsoleErrorFilter();
 }

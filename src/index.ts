@@ -3,6 +3,10 @@
  */
 
 import dotenv from 'dotenv';
+// Install WS 429 console filter before any web3.js Connection is constructed.
+import { ensureRpcWsConsoleFilterInstalled } from './rpcWsGuard';
+ensureRpcWsConsoleFilterInstalled();
+
 import { config, setMode, initWallets, hasPersistedSettings } from './config';
 import { env, logEnvSummary, validateDeploymentEnv } from './env';
 import {

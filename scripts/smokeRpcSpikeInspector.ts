@@ -178,8 +178,8 @@ check(
 );
 config.rpc.containmentEnabled = false;
 check(
-  'containment OFF: secondary spike does not force enrich degrade',
-  isLaneSpiking('secondary') && shouldDegradeScannerEnrich() === false
+  'containment OFF: secondary spike still degrades enrich (independent of containment)',
+  isLaneSpiking('secondary') && shouldDegradeScannerEnrich() === true
 );
 config.rpc.containmentEnabled = true;
 check(
@@ -877,6 +877,64 @@ check(
   !/export async function executeSell[\s\S]*shouldSoftPauseNewEntries/.test(
     readSrc('src/trade.ts')
   )
+);
+
+__resetSpikeAccountInfoCapForTests();
+__resetRpcSpikeInspectorForTests();
+config.rpc.containmentEnabled = false;
+noteRpcCall({
+  lane: 'secondary',
+  provider: 'alchemy-backup3',
+  method: 'getAccountInfo',
+  queueWaitMs: 10,
+  networkMs: 1800,
+  totalMs: 1810,
+  outcome: 'success',
+  inFlight: 3,
+});
+const secOffA = acquireSpikeAccountInfoCap(
+  'secondary',
+  ['getAccountInfo'],
+  'bonding_curve'
+);
+const secOffB = acquireSpikeAccountInfoCap(
+  'secondary',
+  ['getAccountInfo'],
+  'market_scanner'
+);
+check(
+  'containment OFF: secondary spike still sheds enrich getAccountInfo',
+  isLaneSpiking('secondary') &&
+    secOffA.allowed === true &&
+    secOffB.allowed === false,
+  `spike=${isLaneSpiking('secondary')} a=${secOffA.allowed} b=${secOffB.allowed}`
+);
+secOffA.release();
+secOffB.release();
+check(
+  'diagnosis labels Trading/Alchemy not Helius',
+  (() => {
+    const d = buildRpcSpikeDiagnosis();
+    return (
+      /Trading \/ Alchemy/.test(d.reportText) &&
+      !/Trading \/ Helius/.test(d.reportText) &&
+      /Watchers \/ Alchemy-backup2/.test(d.reportText) &&
+      /Utility \/ RPC_URL/.test(d.reportText)
+    );
+  })()
+);
+check(
+  'safeProviderLabel distinguishes backup3',
+  (() => {
+    const { safeProviderLabel } =
+      require('../src/rpcSpikeInspector') as typeof import('../src/rpcSpikeInspector');
+    return (
+      safeProviderLabel('alchemy-backup3') === 'Alchemy-backup3' &&
+      safeProviderLabel('alchemy-backup7') === 'Alchemy-backup7' &&
+      safeProviderLabel('alchemy-backup') === 'Alchemy-backup' &&
+      safeProviderLabel('alchemy-backup2') === 'Alchemy-backup2'
+    );
+  })()
 );
 check(
   'pause_on / pause_off logs include p95 and reason',

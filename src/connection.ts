@@ -673,9 +673,25 @@ export function isRpcSoftBlockedMessage(error: string): boolean {
   );
 }
 
+/** Alchemy/public overloaded (503 / -32001) â€” soft; fail-open callers. */
+export function isRpcProviderUnavailableMessage(error: string): boolean {
+  const s = String(error || '');
+  if (!s) return false;
+  return (
+    /\b503\b/.test(s) ||
+    /-32001/.test(s) ||
+    /unable to complete request/i.test(s) ||
+    /service unavailable/i.test(s)
+  );
+}
+
 /** Soft RPC failure suitable for warn-once (not Trading-critical dump). */
 export function isRpcSoftFailureMessage(error: string): boolean {
-  return isRpcRateLimitMessage(error) || isRpcSoftBlockedMessage(error);
+  return (
+    isRpcRateLimitMessage(error) ||
+    isRpcSoftBlockedMessage(error) ||
+    isRpcProviderUnavailableMessage(error)
+  );
 }
 
 /** True when err is soft 429 / CU/s / 403 blocked / gate-skip. */
@@ -705,6 +721,7 @@ export function formatSoftRpcFailBrief(err: unknown): string {
     /* optional */
   }
   if (isRpcSoftBlockedMessage(msg)) return '403 soft blocked';
+  if (isRpcProviderUnavailableMessage(msg)) return '503 provider unavailable';
   if (isRpcRateLimitMessage(msg) || /\b429\b/.test(msg)) return '429 rate limited';
   if (isRpcSoftFailureMessage(msg)) return 'soft RPC limited';
   const flat = msg.replace(/\s+/g, ' ').replace(/[{}"]/g, '').slice(0, 80);
@@ -899,6 +916,9 @@ function createGuardedConnection(
   label: string,
   wsUrl?: string
 ): Connection {
+  const { ensureRpcWsConsoleFilterInstalled } =
+    require('./rpcWsGuard') as typeof import('./rpcWsGuard');
+  ensureRpcWsConsoleFilterInstalled();
   const connection = new Connection(url, {
     commitment: 'confirmed',
     wsEndpoint: wsUrl || toWsUrl(url),

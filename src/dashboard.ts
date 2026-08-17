@@ -37644,8 +37644,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const chips = document.getElementById('rpc-spike-chips');
         if (chips) {
           chips.innerHTML =
-            rpcSpikeChipHtml('Trading / Helius', si.trading || {}) +
-            rpcSpikeChipHtml('Watchers / Alchemy', si.watchers || {});
+            rpcSpikeChipHtml('Trading / Alchemy', si.trading || {}) +
+            rpcSpikeChipHtml('Watchers / Alchemy-backup2', si.watchers || {});
         }
         const meta = document.getElementById('rpc-spike-meta');
         if (meta) {

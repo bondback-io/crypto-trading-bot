@@ -371,6 +371,20 @@ check(
     'formatSoftRpcFailBrief strips Alchemy JSON',
     brief === '429 CU/s capacity' && !/"error"/.test(brief) && !/\{/.test(brief)
   );
+  const brief503 = formatSoftRpcFailBrief(
+    new Error(
+      '503 Service Unavailable: {"jsonrpc":"2.0","error":{"code":-32001,"message":"Unable to complete request at this time."}}'
+    )
+  );
+  check(
+    'formatSoftRpcFailBrief 503 provider unavailable',
+    brief503 === '503 provider unavailable' && !/"error"/.test(brief503)
+  );
+  check(
+    'tokenMetrics sticky 503 cooldown for largest accounts',
+    /LARGEST_ACCOUNTS_COOLDOWN_MS/.test(readSrc('src/tokenMetrics.ts')) &&
+      /isRpcProviderUnavailableMessage/.test(readSrc('src/tokenMetrics.ts'))
+  );
 }
 
 // Env discovery (may be empty in CI)

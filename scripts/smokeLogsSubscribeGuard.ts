@@ -174,17 +174,28 @@ void runGuardLoopCheck()
       connSrc.includes('createGuardedConnection') &&
         connSrc.includes('guardRpcWebSocket')
     );
-    check(
-      'WS guard rebinds error listener + filters 429',
-      readSrc('src/rpcWsGuard.ts').includes('isWsRateLimitNoise') &&
-        readSrc('src/rpcWsGuard.ts').includes("removeAllListeners('error')")
-    );
-    check(
-      'Utility light prefers RPC_URL',
-      /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(
-        readSrc('src/rpcServiceMap.ts')
-      )
-    );
+check(
+  'WS guard rebinds error listener + filters 429',
+  readSrc('src/rpcWsGuard.ts').includes('isWsRateLimitNoise') &&
+    readSrc('src/rpcWsGuard.ts').includes("removeAllListeners('error')")
+);
+check(
+  'WS console filter installs at module load',
+  /installConsoleErrorFilter\(\);\s*\nif \(envDisableLogsSubscribe/.test(
+    readSrc('src/rpcWsGuard.ts')
+  ) ||
+    /Boot-early: suppress web3\.js/.test(readSrc('src/rpcWsGuard.ts'))
+);
+check(
+  'index installs WS filter before connection',
+  /ensureRpcWsConsoleFilterInstalled/.test(readSrc('src/index.ts'))
+);
+check(
+  'Utility light prefers RPC_URL',
+  /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(
+    readSrc('src/rpcServiceMap.ts')
+  )
+);
     check(
       'index swallows logsSubscribe unhandledRejection',
       readSrc('src/index.ts').includes('isLogsSubscribeUnsupportedError')

@@ -174,18 +174,32 @@ export function isRpcContainmentEnabled(): boolean {
   return isContainmentOn();
 }
 
-function safeProviderLabel(raw: string): string {
+/** Exclusive-map-aware provider chip for spike history / diagnosis. */
+export function safeProviderLabel(raw: string): string {
   const s = String(raw || '').trim();
   if (!s) return '—';
+  if (/helius-backup|helius_api_key_backup/i.test(s)) return 'Helius-backup';
   if (/helius/i.test(s)) return 'Helius';
   if (/alchemy/i.test(s)) {
+    const backupN = /backup\s*([3-7])|backup([3-7])/i.exec(s);
+    if (backupN) {
+      return `Alchemy-backup${backupN[1] || backupN[2]}`;
+    }
     if (/backup2/i.test(s)) return 'Alchemy-backup2';
-    if (/backup/i.test(s)) return 'Alchemy-backup';
+    if (/backup(?!\d)/i.test(s) || /alchemy-backup(?!\d)/i.test(s)) {
+      return 'Alchemy-backup';
+    }
     return 'Alchemy';
   }
   if (/quicknode/i.test(s)) return 'QuickNode';
-  if (/public/i.test(s) || /mainnet-beta/i.test(s) || /api\.mainnet/i.test(s)) {
-    return 'public';
+  if (
+    /rpc-url|rpc_url/i.test(s) ||
+    /public/i.test(s) ||
+    /mainnet-beta/i.test(s) ||
+    /api\.mainnet/i.test(s) ||
+    /publicnode/i.test(s)
+  ) {
+    return /rpc-url|rpc_url/i.test(s) ? 'RPC_URL' : 'public';
   }
   if (/^https?:/i.test(s) || /api[_-]?key/i.test(s) || /@/.test(s)) return 'rpc';
   return s.slice(0, 40);
@@ -823,7 +837,7 @@ Evaluate this RPC Spike Diagnosis carefully and return:
 Rules:
 - Propose only small additive RPC/reliability fixes
 - Do not rewrite trading strategy
-- Do not break lane isolation (Trading Helius vs Watchers Alchemy)
+- Do not break lane isolation (Trading Alchemy vs Watchers Alchemy)
 - Prefer containment, retry caps, dedupe, shedding, sticky-state recovery
 - Return patch prompts only if justified by the diagnosis data
 
@@ -903,16 +917,16 @@ export function buildRpcSpikeDiagnosis(): {
   );
   lines.push(`- exit_lane_guard_trips: ${snap.exit_lane_guard_trips}`);
   lines.push(
-    `- Trading / Helius: status ${snap.trading.status} · p50 ${fmtMs(snap.trading.p50)} · p95 ${fmtMs(snap.trading.p95)} · inFlight ${snap.trading.inFlight} · 429 ${snap.trading.rateLimitedCount} · timeout ${snap.trading.timeoutCount}`
+    `- Trading / Alchemy: status ${snap.trading.status} · p50 ${fmtMs(snap.trading.p50)} · p95 ${fmtMs(snap.trading.p95)} · inFlight ${snap.trading.inFlight} · 429 ${snap.trading.rateLimitedCount} · timeout ${snap.trading.timeoutCount}`
   );
   lines.push(
-    `- Watchers / Alchemy-backup: status ${snap.watchers.status} · p50 ${fmtMs(snap.watchers.p50)} · p95 ${fmtMs(snap.watchers.p95)} · inFlight ${snap.watchers.inFlight} · 429 ${snap.watchers.rateLimitedCount} · timeout ${snap.watchers.timeoutCount}`
+    `- Watchers / Alchemy-backup2: status ${snap.watchers.status} · p50 ${fmtMs(snap.watchers.p50)} · p95 ${fmtMs(snap.watchers.p95)} · inFlight ${snap.watchers.inFlight} · 429 ${snap.watchers.rateLimitedCount} · timeout ${snap.watchers.timeoutCount}`
   );
   lines.push(
-    `- Scanners / Alchemy: status ${snap.scanners.status} · p95 ${fmtMs(snap.scanners.p95)}`
+    `- Scanners / Alchemy-backup3+: status ${snap.scanners.status} · p95 ${fmtMs(snap.scanners.p95)}`
   );
   lines.push(
-    `- Utility / public: status ${snap.utility.status} · p95 ${fmtMs(snap.utility.p95)}`
+    `- Utility / RPC_URL: status ${snap.utility.status} · p95 ${fmtMs(snap.utility.p95)}`
   );
   lines.push('');
   lines.push('## 2. Last 10 spikes');

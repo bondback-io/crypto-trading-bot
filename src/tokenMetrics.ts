@@ -13,7 +13,14 @@ import {
   effectiveMaxTop10HolderPct,
 } from './config';
 import { getBondingCurvePda } from './bondingCurve';
-import { getConnection, runWithRpcRole } from './connection';
+import {
+  getConnection,
+  isRpcProviderUnavailableMessage,
+  isRpcSoftFailureError,
+  logSoftRpcFailure,
+  runWithRpcRole,
+} from './connection';
+import { QuietLogGate } from './httpProviderGate';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta, loggedFetch } from './logger';
 import { effectiveStrictMinVolume24hUsd } from './filterEffective';
@@ -99,6 +106,11 @@ const lightInflight = new Map<string, Promise<TokenMetrics>>();
 const DEFAULT_TTL_MS = 90_000;
 const LIGHT_TTL_MS = 60_000;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Sticky skip after getTokenLargestAccounts 503/-32001 (per mint). */
+const LARGEST_ACCOUNTS_COOLDOWN_MS = 30_000;
+const largestAccountsCooldownUntil = new Map<string, number>();
+const largestAccountsSoftLog = new QuietLogGate(60_000);
 
 function cacheTtlMs(): number {
   return config.tokenMetrics?.cacheTtlMs ?? DEFAULT_TTL_MS;
@@ -804,79 +816,103 @@ async function fetchOnChainHolderMetricsInner(
   // Jupiter-style top-10 excludes Pump bonding-curve vault + post-migration LP.
   const excludeOwners = await resolvePoolVaultExcludeOwners(mint);
 
-  try {
-    const largest = await withTimeout(
-      conn.getTokenLargestAccounts(mintKey),
-      3_000,
-      'getTokenLargestAccounts'
-    );
-    const accounts = largest.value ?? [];
-    const supply =
-      supplyUi && supplyUi > 0
-        ? supplyUi
-        : accounts.reduce((s, a) => s + Number(a.uiAmount ?? 0), 0) || 1;
-
-    // Cap + parallel owner resolve — 30 sequential 2.5s lookups starved Alchemy.
-    const OWNER_CAP = 8;
-    const OWNER_CONCURRENCY = 3;
-    const OWNER_TIMEOUT_MS = 1_200;
-    const slice = accounts.slice(0, OWNER_CAP);
-    for (let i = 0; i < slice.length && topHolders.length < 10; i += OWNER_CONCURRENCY) {
-      const batch = slice.slice(i, i + OWNER_CONCURRENCY);
-      const resolved = await Promise.all(
-        batch.map(async (acc) => {
-          const amountUi = Number(acc.uiAmount ?? 0);
-          const tokenAccount = acc.address.toBase58();
-          let owner = tokenAccount;
-          try {
-            const tok = await withTimeout(
-              conn.getParsedAccountInfo(acc.address),
-              OWNER_TIMEOUT_MS,
-              'getParsedAccountInfo(token)'
-            );
-            const info = (
-              tok.value?.data as {
-                parsed?: { info?: { owner?: string } };
-              } | undefined
-            )?.parsed?.info;
-            if (info?.owner) owner = info.owner;
-          } catch {
-            /* keep token account address */
-          }
-          return { amountUi, tokenAccount, owner };
-        })
+  if (Date.now() >= (largestAccountsCooldownUntil.get(mint) ?? 0)) {
+    try {
+      const largest = await withTimeout(
+        conn.getTokenLargestAccounts(mintKey),
+        3_000,
+        'getTokenLargestAccounts'
       );
-      for (const row of resolved) {
-        if (excludeOwners.has(row.owner) || excludeOwners.has(row.tokenAccount)) {
-          continue;
+      const accounts = largest.value ?? [];
+      const supply =
+        supplyUi && supplyUi > 0
+          ? supplyUi
+          : accounts.reduce((s, a) => s + Number(a.uiAmount ?? 0), 0) || 1;
+
+      // Cap + parallel owner resolve — 30 sequential 2.5s lookups starved Alchemy.
+      const OWNER_CAP = 8;
+      const OWNER_CONCURRENCY = 3;
+      const OWNER_TIMEOUT_MS = 1_200;
+      const slice = accounts.slice(0, OWNER_CAP);
+      for (
+        let i = 0;
+        i < slice.length && topHolders.length < 10;
+        i += OWNER_CONCURRENCY
+      ) {
+        const batch = slice.slice(i, i + OWNER_CONCURRENCY);
+        const resolved = await Promise.all(
+          batch.map(async (acc) => {
+            const amountUi = Number(acc.uiAmount ?? 0);
+            const tokenAccount = acc.address.toBase58();
+            let owner = tokenAccount;
+            try {
+              const tok = await withTimeout(
+                conn.getParsedAccountInfo(acc.address),
+                OWNER_TIMEOUT_MS,
+                'getParsedAccountInfo(token)'
+              );
+              const info = (
+                tok.value?.data as {
+                  parsed?: { info?: { owner?: string } };
+                } | undefined
+              )?.parsed?.info;
+              if (info?.owner) owner = info.owner;
+            } catch {
+              /* keep token account address */
+            }
+            return { amountUi, tokenAccount, owner };
+          })
+        );
+        for (const row of resolved) {
+          if (
+            excludeOwners.has(row.owner) ||
+            excludeOwners.has(row.tokenAccount)
+          ) {
+            continue;
+          }
+          const pct = (row.amountUi / supply) * 100;
+          const isAuthority =
+            row.owner === mintAuthority || row.owner === freezeAuthority;
+          topHolders.push({
+            address: row.owner,
+            amountUi: row.amountUi,
+            pctOfSupply: Math.round(pct * 100) / 100,
+            isAuthority,
+          });
+          if (topHolders.length >= 10) break;
         }
-        const pct = (row.amountUi / supply) * 100;
-        const isAuthority =
-          row.owner === mintAuthority || row.owner === freezeAuthority;
-        topHolders.push({
-          address: row.owner,
-          amountUi: row.amountUi,
-          pctOfSupply: Math.round(pct * 100) / 100,
-          isAuthority,
-        });
-        if (topHolders.length >= 10) break;
+      }
+
+      if (topHolders.length > 0) {
+        topHolderPct = topHolders[0].pctOfSupply;
+        top10HoldPct =
+          Math.round(
+            topHolders.reduce((s, h) => s + h.pctOfSupply, 0) * 100
+          ) / 100;
+      }
+
+      if (supplyUi == null && supply > 0) supplyUi = supply;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '');
+      if (
+        isRpcProviderUnavailableMessage(msg) ||
+        isRpcSoftFailureError(err) ||
+        /\b503\b|-32001|unable to complete request/i.test(msg)
+      ) {
+        largestAccountsCooldownUntil.set(
+          mint,
+          Date.now() + LARGEST_ACCOUNTS_COOLDOWN_MS
+        );
+        if (largestAccountsSoftLog.allow()) {
+          logSoftRpcFailure('tokenMetrics', err);
+        }
+      } else {
+        console.warn(
+          `[tokenMetrics] getTokenLargestAccounts failed for ${mint.slice(0, 8)}…:`,
+          msg
+        );
       }
     }
-
-    if (topHolders.length > 0) {
-      topHolderPct = topHolders[0].pctOfSupply;
-      top10HoldPct =
-        Math.round(
-          topHolders.reduce((s, h) => s + h.pctOfSupply, 0) * 100
-        ) / 100;
-    }
-
-    if (supplyUi == null && supply > 0) supplyUi = supply;
-  } catch (err) {
-    console.warn(
-      `[tokenMetrics] getTokenLargestAccounts failed for ${mint.slice(0, 8)}…:`,
-      err instanceof Error ? err.message : err
-    );
   }
 
   const authHold = topHolders.find((h) => h.isAuthority);

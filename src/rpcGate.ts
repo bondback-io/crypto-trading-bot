@@ -352,6 +352,7 @@ export function __resetSpikeAccountInfoCapForTests(): void {
 /**
  * During a Watchers/secondary spike, cap concurrent getAccountInfo (enrich 1, total 2).
  * Prefer arm/trigger over optional enrich. Exits are never dropped.
+ * Engages on lane spike even when containment is OFF (mirrors always-on getTx caps).
  */
 export function acquireSpikeAccountInfoCap(
   role: RpcGateRole | undefined,
@@ -362,9 +363,9 @@ export function acquireSpikeAccountInfoCap(
   if (!isAccountInfoCapLane(role)) return noop;
   if (!methods.some((m) => m === 'getAccountInfo')) return noop;
   try {
-    const { isLaneSpiking, isRpcContainmentEnabled } =
+    const { isLaneSpiking } =
       require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
-    if (!isRpcContainmentEnabled() || !isLaneSpiking(role)) return noop;
+    if (!isLaneSpiking(role)) return noop;
   } catch {
     return noop;
   }

@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.412',
+    title: 'RPC spike labels + always-on accountInfo shed + quiet 503/WS',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Spike diagnosis / chips label Trading as Alchemy (not Helius); Watchers as Alchemy-backup2; Scanners Alchemy-backup3+; Utility RPC_URL. Provider labels distinguish backup3–7 instead of collapsing to Alchemy-backup.',
+      'Secondary/watchers getAccountInfo enrich caps engage on lane spike even when containment is OFF (exits untouched). tokenMetrics getTokenLargestAccounts 503/-32001 soft-logs with 30s per-mint cooldown. WS 429 console filter installs at boot.',
+    ],
+  },
+  {
     version: '1.2.411',
     title: 'Utility light on public RPC_URL; quiet WS 429',
     sections: ['execution', 'knobs'],
