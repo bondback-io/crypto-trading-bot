@@ -28374,9 +28374,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         rpcBody.innerHTML = (rpc.endpoints || []).length === 0
           ? '<tr><td colspan="6" style="color:var(--muted)">No RPC endpoints configured</td></tr>'
           : rpc.endpoints.map(function (e) {
+              const labelMap = {
+                'alchemy-backup': 'Alchemy BACKUP',
+                alchemy: 'Alchemy',
+                'alchemy-backup2': 'Alchemy BACKUP2',
+                'alchemy-backup3': 'Alchemy BACKUP3',
+                'alchemy-backup4': 'Alchemy BACKUP4'
+              };
+              const name = labelMap[e.label] || String(e.label || '');
+              const laneMap = {
+                primary: 'Critical',
+                secondary: 'Scanners',
+                utility: 'Utility',
+                fallback: 'Emergency'
+              };
+              const laneKey = String(e.lane || e.role || '');
+              const lane = laneMap[laneKey] || laneKey || '—';
               return '<tr>' +
-                '<td title="' + String(e.url || '').replace(/"/g, '&quot;') + '">' + String(e.label || '') + '</td>' +
-                '<td>' + String(e.lane || e.role || '—') + '</td>' +
+                '<td title="' + String(e.url || '').replace(/"/g, '&quot;') + '">' + name + '</td>' +
+                '<td>' + String(lane) + '</td>' +
                 '<td>' + (e.healthy ? '✅' : '❌') + '</td>' +
                 '<td>' + (e.latencyMs != null ? e.latencyMs + 'ms' : '—') + '</td>' +
                 '<td>' + (e.successRate != null ? Number(e.successRate).toFixed(0) : '—') +

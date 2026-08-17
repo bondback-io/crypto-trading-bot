@@ -187,8 +187,7 @@ export interface NormalizedRpcEndpoint {
 
 /**
  * Build a sanitized endpoint list from env/config candidates.
- * Drops placeholders, dedupes. Ensures public Solana is present as last resort
- * when not already in the list.
+ * Drops placeholders and duplicates. Does not inject extra public RPCs.
  */
 export function normalizeRpcEndpoints(
   candidates: Array<{
@@ -249,16 +248,6 @@ export function normalizeRpcEndpoints(
     );
   }
 
-  // Always keep a public endpoint as last resort if missing
-  const hasPublic = out.some((e) => isPublicRpcUrl(e.url));
-  if (!hasPublic) {
-    push(
-      PUBLIC_SOLANA_RPC,
-      out.length === 0 ? 'primary' : 'publicnode',
-      out.length === 0 ? 'primary' : 'fallback'
-    );
-  }
-
   if (droppedPlaceholder && out.length > 0) {
     console.warn(
       `[rpc] Using ${out[0].label} — set ALCHEMY_API_KEY / ALCHEMY_API_KEY_BACKUP for reliability`
@@ -278,7 +267,7 @@ export function normalizeRpcEndpoints(
  */
 export function rpcEndpointsFromEnv(
   _primaryEnv?: string | null,
-  fallbacksEnv?: string | null,
+  _fallbacksEnv?: string | null,
   _secondaryEnv?: string | null
 ): NormalizedRpcEndpoint[] {
   const alchemyPrimary = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP);
@@ -286,134 +275,26 @@ export function rpcEndpointsFromEnv(
   const alchemyUtility = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP2);
   const alchemyEmerg1 = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP3);
   const alchemyEmerg2 = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP4);
-  const quicknode = buildQuicknodeRpcUrl();
 
-  const fallbacks = (fallbacksEnv ?? process.env.RPC_FALLBACKS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((u) => u && isUsableRpcUrl(u));
-
-  type Cand = { url: string; label: string; role: RpcLaneRole; wsUrl?: string };
-  const pool: Cand[] = [];
-
-  if (alchemyPrimary) {
-    pool.push({ url: alchemyPrimary, label: 'helius', role: 'fallback' });
-  }
-  if (alchemy) pool.push({ url: alchemy, label: 'alchemy', role: 'fallback' });
-  if (quicknode) {
-    const qnWs = process.env.QUICKNODE_WSS_URL?.trim();
-    pool.push({
-      url: quicknode,
-      label: 'quicknode',
-      role: 'fallback',
-      wsUrl: qnWs && isUsableRpcUrl(qnWs) ? qnWs : undefined,
-    });
-  }
-  if (alchemyEmerg1) {
-    pool.push({ url: alchemyEmerg1, label: 'rpc-url', role: 'fallback' });
-  }
-  if (alchemyEmerg2) {
-    pool.push({ url: alchemyEmerg2, label: 'publicnode', role: 'fallback' });
-  }
-  if (alchemyUtility) {
-    pool.push({
-      url: alchemyUtility,
-      label: 'mainnet-beta',
-      role: 'fallback',
-    });
-  }
-  for (let i = 0; i < fallbacks.length; i++) {
-    pool.push({
-      url: fallbacks[i],
-      label: `fallback-${i + 1}`,
-      role: 'fallback',
-    });
-  }
-
-  const primaryUrl = alchemyPrimary || alchemy || alchemyEmerg1 || alchemyEmerg2 || '';
-  let secondaryUrl = '';
-  if (alchemy && alchemy !== primaryUrl) {
-    secondaryUrl = alchemy;
-  } else {
-    for (const c of pool) {
-      if (c.url !== primaryUrl) {
-        secondaryUrl = c.url;
-        break;
-      }
-    }
-  }
-
-  let utilityUrl = '';
-  if (
-    alchemyUtility &&
-    alchemyUtility !== primaryUrl &&
-    alchemyUtility !== secondaryUrl
-  ) {
-    utilityUrl = alchemyUtility;
-  }
-  if (!utilityUrl) {
-    for (const c of pool) {
-      if (c.url === primaryUrl || c.url === secondaryUrl) continue;
-      utilityUrl = c.url;
-      break;
-    }
-  }
-  if (!utilityUrl) {
-    utilityUrl = secondaryUrl || primaryUrl;
-  }
-
-  if (secondaryUrl && secondaryUrl === primaryUrl) {
-    console.warn(
-      '[rpc] Primary and secondary resolve to the same URL — Zion shares CU with copy/signals.'
-    );
-  }
-
+  type Cand = { url: string; label: string; role: RpcLaneRole };
   const candidates: Cand[] = [];
   const seen = new Set<string>();
-  const add = (
-    url: string,
-    label: string,
-    role: RpcLaneRole,
-    wsUrl?: string
-  ) => {
+  const add = (url: string | null, label: string, role: RpcLaneRole) => {
     if (!url || seen.has(url)) return;
     seen.add(url);
-    candidates.push({ url, label, role, wsUrl });
+    candidates.push({ url, label, role });
   };
 
-  const labelFor = (url: string, fallback: string): string => {
-    if (url === alchemyPrimary) return 'helius';
-    if (url === alchemy) return 'alchemy';
-    if (url === quicknode) return 'quicknode';
-    if (url === alchemyEmerg1) return 'rpc-url';
-    if (url === alchemyEmerg2) return 'publicnode';
-    if (url === alchemyUtility) return 'mainnet-beta';
-    return fallback;
-  };
-
-  add(primaryUrl, labelFor(primaryUrl, 'primary'), 'primary');
-  if (secondaryUrl) {
-    add(secondaryUrl, labelFor(secondaryUrl, 'secondary'), 'secondary');
-  }
-  if (utilityUrl) {
-    add(utilityUrl, labelFor(utilityUrl, 'utility'), 'utility');
-  }
-
-  for (const c of pool) {
-    add(c.url, c.label, 'fallback', c.wsUrl);
-  }
+  // Assigned slots only — no Helius / public / QuickNode / RPC_URL extras.
+  add(alchemyPrimary, 'alchemy-backup', 'primary');
+  add(alchemy, 'alchemy', 'secondary');
+  add(alchemyUtility, 'alchemy-backup2', 'utility');
+  add(alchemyEmerg1, 'alchemy-backup3', 'fallback');
+  add(alchemyEmerg2, 'alchemy-backup4', 'fallback');
 
   const out = normalizeRpcEndpoints(candidates);
-
-  const chain = out.map((e) => e.label).join(' → ');
-  console.log(
-    `[rpc] Multi-RPC chain: ${chain}` +
-      (alchemyPrimary ? ' (Alchemy BACKUP primary)' : '') +
-      (alchemy ? ' (Alchemy secondary)' : '') +
-      (alchemyUtility ? ' (Alchemy BACKUP2 utility)' : '') +
-      (alchemyEmerg1 ? ' (Alchemy BACKUP3 emergency)' : '') +
-      (alchemyEmerg2 ? ' (Alchemy BACKUP4 emergency)' : '')
-  );
+  const chain = out.map((e) => `${e.label}[${e.role}]`).join(' → ');
+  console.log(`[rpc] Assigned Alchemy slots: ${chain || '(none)'}`);
   if (!alchemyPrimary && !alchemy) {
     console.warn(
       '[rpc] ALCHEMY_API_KEY_BACKUP / ALCHEMY_API_KEY unset — set Alchemy keys for each lane.'

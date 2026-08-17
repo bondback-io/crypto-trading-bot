@@ -19,7 +19,6 @@ import { config, getActiveTradingWallet, listTradingWalletSlots, resolveTradingW
 import { logger, errorToMeta } from './logger';
 import {
   PUBLIC_SOLANA_RPC,
-  normalizeRpcEndpoints,
   rpcEndpointsFromEnv,
   RPC_LANE_SUPPORTS,
   RPC_SHARE_LOAD_SUPPORTS,
@@ -575,17 +574,7 @@ function formatFailoverGrace(ms: number): string {
 }
 
 function parseRpcList(): RpcEndpoint[] {
-  const fromConfig = config.rpc?.endpoints ?? [];
-  if (fromConfig.length > 0) {
-    return normalizeRpcEndpoints(
-      fromConfig.map((e, i) => ({
-        url: e.url,
-        label: e.label || `rpc-${i + 1}`,
-        wsUrl: e.wsUrl,
-        role: (e as { role?: RpcLaneRole }).role,
-      }))
-    );
-  }
+  // Assigned Alchemy slots from env only — ignore persisted extra endpoints.
   return rpcEndpointsFromEnv();
 }
 
@@ -1983,7 +1972,6 @@ export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>
   push(preferredPrimary);
   push(preferredSecondary);
   push(preferredUtility);
-  push(preferredQuicknode);
   push(activePrimary);
   push(activeSecondary);
   push(activeUtility);
@@ -2007,83 +1995,31 @@ export function startRpcHealthMonitor(): void {
   );
   let healthCycle = 0;
 
-  /** Share load: keep public/utility hot for diagnostics; probe paid lanes sparsely. */
-  function shouldProbeIndex(index: number, cycle: number): boolean {
-    if (!Boolean(config.rpc?.shareLoad)) {
-      // Non-share: never probe while quarantined (window must elapse first).
-      const st = endpoints[index];
-      if (st && isEndpointHardFailed(st)) return false;
-      return true;
-    }
+  /** Probe only assigned preferred/active lanes — never unused emergency extras. */
+  function shouldProbeIndex(index: number, _cycle: number): boolean {
     const state = endpoints[index];
     if (!state) return false;
-    // Quarantine: no probes until cooldown elapses (prevents retry storms).
     if (isEndpointHardFailed(state)) return false;
-    const isPublic = isPublicRpcUrl(state.endpoint.url);
-    const isUtil = index === preferredUtility;
-    const isPrimary = index === preferredPrimary;
-    const isSecondary =
-      index === preferredSecondary && preferredSecondary !== preferredPrimary;
-    // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
-    // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
-    if (isUtil || index === activeUtility) {
-      // Preferred Utility already soft-failed elsewhere: probe it rarely so slow
-      // Triton/rpc-url getSlot samples do not keep painting the Multi-RPC row.
-      if (
-        isUtil &&
-        index !== activeUtility &&
-        state.latencyStressedSince != null &&
-        state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
-      ) {
-        return cycle % 4 === 0;
-      }
-      if (
-        state.latencyStressedSince != null &&
-        state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
-      ) {
-        return cycle % 2 === 0;
-      }
-      return true;
-    }
-    if (isPublic) {
-      return cycle % 5 === 0;
-    }
-    // Helius (critical): every 3rd cycle (~135s at 45s interval)
-    if (isPrimary) return cycle % 3 === 0;
-    // Alchemy (scanners): every 2nd cycle (~90s)
-    if (isSecondary) return cycle % 2 === 0;
-    // QuickNode: rare when failing; otherwise every 4th (~180s) — avoid retry storms
-    if (
-      index === preferredQuicknode ||
-      state.endpoint.label === 'quicknode' ||
-      isQuicknodeRpcUrl(state.endpoint.url)
-    ) {
-      if (!state.healthy) return cycle % 8 === 0;
-      return cycle % 4 === 0;
-    }
-    // Inactive fallback: rare
-    return cycle % 5 === 0;
+    const isActive =
+      index === activePrimary ||
+      index === activeSecondary ||
+      index === activeUtility;
+    const isPreferred =
+      index === preferredPrimary ||
+      index === preferredSecondary ||
+      index === preferredUtility;
+    return isActive || isPreferred;
   }
 
-  // Boot: probe utility/public first, then preferred paid lanes once (not all fallbacks).
+  // Boot: probe assigned preferred lanes only.
   void (async () => {
     const order: number[] = [];
     const push = (i: number) => {
       if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
     };
-    if (Boolean(config.rpc?.shareLoad)) {
-      push(preferredUtility);
-      for (let i = 0; i < endpoints.length; i++) {
-        if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) push(i);
-      }
-      push(preferredPrimary);
-      push(preferredSecondary);
-      push(preferredQuicknode);
-    } else {
-      for (let i = 0; i < endpoints.length; i++) push(i);
-    }
+    push(preferredPrimary);
+    push(preferredSecondary);
+    push(preferredUtility);
     for (const i of order) {
       await probeEndpoint(i);
       await new Promise((r) => setTimeout(r, 400));
@@ -2119,11 +2055,7 @@ export function startRpcHealthMonitor(): void {
   }, interval);
 
   console.log(
-    `[rpc] Health monitor started (every ${interval}ms` +
-      (Boolean(config.rpc?.shareLoad)
-        ? '; share-load: public/utility every tick, helius~3x, alchemy/quicknode~2x'
-        : '') +
-      `) — endpoints: ` +
+    `[rpc] Health monitor started (every ${interval}ms; assigned lanes only) — endpoints: ` +
       endpoints.map((e) => `${e.endpoint.label}[${e.role}]`).join(', ') +
       ` · active primary=${getActiveEndpointLabel('primary')} secondary=${getActiveEndpointLabel('secondary')}`
   );

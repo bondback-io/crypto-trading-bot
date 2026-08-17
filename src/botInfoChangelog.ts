@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.416',
+    title: 'RPC table shows assigned Alchemy slots only',
+    sections: ['execution', 'knobs'],
+    items: [
+      'RPC Status lists only assigned Alchemy keys with correct names (BACKUP / Alchemy / BACKUP2 / BACKUP3 / BACKUP4). Unused Helius, publicnode, mainnet-beta, RPC_URL, and QuickNode are not registered or probed.',
+    ],
+  },
+  {
     version: '1.2.415',
     title: 'Alchemy keys for every RPC slot',
     sections: ['execution', 'knobs'],
