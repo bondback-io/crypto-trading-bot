@@ -803,13 +803,31 @@ export function evaluateDeadTokenHardFloors(
  * Entry timing gate: reject if smart-wallet signal is older than maxEntryAgeMinutes.
  * Non-bypassable when enableEntryTimingGate is on.
  */
-export function evaluateEntryTimingGate(signalAgeMinutes: number | null | undefined): string | null {
+export function evaluateEntryTimingGate(
+  signalAgeMinutes: number | null | undefined,
+  opts?: { marketCapUsd?: number; profileId?: string }
+): string | null {
   if (config.filters.enableEntryTimingGate === false) return null;
   const maxAge = isStrategyEnabled('time_based_entry')
     ? effectiveMaxEntryAgeMinutes()
     : 0;
   if (signalAgeMinutes == null || !Number.isFinite(signalAgeMinutes)) return null;
   if (signalAgeMinutes > maxAge) {
+    try {
+      const { isUpgradeEnabled } =
+        require('./upgrades/registry') as typeof import('./upgrades/registry');
+      const mc = opts?.marketCapUsd ?? 0;
+      const pid = String(opts?.profileId || '');
+      if (
+        isUpgradeEnabled('steady_hwr_majors') &&
+        mc >= 100_000_000 &&
+        (pid === 'high_win_rate' || pid === 'steady_compounder')
+      ) {
+        return null;
+      }
+    } catch {
+      /* core */
+    }
     return `Skipped — signal too old / entry age ${signalAgeMinutes.toFixed(1)}m > max ${maxAge}m`;
   }
   return null;

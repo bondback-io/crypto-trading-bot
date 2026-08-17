@@ -62,13 +62,20 @@ export function isPublicRpcUrl(url: string | null | undefined): boolean {
   );
 }
 
-export type RpcLaneRole = 'primary' | 'secondary' | 'fallback';
+export type RpcLaneRole =
+  | 'primary'
+  | 'secondary'
+  | 'utility'
+  | 'data'
+  | 'fallback';
 
 export interface NormalizedRpcEndpoint {
   url: string;
   label: string;
   wsUrl?: string;
   role?: RpcLaneRole;
+  /** Idle until preferred lanes fail — do not health-probe while idle */
+  emergency?: boolean;
 }
 
 /**
@@ -81,7 +88,9 @@ export function normalizeRpcEndpoints(
     label?: string;
     wsUrl?: string;
     role?: RpcLaneRole;
-  }>
+    emergency?: boolean;
+  }>,
+  opts?: { skipPublicFallbacks?: boolean }
 ): NormalizedRpcEndpoint[] {
   const seen = new Set<string>();
   const out: NormalizedRpcEndpoint[] = [];
@@ -91,7 +100,8 @@ export function normalizeRpcEndpoints(
     url: string,
     label: string,
     role: RpcLaneRole,
-    wsUrl?: string
+    wsUrl?: string,
+    emergency?: boolean
   ) => {
     const trimmed = url.trim();
     if (!trimmed || seen.has(trimmed)) return;
@@ -103,7 +113,7 @@ export function normalizeRpcEndpoints(
       return;
     }
     seen.add(trimmed);
-    out.push({ url: trimmed, label, wsUrl, role });
+    out.push({ url: trimmed, label, wsUrl, role, emergency });
   };
 
   for (let i = 0; i < candidates.length; i++) {
@@ -114,9 +124,13 @@ export function normalizeRpcEndpoints(
         ? 'primary'
         : c.label === 'secondary'
           ? 'secondary'
-          : i === 0
-            ? 'primary'
-            : 'fallback');
+          : c.label === 'utility'
+            ? 'utility'
+            : c.label === 'data'
+              ? 'data'
+              : i === 0
+                ? 'primary'
+                : 'fallback');
     push(
       c.url,
       c.label ||
@@ -126,18 +140,22 @@ export function normalizeRpcEndpoints(
             ? 'secondary'
             : `rpc-${i + 1}`),
       role,
-      c.wsUrl
+      c.wsUrl,
+      c.emergency
     );
   }
 
-  // Always keep at least one working public endpoint
-  push(
-    PUBLIC_SOLANA_RPC,
-    out.length === 0 ? 'primary' : 'public-fallback',
-    out.length === 0 ? 'primary' : 'fallback'
-  );
-  for (let i = 0; i < PUBLIC_RPC_FALLBACKS.length; i++) {
-    push(PUBLIC_RPC_FALLBACKS[i], `public-fallback-${i + 2}`, 'fallback');
+  if (!opts?.skipPublicFallbacks || out.length === 0) {
+    push(
+      PUBLIC_SOLANA_RPC,
+      out.length === 0 ? 'primary' : 'public-fallback',
+      out.length === 0 ? 'primary' : 'fallback'
+    );
+    if (!opts?.skipPublicFallbacks) {
+      for (let i = 0; i < PUBLIC_RPC_FALLBACKS.length; i++) {
+        push(PUBLIC_RPC_FALLBACKS[i], `public-fallback-${i + 2}`, 'fallback');
+      }
+    }
   }
 
   if (droppedPlaceholder && out.length > 0) {
@@ -160,6 +178,16 @@ export function rpcEndpointsFromEnv(
   fallbacksEnv?: string | null,
   secondaryEnv?: string | null
 ): NormalizedRpcEndpoint[] {
+  try {
+    const { getUpgradeRpcInventory } =
+      require('./upgrades/rpc/inventory') as typeof import('./upgrades/rpc/inventory');
+    const alt = getUpgradeRpcInventory();
+    if (alt && alt.length > 0) {
+      return normalizeRpcEndpoints(alt, { skipPublicFallbacks: true });
+    }
+  } catch {
+    /* no RPC upgrade pack — 1.2.21 dual-lane */
+  }
   const primary =
     (primaryEnv ?? process.env.RPC_PRIMARY ?? process.env.RPC_URL)?.trim() ||
     PUBLIC_SOLANA_RPC;
@@ -236,5 +264,11 @@ export const RPC_LANE_SUPPORTS = {
     'Email notifications (Resend / SMTP — no Solana RPC)',
     'Wallet discovery / search (GMGN, Kolscan, etc. — HTTP APIs)',
     'Open-trade mark prices (DexScreener HTTP)',
+  ],
+  utility: [
+    'Wallet on-chain activity / Favourites (when an RPC lane map is on)',
+  ],
+  data: [
+    'Watch-list RPC + token metrics (4-lane / exclusive maps)',
   ],
 } as const;

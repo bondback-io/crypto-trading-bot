@@ -4040,20 +4040,36 @@ export function effectiveMinLiquidityUsd(): number {
   if (!hardFilterFloorsActive()) {
     return Math.max(0, config.filters.minLiquidity ?? 0);
   }
-  return Math.max(
+  let n = Math.max(
     config.filters.minLiquidity ?? 0,
     HARD_FILTER_FLOORS.minLiquidityUsd
   );
+  try {
+    const { learningModeAdjustedMinLiquidity } =
+      require('./upgrades/learning/learningMode') as typeof import('./upgrades/learning/learningMode');
+    n = learningModeAdjustedMinLiquidity(n);
+  } catch {
+    /* pack optional */
+  }
+  return n;
 }
 
 export function effectiveMinMarketCapUsd(): number {
   if (!hardFilterFloorsActive()) {
     return Math.max(0, config.filters.minMarketCapUsd ?? 0);
   }
-  return Math.max(
+  let n = Math.max(
     config.filters.minMarketCapUsd ?? 0,
     HARD_FILTER_FLOORS.minMarketCapUsd
   );
+  try {
+    const { learningModeAdjustedMinMarketCap } =
+      require('./upgrades/learning/learningMode') as typeof import('./upgrades/learning/learningMode');
+    n = learningModeAdjustedMinMarketCap(n);
+  } catch {
+    /* pack optional */
+  }
+  return n;
 }
 
 export function effectiveMinVolume24hUsd(): number {

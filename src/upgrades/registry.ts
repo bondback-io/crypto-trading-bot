@@ -7,6 +7,7 @@ import { persistUserSettings } from './configBridge';
 import {
   getUpgradePack,
   isReadyUpgradeId,
+  isRpcLaneMapId,
   UPGRADE_PACKS,
   type UpgradePackMeta,
 } from './catalog';
@@ -27,6 +28,16 @@ export function normalizeEnabledIds(raw: unknown): string[] {
   return out;
 }
 
+/** Keep the last selected RPC lane map; drop earlier ones. */
+export function enforceRpcLaneExclusion(ids: string[]): string[] {
+  let lastMap: string | null = null;
+  for (const id of ids) {
+    if (isRpcLaneMapId(id)) lastMap = id;
+  }
+  if (!lastMap) return ids;
+  return ids.filter((id) => !isRpcLaneMapId(id) || id === lastMap);
+}
+
 export function getEnabledUpgradeIds(): string[] {
   return [...enabledIds];
 }
@@ -35,8 +46,17 @@ export function isUpgradeEnabled(id: string): boolean {
   return enabledIds.has(id);
 }
 
+export function getActiveRpcLaneMap(): string | null {
+  for (const id of enabledIds) {
+    if (isRpcLaneMapId(id)) return id;
+  }
+  return null;
+}
+
 export function hydrateEnabledUpgrades(raw: unknown): string[] {
-  const ids = normalizeEnabledIds(raw).filter(isReadyUpgradeId);
+  const ids = enforceRpcLaneExclusion(
+    normalizeEnabledIds(raw).filter(isReadyUpgradeId)
+  );
   enabledIds = new Set(ids);
   return getEnabledUpgradeIds();
 }
@@ -44,6 +64,7 @@ export function hydrateEnabledUpgrades(raw: unknown): string[] {
 export function setEnabledUpgradeIds(raw: unknown): {
   enabled: string[];
   rejected: string[];
+  droppedLaneMaps: string[];
 } {
   const requested = normalizeEnabledIds(raw);
   const rejected = requested.filter((id) => !isReadyUpgradeId(id));
@@ -52,9 +73,20 @@ export function setEnabledUpgradeIds(raw: unknown): {
       `Cannot enable packs that are not rebuilt yet: ${rejected.join(', ')}`
     );
   }
-  enabledIds = new Set(requested);
+  const unknown = Array.isArray(raw)
+    ? raw
+        .map((x) => String(x || '').trim())
+        .filter((id) => id && !getUpgradePack(id))
+    : [];
+  if (unknown.length) {
+    throw new Error(`Unknown upgrade pack(s): ${unknown.join(', ')}`);
+  }
+  const laneRequested = requested.filter(isRpcLaneMapId);
+  const enabled = enforceRpcLaneExclusion(requested);
+  const droppedLaneMaps = laneRequested.filter((id) => !enabled.includes(id));
+  enabledIds = new Set(enabled);
   persistUserSettings();
-  return { enabled: getEnabledUpgradeIds(), rejected: [] };
+  return { enabled: getEnabledUpgradeIds(), rejected: [], droppedLaneMaps };
 }
 
 export function listUpgradePacks(): UpgradePackMeta[] {

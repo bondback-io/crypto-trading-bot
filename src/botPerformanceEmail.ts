@@ -745,6 +745,16 @@ async function scheduledTick(): Promise<void> {
 }
 
 export function startBotPerfEmailScheduler(): void {
+  try {
+    const { isLoadServiceEnabled } =
+      require('./upgrades/packs/systemLoadMode') as typeof import('./upgrades/packs/systemLoadMode');
+    if (!isLoadServiceEnabled('email_botperf')) {
+      console.log('[bot-perf-email] scheduler skipped — System Load Mode extras off');
+      return;
+    }
+  } catch {
+    /* pack optional */
+  }
   if (tickTimer) return;
   tickTimer = setInterval(() => {
     void scheduledTick();

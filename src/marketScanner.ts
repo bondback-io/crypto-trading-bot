@@ -1181,8 +1181,19 @@ export async function runScannerPollOnce(): Promise<number> {
   const t0 = Date.now();
   try {
     lastError = null;
-    const universe = await collectScannerUniverse();
-    const picked = await selectScannerCandidates(universe);
+    const onScannerLane = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      try {
+        const { scannerRpcRole } =
+          require('./upgrades/rpc/facade') as typeof import('./upgrades/rpc/facade');
+        const { runWithRpcRole } =
+          require('./connection') as typeof import('./connection');
+        return await runWithRpcRole(scannerRpcRole(), fn);
+      } catch {
+        return fn();
+      }
+    };
+    const universe = await onScannerLane(() => collectScannerUniverse());
+    const picked = await onScannerLane(() => selectScannerCandidates(universe));
     let handed = 0;
     // Non-blocking hand-off: fire handlers without serial await so the
     // scanner poll lock releases quickly; mint locks still serialize buys.

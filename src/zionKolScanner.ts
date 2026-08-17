@@ -753,6 +753,16 @@ export function getZionScannerStatus(): {
 export function startZionKolScanner(): void {
   if (running) return;
   if (!zionCfg()?.enabled || zionCfg().scanner?.enabled === false) return;
+  try {
+    const { isLoadServiceEnabled } =
+      require('./upgrades/packs/systemLoadMode') as typeof import('./upgrades/packs/systemLoadMode');
+    if (!isLoadServiceEnabled('zion_kol_scanner')) {
+      console.log('[zion] KOL scanner skipped — System Load Mode extras off');
+      return;
+    }
+  } catch {
+    /* pack optional */
+  }
   running = true;
   loadUniverseCache();
   const share = lanesShareEndpoint();
@@ -784,8 +794,15 @@ export function stopZionKolScanner(): void {
 
 /** Start or stop based on current config (no strategy toggle side effects). */
 export function syncZionKolScannerLifecycle(): void {
-  const want =
+  let want =
     zionCfg()?.enabled === true && zionCfg().scanner?.enabled !== false;
+  try {
+    const { isLoadServiceEnabled } =
+      require('./upgrades/packs/systemLoadMode') as typeof import('./upgrades/packs/systemLoadMode');
+    if (!isLoadServiceEnabled('zion_kol_scanner')) want = false;
+  } catch {
+    /* pack optional */
+  }
   if (want && !running) startZionKolScanner();
   else if (!want && running) stopZionKolScanner();
   else if (want && running) {

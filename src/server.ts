@@ -550,6 +550,12 @@ export function createServer(): express.Application {
         baseline: '1.2.21',
         enabled: getEnabledUpgradeIds(),
         packs: listUpgradePacks(),
+        categories: (
+          require('./upgrades/catalog') as typeof import('./upgrades/catalog')
+        ).UPGRADE_CATEGORIES,
+        rpcLaneMapIds: (
+          require('./upgrades/catalog') as typeof import('./upgrades/catalog')
+        ).RPC_LANE_MAP_IDS,
       });
     } catch (err) {
       res.status(500).json({
@@ -570,11 +576,94 @@ export function createServer(): express.Application {
       res.json({
         ok: true,
         enabled: result.enabled,
+        droppedLaneMaps: result.droppedLaneMaps,
         rebooting: true,
         message:
           'Saved. Process will exit so Render/PM2 starts a fresh 1.2.21 core with only these packs on.',
       });
       scheduleUpgradeReboot();
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/upgrades/zion-fight-log', (_req: Request, res: Response) => {
+    try {
+      const { getZionFightLog } =
+        require('./upgrades/packs/zionFightLog') as typeof import('./upgrades/packs/zionFightLog');
+      res.json({ ok: true, rows: getZionFightLog(24) });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/upgrades/load-mode', (_req: Request, res: Response) => {
+    try {
+      const { getSystemLoadMode } =
+        require('./upgrades/packs/systemLoadMode') as typeof import('./upgrades/packs/systemLoadMode');
+      res.json({ ok: true, mode: getSystemLoadMode() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/upgrades/load-mode', (req: Request, res: Response) => {
+    try {
+      const { setSystemLoadMode } =
+        require('./upgrades/packs/systemLoadMode') as typeof import('./upgrades/packs/systemLoadMode');
+      const body = (req.body ?? {}) as { mode?: unknown };
+      res.json({ ok: true, mode: setSystemLoadMode(body.mode) });
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/upgrades/bot-learning', (_req: Request, res: Response) => {
+    try {
+      const { loadBotLearningSettings, isBotLearningPackOn } =
+        require('./upgrades/learning/settings') as typeof import('./upgrades/learning/settings');
+      const { getEnhancementsStatus } =
+        require('./upgrades/learning/enhancements') as typeof import('./upgrades/learning/enhancements');
+      res.json({
+        ok: true,
+        packOn: isBotLearningPackOn(),
+        settings: loadBotLearningSettings(),
+        scheduler: getEnhancementsStatus(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/upgrades/bot-learning', (req: Request, res: Response) => {
+    try {
+      const { saveBotLearningSettings, isBotLearningPackOn } =
+        require('./upgrades/learning/settings') as typeof import('./upgrades/learning/settings');
+      const { startBotLearningEnhancements } =
+        require('./upgrades/learning/enhancements') as typeof import('./upgrades/learning/enhancements');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const settings = saveBotLearningSettings(
+        body as Partial<
+          import('./upgrades/learning/settings').BotLearningSettings
+        >
+      );
+      if (isBotLearningPackOn()) startBotLearningEnhancements();
+      res.json({ ok: true, settings });
     } catch (err) {
       res.status(400).json({
         ok: false,

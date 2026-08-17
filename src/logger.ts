@@ -189,6 +189,24 @@ export const logger = {
     return push('warn', context, message, meta);
   },
   error(context: LogContext, message: string, meta?: Record<string, unknown>) {
+    try {
+      const { isUpgradeEnabled } =
+        require('./upgrades/registry') as typeof import('./upgrades/registry');
+      if (isUpgradeEnabled('render_rpc_quiet_logs')) {
+        const hay = `${message} ${JSON.stringify(meta ?? {})}`.toLowerCase();
+        if (
+          hay.includes('429') ||
+          hay.includes('too many requests') ||
+          hay.includes('compute units per second') ||
+          hay.includes('request blocked') ||
+          hay.includes('403')
+        ) {
+          return push('warn', context, message, meta);
+        }
+      }
+    } catch {
+      /* core */
+    }
     return push('error', context, message, meta);
   },
 

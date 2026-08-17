@@ -1374,8 +1374,48 @@ export function runSelfLearnTick(input: {
     return { state };
   }
 
-  const episodes = getProfileLearningEpisodes(input.profileId, 120);
+  const episodes = getProfileLearningEpisodes(
+    input.profileId,
+    (() => {
+      try {
+        const { botLearningTickEpisodeLimit } =
+          require('./upgrades/learning/settings') as typeof import('./upgrades/learning/settings');
+        return botLearningTickEpisodeLimit();
+      } catch {
+        return 120;
+      }
+    })()
+  );
   state = refreshSelfLearnMetrics(state, input.profileId);
+  try {
+    const { isBotLearningPackOn } =
+      require('./upgrades/learning/settings') as typeof import('./upgrades/learning/settings');
+    if (isBotLearningPackOn()) {
+      const { maybeAutoAdvanceMlMode } =
+        require('./upgrades/learning/mlAdvance') as typeof import('./upgrades/learning/mlAdvance');
+      const { loadProfileMlModel, isModelStale } =
+        require('./profileLearningMl') as typeof import('./profileLearningMl');
+      const model = loadProfileMlModel(input.profileId);
+      const advanced = maybeAutoAdvanceMlMode({
+        enabled: state.enabled,
+        mlMode: state.mlMode,
+        mlValidatedInPaper: state.mlValidatedInPaper === true,
+        level: state.version,
+        episodeCount: episodes.length,
+        holdoutAuc: model?.holdoutAuc ?? 0,
+        hasModel: Boolean(model),
+        stale: isModelStale(model, episodes.length),
+      });
+      if (advanced && advanced.mlMode !== state.mlMode) {
+        console.log(
+          `[learning-ml] ${input.profileId} ${advanced.from}→${advanced.mlMode} (${advanced.reason})`
+        );
+        state = { ...state, mlMode: advanced.mlMode };
+      }
+    }
+  } catch {
+    /* optional */
+  }
 
   const microEvery = state.microEveryTrades || 4;
   state.nextEligibleIn = Math.max(0, microEvery - (state.tradesSinceMicro || 0));

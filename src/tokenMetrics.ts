@@ -23,6 +23,16 @@ import {
 } from './jupiterTokens';
 import { isStrategyEnabled } from './strategies';
 
+function metricsConn() {
+  try {
+    const { metricsRpcRole } =
+      require('./upgrades/rpc/facade') as typeof import('./upgrades/rpc/facade');
+    return getConnection(metricsRpcRole());
+  } catch {
+    return getConnection();
+  }
+}
+
 export interface HolderBucket {
   address: string;
   amountUi: number;
@@ -521,7 +531,7 @@ async function resolvePoolVaultExcludeOwners(
 async function fetchOnChainHolderMetrics(
   mint: string
 ): Promise<Partial<TokenMetrics>> {
-  const conn = getConnection();
+  const conn = metricsConn();
   const mintKey = new PublicKey(mint);
 
   let supplyUi: number | null = null;
@@ -655,7 +665,7 @@ async function fetchDevActivity(
 ): Promise<{ count: number; active: boolean }> {
   const lookbackMs = config.tokenMetrics?.devActivityLookbackMs ?? 2 * MS_PER_DAY;
   try {
-    const conn = getConnection();
+    const conn = metricsConn();
     const sigs = await conn.getSignaturesForAddress(new PublicKey(address), {
       limit: 20,
     });

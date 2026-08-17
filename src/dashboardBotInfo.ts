@@ -408,7 +408,7 @@ export function buildBotInfoPanelHtml(
         <div class="botinfo-hero">
           <div>
             <h2>Bot Info <span class="sr-only">${esc(label)}</span></h2>
-            <p class="botinfo-lede">Operator manual for this dashboard — ${snap.counts.profiles} micro-bots, ${snap.counts.modules} modules, ${snap.counts.presets} presets. v1.2.422 restored the 1.2.21 core; post-1.2.21 features live under the Upgrades tab (default off). Lists sync from code catalogs; use chips to jump.</p>
+            <p class="botinfo-lede">Operator manual for this dashboard — ${snap.counts.profiles} micro-bots, ${snap.counts.modules} modules, ${snap.counts.presets} presets. v1.2.424 adds the Bot Learning pack (1.2.421 self-learn stack, default off) on the restored 1.2.21 core. Lists sync from code catalogs; use chips to jump.</p>
             ${BOT_INFO_CHANGELOG.slice(0, 1)
               .map(
                 (e) =>

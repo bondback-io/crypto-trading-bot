@@ -46,6 +46,19 @@ export function effectiveMinWalletQualityScore(): number {
   } catch {
     /* ignore bootstrap */
   }
+  try {
+    const { getLearningModeGateOverlays } =
+      require('./upgrades/learning/learningMode') as typeof import('./upgrades/learning/learningMode');
+    const o = getLearningModeGateOverlays();
+    if (o) {
+      score =
+        o.minWalletQuality >= score
+          ? o.minWalletQuality
+          : Math.max(25, Math.round((score + o.minWalletQuality) / 2));
+    }
+  } catch {
+    /* pack optional */
+  }
   return Math.min(85, score);
 }
 
@@ -62,6 +75,19 @@ export function effectiveMinConvictionScore(): number {
     if (ov != null) score = Math.max(score, ov);
   } catch {
     /* ignore bootstrap */
+  }
+  try {
+    const { getLearningModeGateOverlays } =
+      require('./upgrades/learning/learningMode') as typeof import('./upgrades/learning/learningMode');
+    const o = getLearningModeGateOverlays();
+    if (o) {
+      score =
+        o.minConviction >= score
+          ? o.minConviction
+          : Math.max(25, Math.round((score + o.minConviction) / 2));
+    }
+  } catch {
+    /* pack optional */
   }
   return Math.min(80, score);
 }

@@ -163,6 +163,16 @@ import {
 } from './postRunDip';
 import { registerDipBuyHistoryProvider } from './dipSmartWallet';
 
+function activityLane(): 'primary' | 'secondary' | 'utility' | 'data' {
+  try {
+    const { activityRpcRole } =
+      require('./upgrades/rpc/facade') as typeof import('./upgrades/rpc/facade');
+    return activityRpcRole();
+  } catch {
+    return 'secondary';
+  }
+}
+
 export { pruneLowQualityWallets, refreshAllWalletQualityScores };
 
 /** Build match context for early Soft Bot / final profile assignment. */
@@ -1068,7 +1078,7 @@ export async function checkWalletLastTrade(
   signature?: string;
   failed?: boolean;
 }> {
-  return runWithRpcRole('secondary', async () => {
+  return runWithRpcRole(activityLane(), async () => {
     try {
       const pubkey = new PublicKey(address);
       const conn = getConnection();
@@ -1251,7 +1261,7 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
   console.log(`[monitor] Refreshing activity for ${config.smartWallets.length} wallet(s)…`);
   const reports: WalletActivityReport[] = [];
 
-  return runWithRpcRole('secondary', async () => {
+  return runWithRpcRole(activityLane(), async () => {
     for (let i = 0; i < config.smartWallets.length; i++) {
       const wallet = config.smartWallets[i];
       const report = await refreshWalletActivity(wallet);
@@ -4291,7 +4301,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     isStrategyEnabled('early_entry_only') ||
     isStrategyEnabled('elite_convergence')
   ) {
-    const timingSkip = evaluateEntryTimingGate(signal.signalAgeMinutes);
+    const timingSkip = evaluateEntryTimingGate(signal.signalAgeMinutes, {
+      marketCapUsd:
+        signal.metrics?.marketCapUsd ?? signal.sourceEntryMcUsd ?? undefined,
+      profileId: signal.candidateTradeProfileId,
+    });
     if (timingSkip) {
       // Post-run dip setups intentionally target older runs — allow past early age gate
       let dipBypass = false;

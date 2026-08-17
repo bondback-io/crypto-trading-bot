@@ -67,7 +67,18 @@ interface EpisodesFile {
   updatedAt: number;
 }
 
-const MAX_PER_PROFILE = 400;
+const CORE_MAX_PER_PROFILE = 400;
+
+function maxPerProfile(): number {
+  try {
+    const { isBotLearningPackOn, botLearningEpisodeCap } =
+      require('./upgrades/learning/settings') as typeof import('./upgrades/learning/settings');
+    if (isBotLearningPackOn()) return botLearningEpisodeCap();
+  } catch {
+    /* core */
+  }
+  return CORE_MAX_PER_PROFILE;
+}
 const DIR = () => dataFile('profile-learning');
 
 const cache = new Map<string, ProfileLearningEpisode[]>();
@@ -97,7 +108,7 @@ function loadProfile(profileId: string): ProfileLearningEpisode[] {
       return [];
     }
     const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as EpisodesFile;
-    const ring = Array.isArray(raw.ring) ? raw.ring.slice(-MAX_PER_PROFILE) : [];
+    const ring = Array.isArray(raw.ring) ? raw.ring.slice(-maxPerProfile()) : [];
     cache.set(profileId, ring);
     return ring;
   } catch (err) {
@@ -115,7 +126,7 @@ function persistProfile(profileId: string): void {
     ensureDataDir();
     const dir = DIR();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const ring = (cache.get(profileId) || []).slice(-MAX_PER_PROFILE);
+    const ring = (cache.get(profileId) || []).slice(-maxPerProfile());
     const payload: EpisodesFile = {
       version: 1,
       profileId,
@@ -182,6 +193,23 @@ export function appendProfileLearningEpisode(
   if (!profileId || profileId === 'default') return null;
   // Skip partial slices
   if (/^partial:/i.test(String(episode.exitReason || ''))) return null;
+  try {
+    const { isBotLearningPackOn, loadBotLearningSettings } =
+      require('./upgrades/learning/settings') as typeof import('./upgrades/learning/settings');
+    if (isBotLearningPackOn()) {
+      const s = loadBotLearningSettings();
+      const { config } = require('./config') as typeof import('./config');
+      if (config.mode === 'live' && !s.includeLiveModeEpisodes) return null;
+      if (
+        /dashboard_reset/i.test(String(episode.exitReason || '')) &&
+        !s.includeDashboardResetEpisodes
+      ) {
+        return null;
+      }
+    }
+  } catch {
+    /* core */
+  }
 
   const ring = loadProfile(profileId);
   const row: ProfileLearningEpisode = {
@@ -192,8 +220,9 @@ export function appendProfileLearningEpisode(
     profileId,
   };
   ring.push(row);
-  if (ring.length > MAX_PER_PROFILE) {
-    cache.set(profileId, ring.slice(-MAX_PER_PROFILE));
+  const cap = maxPerProfile();
+  if (ring.length > cap) {
+    cache.set(profileId, ring.slice(-cap));
   } else {
     cache.set(profileId, ring);
   }
@@ -222,7 +251,8 @@ export function getProfileLearningEpisodes(
   limit = 200
 ): ProfileLearningEpisode[] {
   const ring = loadProfile(profileId);
-  const n = Math.max(1, Math.min(MAX_PER_PROFILE, limit));
+  const cap = maxPerProfile();
+  const n = Math.max(1, Math.min(cap, limit));
   return ring.slice(-n);
 }
 
@@ -256,7 +286,28 @@ export function getProfileEpisodeExpectancy(
   const wins = eps.filter((e) => (e.pnlPct || 0) > 0).length;
   const avgHold =
     eps.reduce((s, e) => s + (e.holdSec || 0), 0) / Math.max(1, eps.length);
-  const expectancyPct = sumPct / eps.length;
+  let expectancyPct = sumPct / eps.length;
+  try {
+    const { isBotLearningPackOn, loadBotLearningSettings } =
+      require('./upgrades/learning/settings') as typeof import('./upgrades/learning/settings');
+    const { computeEpisodeQualityWeight } =
+      require('./upgrades/learning/episodeQuality') as typeof import('./upgrades/learning/episodeQuality');
+    if (
+      isBotLearningPackOn() &&
+      loadBotLearningSettings().enhancements.qualityWeightingEnabled
+    ) {
+      let wSum = 0;
+      let wPnl = 0;
+      for (const e of eps) {
+        const w = computeEpisodeQualityWeight(e);
+        wSum += w;
+        wPnl += w * (e.pnlPct || 0);
+      }
+      if (wSum > 0) expectancyPct = wPnl / wSum;
+    }
+  } catch {
+    /* core unweighted */
+  }
   // Penalize large losers and very long dead holds
   let penalty = 0;
   for (const e of eps) {

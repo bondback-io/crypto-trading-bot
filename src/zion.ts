@@ -569,6 +569,25 @@ export function maybeCreateOffer(
     if (minMc > 0 && input.mcUsd < minMc) return null;
     if (maxMc > 0 && input.mcUsd > maxMc) return null;
   }
+  try {
+    const { isUpgradeEnabled } =
+      require('./upgrades/registry') as typeof import('./upgrades/registry');
+    if (isUpgradeEnabled('zion_fight_log')) {
+      const { recordZionFight } =
+        require('./upgrades/packs/zionFightLog') as typeof import('./upgrades/packs/zionFightLog');
+      const { zionPlatinumHandoffEligible } =
+        require('./upgrades/packs/zionPlatinum') as typeof import('./upgrades/packs/zionPlatinum');
+      const handoff = zionPlatinumHandoffEligible(input.mcUsd);
+      recordZionFight({
+        ts: Date.now(),
+        mint,
+        winner: handoff ? 'high_win_rate' : 'zion',
+        reason: handoff ? 'platinum_handoff' : 'offer_created',
+      });
+    }
+  } catch {
+    /* optional */
+  }
 
   const displaySym = pickZionDisplaySymbol(input.symbol, input.name, mint);
   const displayName =

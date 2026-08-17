@@ -530,6 +530,16 @@ async function scheduledTick(): Promise<void> {
 
 /** Start background interval checker (safe to call multiple times). */
 export function startGithubSiteBackupScheduler(): void {
+  try {
+    const { isLoadServiceEnabled } =
+      require('./upgrades/packs/systemLoadMode') as typeof import('./upgrades/packs/systemLoadMode');
+    if (!isLoadServiceEnabled('github_backup')) {
+      console.log('[github-backup] scheduler skipped — System Load Mode extras off');
+      return;
+    }
+  } catch {
+    /* pack optional */
+  }
   if (tickTimer) return;
   tickTimer = setInterval(() => {
     void scheduledTick();

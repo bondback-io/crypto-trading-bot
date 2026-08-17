@@ -225,6 +225,7 @@ export function considerDipWatchSetup(input: {
   const minVol = m.minVolumeH1Usd ?? 8_000;
   const minDrop = m.minDropFromPeakPct ?? 8;
   const maxDrop = m.maxDropFromPeakPct ?? 45;
+  const maxMcBand = m.maxMarketCapUsd;
 
   pruneTerminal();
   const existing = watches.get(input.mint);
@@ -251,7 +252,30 @@ export function considerDipWatchSetup(input: {
   }
 
   const mc = input.marketCapUsd;
-  if (mc != null && mc > 0 && mc < minMc) return null;
+  try {
+    const { isUpgradeEnabled } =
+      require('./upgrades/registry') as typeof import('./upgrades/registry');
+    const { majorsDipWatchAllows } =
+      require('./upgrades/packs/majorsDipWatch') as typeof import('./upgrades/packs/majorsDipWatch');
+    if (majorsDipWatchAllows({ marketCapUsd: mc, source: input.source })) {
+      // majors pack: skip low-MC floor (high-MC names)
+    } else if (isUpgradeEnabled('expectancy_entry_skill') && (mc == null || mc <= 0)) {
+      // unknown MC soft-pass
+    } else if (mc != null && mc > 0 && mc < minMc) {
+      return null;
+    }
+    if (
+      isUpgradeEnabled('microbot_mc_bands') &&
+      maxMcBand != null &&
+      maxMcBand > 0 &&
+      mc != null &&
+      mc > maxMcBand
+    ) {
+      return null;
+    }
+  } catch {
+    if (mc != null && mc > 0 && mc < minMc) return null;
+  }
   if (
     input.holderCount != null &&
     input.holderCount > 0 &&
@@ -268,22 +292,60 @@ export function considerDipWatchSetup(input: {
   }
 
   const drop = input.dropFromPeakPct;
-  const nearTa = input.nearKeyFib === true || input.nearSupport === true;
+  let nearTa = input.nearKeyFib === true || input.nearSupport === true;
+  let hybrid = false;
+  try {
+    const { isUpgradeEnabled } =
+      require('./upgrades/registry') as typeof import('./upgrades/registry');
+    if (isUpgradeEnabled('scalper_mode_b') && input.nearSupport === true) {
+      nearTa = true;
+    }
+    hybrid = isUpgradeEnabled('hybrid_admission');
+    if (isUpgradeEnabled('watch_arm_ownership')) {
+      for (const w of watches.values()) {
+        if (
+          (w.status === 'watching' || w.status === 'armed') &&
+          Date.now() - w.createdAt > 20 * 60_000
+        ) {
+          w.status = 'expired';
+          w.lastReason = 'arm_timeout';
+          w.updatedAt = Date.now();
+        }
+      }
+    }
+  } catch {
+    /* core path */
+  }
   const dropStarted = drop != null && drop >= Math.min(5, minDrop);
   // Need early dip signal OR Fib/S proximity on established token
   if (!dropStarted && !nearTa) return null;
   if (drop != null && drop > maxDrop) return null;
 
   const now = Date.now();
+  const armNow = hybrid ? nearTa : nearTa && dropStarted;
+  let ttlMs = DEFAULT_TTL_MS;
+  try {
+    const { isUpgradeEnabled } =
+      require('./upgrades/registry') as typeof import('./upgrades/registry');
+    if (
+      isUpgradeEnabled('steady_hwr_majors') &&
+      mc != null &&
+      mc >= 100_000_000
+    ) {
+      ttlMs = Math.max(ttlMs, 6 * 60 * 60_000);
+    }
+  } catch {
+    /* core */
+  }
   const entry: DipWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
     name: input.name || input.symbol || 'Dip watch',
-    status: nearTa && dropStarted ? 'armed' : 'watching',
+    status: armNow ? 'armed' : 'watching',
     createdAt: now,
     updatedAt: now,
-    armedAt: nearTa && dropStarted ? now : null,
-    expiresAt: now + DEFAULT_TTL_MS,
+    armedAt: armNow ? now : null,
+    expiresAt: now + ttlMs,
     marketCapUsd: mc,
     volumeH1Usd: input.volumeH1Usd,
     holderCount: input.holderCount,

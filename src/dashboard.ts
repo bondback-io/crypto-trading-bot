@@ -5240,8 +5240,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <!-- ========== TAB: Upgrades ========== -->
     <section data-tab-panel="upgrades" class="upgrades-panel hidden space-y-4">
       <div class="card">
-        <div class="section-title">Upgrades <span class="tip" tabindex="0" data-tip="Restored 1.2.21 core. Packs added after that release are listed here. All start OFF. Pending packs are catalogued until they are rebuilt as isolated modules."></span></div>
-        <p class="text-sm text-slate-400 mb-2">Baseline is <strong style="color:#a7f3d0">1.2.21</strong> (pre-1.2.22). Check one or more ready packs, then Save &amp; reboot. Turning a pack off and saving reboots without it. RPC packs stay pending so they cannot remap the restored connection manager.</p>
+        <div class="section-title">Upgrades <span class="tip" tabindex="0" data-tip="Restored 1.2.21 core. Every pack is pre-built and default off. Check packs, then Save &amp; reboot. RPC lane maps are exclusive (one at a time)."></span></div>
+        <p class="text-sm text-slate-400 mb-2">Baseline is <strong style="color:#a7f3d0">1.2.21</strong> (pre-1.2.22). Packs are pre-built and default off. Check one or more, then Save &amp; reboot. RPC lane maps are exclusive (one at a time). Containment can stack on a lane map.</p>
         <div class="mint text-xs mb-3" id="upgrades-status">Loading…</div>
         <div id="upgrades-list" class="upgrade-groups">Loading packs…</div>
         <div class="mt-3 flex flex-wrap gap-2 items-center">
@@ -11243,19 +11243,281 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.importStrategyModulesJson = importStrategyModulesJson;
     window.resetStrategyModulesToDefaults = resetStrategyModulesToDefaults;
 
-    let _upgradesState = { enabled: [], packs: [] };
+    let _upgradesState = { enabled: [], packs: [], categories: [], rpcLaneMapIds: [] };
+    function upgradeOn(id) {
+      return (_upgradesState.enabled || []).indexOf(id) >= 0;
+    }
+    function applyDashboardUpgrades() {
+      const onWatch = upgradeOn('watchlist_tab');
+      const onCos = upgradeOn('dashboard_cosmetics');
+      const scanBtn = document.querySelector('[data-tab="scanner"]');
+      if (scanBtn) {
+        const short = scanBtn.querySelector('.btn-label-short');
+        const full = scanBtn.querySelector('.btn-label-full');
+        if (short) short.textContent = onWatch ? 'Watch' : 'Feed';
+        if (full) full.textContent = onWatch ? 'Watchlist' : 'Live Feed';
+        scanBtn.setAttribute('title', onWatch
+          ? 'Watchlist — dip/scalper/grad watches, market scanner, signals'
+          : 'Live Feed — market scanner, Pump.fun activity, signals, sizing, and re-entry watches');
+      }
+      let sub = document.getElementById('watchlist-setup-subnav');
+      if (onWatch) {
+        if (!sub) {
+          const panel = document.querySelector('[data-tab-panel="scanner"]');
+          if (panel) {
+            sub = document.createElement('div');
+            sub.id = 'watchlist-setup-subnav';
+            sub.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.4rem;margin:0 0 0.75rem';
+            sub.innerHTML =
+              '<button type="button" class="btn btn-secondary text-xs" data-watch-setup="dip">Dip</button>' +
+              '<button type="button" class="btn btn-secondary text-xs" data-watch-setup="scalper">Scalper</button>' +
+              '<button type="button" class="btn btn-secondary text-xs" data-watch-setup="grad">Grad</button>' +
+              '<button type="button" class="btn btn-secondary text-xs" data-watch-setup="scanner">Scanner</button>';
+            panel.insertBefore(sub, panel.firstChild);
+            sub.addEventListener('click', function (ev) {
+              const t = ev.target && ev.target.closest && ev.target.closest('[data-watch-setup]');
+              if (!t) return;
+              try { if (typeof refreshSetupWatches === 'function') refreshSetupWatches(); } catch (_) {}
+            });
+          }
+        }
+      } else if (sub) {
+        sub.remove();
+      }
+      document.body.classList.toggle('upgrade-cosmetics', onCos);
+      const tradesBtn = document.querySelector('[data-tab="trades"]');
+      if (tradesBtn) {
+        tradesBtn.classList.toggle('upgrade-trades-mobile', onCos);
+        tradesBtn.classList.remove('hidden');
+        tradesBtn.removeAttribute('hidden');
+      }
+      let statsChip = document.getElementById('upgrade-stats-chip');
+      if (onCos && !statsChip) {
+        const nav = document.querySelector('.nav-tabs');
+        const micro = document.querySelector('[data-tab="microbots"]');
+        if (nav) {
+          statsChip = document.createElement('button');
+          statsChip.id = 'upgrade-stats-chip';
+          statsChip.type = 'button';
+          statsChip.className = 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
+          statsChip.setAttribute('data-tab', 'overview');
+          statsChip.title = 'Jump to Overview stats';
+          statsChip.textContent = 'Stats';
+          statsChip.onclick = function () {
+            showTab('overview', statsChip);
+            const el = document.getElementById('ov-equity-panel');
+            if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          };
+          if (micro && micro.nextSibling) nav.insertBefore(statsChip, micro.nextSibling);
+          else if (nav) nav.appendChild(statsChip);
+        }
+      } else if (!onCos && statsChip) statsChip.remove();
+      const headerMeta = document.querySelector('.status-meta');
+      let sess = document.getElementById('upgrade-session-chip');
+      if (onCos && headerMeta && !sess) {
+        sess = document.createElement('span');
+        sess.id = 'upgrade-session-chip';
+        sess.className = 'badge status-badge';
+        sess.style.cssText = 'background:#1e293b;border:1px solid #334155;color:#94a3b8';
+        sess.textContent = 'Session';
+        headerMeta.appendChild(sess);
+      } else if (!onCos && sess) sess.remove();
+      const menu = document.getElementById('settings-dropdown');
+      if (menu) {
+        const orderOn = ['wallets', 'settings', 'backtester', 'config', 'logs', 'backup', 'botinfo'];
+        const orderOff = ['wallets', 'settings', 'config', 'backtester', 'logs', 'backup', 'botinfo'];
+        (onCos ? orderOn : orderOff).forEach(function (id) {
+          const el = menu.querySelector('[data-settings-tab="' + id + '"]');
+          if (el) menu.appendChild(el);
+        });
+      }
+      if (onCos && !document.getElementById('upgrade-cosmetics-css')) {
+        const st = document.createElement('style');
+        st.id = 'upgrade-cosmetics-css';
+        st.textContent =
+          '.upgrade-cosmetics .btn-warning{background:#F1BB72;color:#0f172a;border-color:#d4a05e}' +
+          '.upgrade-cosmetics .nav-tab-zion{border-color:#f2ae66}' +
+          '.upgrade-cosmetics .nav-tab-microbots{box-shadow:0 0 10px rgba(52,211,153,0.18)}' +
+          '.upgrade-cosmetics .tp-toggle-card{box-shadow:0 0 14px rgba(52,211,153,0.12)}' +
+          '.upgrade-cosmetics .nav-tabs [data-tab="trades"].upgrade-trades-mobile{display:none}' +
+          '@media(max-width:640px){.upgrade-cosmetics #trade-profiles-active-chips{max-height:2.4rem;overflow:hidden}' +
+          '.upgrade-cosmetics .nav-tabs [data-tab="trades"].upgrade-trades-mobile{display:inline-flex}}';
+        document.head.appendChild(st);
+      } else if (!onCos) {
+        const st = document.getElementById('upgrade-cosmetics-css');
+        if (st) st.remove();
+      }
+      const craft = document.getElementById('upgrade-trade-craft');
+      if (upgradeOn('trade_craft_learning')) {
+        const micro = document.querySelector('[data-tab-panel="microbots"]');
+        if (micro && !craft) {
+          const el = document.createElement('div');
+          el.id = 'upgrade-trade-craft';
+          el.className = 'card';
+          el.innerHTML = '<div class="section-title">Trade Craft</div><p class="text-xs text-slate-400 mb-0">Scorecard + soft Timing/PPP alignment is on. Open Bot Info for the full chapter.</p>';
+          micro.insertBefore(el, micro.firstChild);
+        }
+      } else if (craft) craft.remove();
+      const im = document.getElementById('upgrade-influencer-mirror');
+      if (upgradeOn('influencer_mirror')) {
+        const wallets = document.querySelector('[data-tab-panel="wallets"]');
+        if (wallets && !im) {
+          const el = document.createElement('div');
+          el.id = 'upgrade-influencer-mirror';
+          el.className = 'card';
+          el.innerHTML = '<div class="section-title">Influencer Smart Mirror</div><p class="text-xs text-slate-400 mb-0">Tagged influencer watchlist is on. Copy/mirror buys stay off until those modules are enabled separately.</p>';
+          wallets.insertBefore(el, wallets.firstChild);
+        }
+      } else if (im) im.remove();
+      const zf = document.getElementById('upgrade-zion-fight-log');
+      if (upgradeOn('zion_fight_log')) {
+        const zion = document.querySelector('[data-tab-panel="zion"]');
+        if (zion && !zf) {
+          const el = document.createElement('div');
+          el.id = 'upgrade-zion-fight-log';
+          el.className = 'card';
+          el.innerHTML = '<div class="section-title">Zion fight log</div><div class="mint text-xs" id="upgrade-zion-fight-rows">Loading…</div>';
+          zion.insertBefore(el, zion.firstChild);
+        }
+        fetch('/api/upgrades/zion-fight-log').then(function (r) { return r.json(); }).then(function (d) {
+          const box = document.getElementById('upgrade-zion-fight-rows');
+          if (!box) return;
+          const rows = (d && d.rows) || [];
+          box.innerHTML = rows.length
+            ? rows.slice(0, 12).map(function (row) {
+                return (row.winner || '—') + ' · ' + (row.reason || '') + ' · ' + String(row.mint || '').slice(0, 8);
+              }).join('<br>')
+            : 'No Zion fights recorded yet.';
+        }).catch(function () {});
+      } else if (zf) zf.remove();
+      const lm = document.getElementById('upgrade-load-mode');
+      if (upgradeOn('system_load_mode')) {
+        const panel = document.querySelector('[data-tab-panel="upgrades"]');
+        if (panel && !lm) {
+          const el = document.createElement('div');
+          el.id = 'upgrade-load-mode';
+          el.className = 'card';
+          el.innerHTML = '<div class="section-title">System Load Mode</div><p class="text-xs text-slate-400 mb-2">Extra services only. Trading path unchanged. Save &amp; reboot after changing mode if extras were already running.</p>' +
+            '<div class="flex flex-wrap gap-2">' +
+            '<button type="button" class="btn btn-secondary text-xs" data-load-mode="basic">Basic</button>' +
+            '<button type="button" class="btn btn-secondary text-xs" data-load-mode="premium">Premium</button>' +
+            '<button type="button" class="btn btn-secondary text-xs" data-load-mode="full">Full</button>' +
+            '<span class="mint text-xs" id="upgrade-load-mode-status">—</span></div>';
+          panel.appendChild(el);
+          el.addEventListener('click', function (ev) {
+            const t = ev.target && ev.target.closest && ev.target.closest('[data-load-mode]');
+            if (!t) return;
+            fetch('/api/upgrades/load-mode', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mode: t.getAttribute('data-load-mode') }),
+            }).then(function (r) { return r.json(); }).then(function (d) {
+              const st = document.getElementById('upgrade-load-mode-status');
+              if (st) st.textContent = 'Mode: ' + ((d && d.mode) || 'basic');
+            }).catch(function () {});
+          });
+        }
+        fetch('/api/upgrades/load-mode').then(function (r) { return r.json(); }).then(function (d) {
+          const st = document.getElementById('upgrade-load-mode-status');
+          if (st) st.textContent = 'Mode: ' + ((d && d.mode) || 'basic');
+        }).catch(function () {});
+      } else if (lm) lm.remove();
+      const bl = document.getElementById('upgrade-bot-learning');
+      if (upgradeOn('bot_learning_421')) {
+        const micro = document.querySelector('[data-tab-panel="microbots"]');
+        if (micro && !bl) {
+          const el = document.createElement('div');
+          el.id = 'upgrade-bot-learning';
+          el.className = 'card';
+          el.innerHTML =
+            '<div class="section-title">Bot Learning (1.2.421)</div>' +
+            '<p class="text-xs text-slate-400 mb-2">400-episode film and 1.2.421 self-learn settings. Pack is on after Save &amp; reboot; toggles below save immediately.</p>' +
+            '<div class="flex flex-wrap gap-2 text-xs mb-2">' +
+            '<label class="toggle-row" style="margin:0"><span>Live Mode film</span><label class="switch"><input type="checkbox" data-bl="live"><span class="slider"></span></label></label>' +
+            '<label class="toggle-row" style="margin:0"><span>Reset episodes</span><label class="switch"><input type="checkbox" data-bl="reset"><span class="slider"></span></label></label>' +
+            '<label class="toggle-row" style="margin:0"><span>Learning Mode</span><label class="switch"><input type="checkbox" data-bl="lmode"><span class="slider"></span></label></label>' +
+            '<label class="toggle-row" style="margin:0"><span>MARL</span><label class="switch"><input type="checkbox" data-bl="marl"><span class="slider"></span></label></label>' +
+            '<label class="toggle-row" style="margin:0"><span>Profile RL</span><label class="switch"><input type="checkbox" data-bl="rl"><span class="slider"></span></label></label>' +
+            '<label class="toggle-row" style="margin:0"><span>Accelerators</span><label class="switch"><input type="checkbox" data-bl="acc"><span class="slider"></span></label></label>' +
+            '<label class="toggle-row" style="margin:0"><span>Enhancements</span><label class="switch"><input type="checkbox" data-bl="enh"><span class="slider"></span></label></label>' +
+            '</div>' +
+            '<div class="filters-row">' +
+            '<label class="ctl ctl-md"><span>Learning Mode</span><select data-bl="strict">' +
+            '<option value="stricter">Stricter</option><option value="middle">Middle</option><option value="looser">Looser</option></select></label>' +
+            '</div>' +
+            '<span class="mint text-xs" id="upgrade-bot-learning-status">—</span>';
+          micro.insertBefore(el, micro.firstChild);
+          function blSave() {
+            const live = el.querySelector('[data-bl="live"]');
+            const reset = el.querySelector('[data-bl="reset"]');
+            const lmode = el.querySelector('[data-bl="lmode"]');
+            const marl = el.querySelector('[data-bl="marl"]');
+            const rl = el.querySelector('[data-bl="rl"]');
+            const acc = el.querySelector('[data-bl="acc"]');
+            const enh = el.querySelector('[data-bl="enh"]');
+            const strict = el.querySelector('[data-bl="strict"]');
+            fetch('/api/upgrades/bot-learning', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                includeLiveModeEpisodes: live && live.checked,
+                includeDashboardResetEpisodes: reset && reset.checked,
+                learningMode: { enabled: lmode && lmode.checked, strictness: strict && strict.value },
+                marl: { enabled: marl && marl.checked },
+                profileRl: { enabled: rl && rl.checked },
+                accelerators: { enabled: acc && acc.checked },
+                enhancements: { enabled: enh && enh.checked },
+              }),
+            }).then(function (r) { return r.json(); }).then(function (d) {
+              const st = document.getElementById('upgrade-bot-learning-status');
+              if (st) st.textContent = (d && d.ok) ? 'Saved.' : 'Save failed';
+            }).catch(function () {});
+          }
+          el.addEventListener('change', blSave);
+        }
+        fetch('/api/upgrades/bot-learning').then(function (r) { return r.json(); }).then(function (d) {
+          const s = d && d.settings;
+          if (!s) return;
+          const card = document.getElementById('upgrade-bot-learning');
+          if (!card) return;
+          const setChk = function (key, on) {
+            const box = card.querySelector('[data-bl="' + key + '"]');
+            if (box) box.checked = !!on;
+          };
+          setChk('live', s.includeLiveModeEpisodes);
+          setChk('reset', s.includeDashboardResetEpisodes);
+          setChk('lmode', s.learningMode && s.learningMode.enabled);
+          setChk('marl', s.marl && s.marl.enabled);
+          setChk('rl', s.profileRl && s.profileRl.enabled);
+          setChk('acc', s.accelerators && s.accelerators.enabled);
+          setChk('enh', s.enhancements && s.enhancements.enabled);
+          const sel = card.querySelector('[data-bl="strict"]');
+          if (sel && s.learningMode) sel.value = s.learningMode.strictness || 'middle';
+          const st = document.getElementById('upgrade-bot-learning-status');
+          const sch = d.scheduler || {};
+          if (st) st.textContent = 'Scheduler ' + (sch.running ? 'on' : 'idle') +
+            (sch.lastQualityAvg ? ' · quality ' + sch.lastQualityAvg : '');
+        }).catch(function () {});
+      } else if (bl) bl.remove();
+    }
     function loadUpgrades() {
       const statusEl = document.getElementById('upgrades-status');
       const listEl = document.getElementById('upgrades-list');
       fetch('/api/upgrades').then(function (r) { return r.json(); }).then(function (d) {
         if (!d || !d.ok) throw new Error((d && d.error) || 'Failed to load upgrades');
-        _upgradesState = { enabled: d.enabled || [], packs: d.packs || [] };
+        _upgradesState = {
+          enabled: d.enabled || [],
+          packs: d.packs || [],
+          categories: d.categories || [],
+          rpcLaneMapIds: d.rpcLaneMapIds || [],
+        };
         const onCount = (_upgradesState.enabled || []).length;
         if (statusEl) {
           statusEl.textContent = 'Baseline ' + (d.baseline || '1.2.21') +
-            ' · ' + onCount + ' pack' + (onCount === 1 ? '' : 's') + ' on · pending packs cannot be enabled until rebuilt';
+            ' · ' + onCount + ' pack' + (onCount === 1 ? '' : 's') + ' on · all packs pre-built; default off until you save';
         }
         renderUpgradesList();
+        applyDashboardUpgrades();
       }).catch(function (err) {
         if (statusEl) statusEl.textContent = 'Load failed: ' + (err.message || err);
         if (listEl) listEl.textContent = 'Could not load upgrade catalog.';
@@ -11264,36 +11526,58 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function renderUpgradesList() {
       const listEl = document.getElementById('upgrades-list');
       if (!listEl) return;
-      const groups = [
-        { id: 'product', label: 'Product' },
-        { id: 'rpc', label: 'RPC (high risk)' },
-        { id: 'infra', label: 'Infra' },
-      ];
+      const groups = (_upgradesState.categories && _upgradesState.categories.length)
+        ? _upgradesState.categories
+        : [
+            { id: 'watchlist', label: 'Watchlist', blurb: '' },
+            { id: 'trading', label: 'Trading', blurb: '' },
+            { id: 'zion', label: 'Zion', blurb: '' },
+            { id: 'learning', label: 'Learning', blurb: '' },
+            { id: 'bot_learning', label: 'Bot Learning', blurb: '' },
+            { id: 'rpc', label: 'RPC', blurb: '' },
+            { id: 'cosmetics', label: 'Dashboard cosmetics', blurb: '' },
+            { id: 'infra', label: 'Infra', blurb: '' },
+          ];
       const enabled = new Set(_upgradesState.enabled || []);
+      const laneIds = _upgradesState.rpcLaneMapIds || [];
       let html = '';
       groups.forEach(function (g) {
-        const packs = (_upgradesState.packs || []).filter(function (p) { return p.risk === g.id; });
+        const packs = (_upgradesState.packs || []).filter(function (p) {
+          return (p.category || p.risk) === g.id;
+        });
         if (!packs.length) return;
         html += '<div class="upgrade-group-label">' + g.label + '</div>';
+        if (g.blurb) html += '<p class="text-xs text-slate-500 mb-1" style="margin-top:-0.15rem">' + g.blurb + '</p>';
         packs.forEach(function (p) {
-          const pending = p.status !== 'ready';
+          const pending = p.status && p.status !== 'ready';
           const checked = !pending && enabled.has(p.id);
+          const lane = p.laneMap || (laneIds.indexOf(p.id) >= 0);
           html += '<label class="upgrade-pack' + (pending ? ' is-pending' : '') + '">' +
             '<input type="checkbox" data-upgrade-id="' + p.id + '"' +
             (checked ? ' checked' : '') +
             (pending ? ' disabled' : '') +
+            (lane ? ' data-rpc-lane-map="1"' : '') +
             ' />' +
             '<div><div class="upgrade-title">' + p.title + '</div>' +
             '<div class="upgrade-meta">since ' + (p.sinceVersion || '') + ' · ' + p.id + '</div>' +
             '<p class="upgrade-sum">' + (p.summary || '') +
             (pending ? ' Not rebuilt yet — toggle disabled.' : '') +
+            (lane ? ' Enabling this lane map turns the others off on Save.' : '') +
             '</p></div>' +
             '<span class="upgrade-badge ' + (pending ? 'pending' : 'ready') +
-            (p.risk === 'rpc' ? ' rpc' : '') + '">' +
+            (g.id === 'rpc' ? ' rpc' : '') + '">' +
             (pending ? 'pending' : 'ready') + '</span></label>';
         });
       });
       listEl.innerHTML = html || '<div class="mint">No packs in catalog.</div>';
+      listEl.querySelectorAll('[data-rpc-lane-map]').forEach(function (box) {
+        box.addEventListener('change', function () {
+          if (!box.checked) return;
+          listEl.querySelectorAll('[data-rpc-lane-map]').forEach(function (other) {
+            if (other !== box) other.checked = false;
+          });
+        });
+      });
     }
     function selectedUpgradeIds() {
       return Array.from(document.querySelectorAll('[data-upgrade-id]:checked:not(:disabled)')).map(function (el) {
@@ -11317,7 +11601,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         const d = await r.json();
         if (!d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
-        if (msg) msg.textContent = 'Saved. Rebooting… refresh in a few seconds.';
+        let extra = '';
+        if (d.droppedLaneMaps && d.droppedLaneMaps.length) {
+          extra = ' Kept one RPC lane map (dropped ' + d.droppedLaneMaps.join(', ') + ').';
+        }
+        if (msg) msg.textContent = 'Saved. Rebooting… refresh in a few seconds.' + extra;
       } catch (err) {
         if (msg) msg.textContent = 'Save failed: ' + (err.message || err);
       }
@@ -22123,6 +22411,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const rememberedTab = normalizeTabName(savedTab);
     const startTab = tabNames.includes(qsTab) ? qsTab : (tabNames.includes(rememberedTab) ? rememberedTab : 'overview');
     showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
+    try { loadUpgrades(); } catch (_) {}
     if (qsOffer) {
       setTimeout(function () { openZionOfferModal(qsOffer); }, 400);
     }

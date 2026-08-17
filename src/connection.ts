@@ -29,8 +29,8 @@ dotenv.config();
 
 const DEFAULT_RPC = PUBLIC_SOLANA_RPC;
 
-/** Workload lane — primary = trading/copy; secondary = Zion / KOL / enrichment */
-export type RpcRole = 'primary' | 'secondary';
+/** Workload lane — primary = trading/copy; secondary = Zion/scanner; utility/data used by RPC upgrades */
+export type RpcRole = 'primary' | 'secondary' | 'utility' | 'data';
 
 export interface RpcEndpoint {
   url: string;
@@ -38,6 +38,7 @@ export interface RpcEndpoint {
   /** Optional dedicated websocket URL */
   wsUrl?: string;
   role?: RpcLaneRole;
+  emergency?: boolean;
 }
 
 export interface RpcEndpointStats {
@@ -53,8 +54,9 @@ export interface RpcEndpointStats {
   lastCheckedAt: number | null;
   unhealthySince: number | null;
   isActive: boolean;
-  /** Preferred endpoint for primary or secondary lane */
+  /** Preferred endpoint for primary/secondary/utility/data */
   lane?: RpcRole | null;
+  emergency?: boolean;
 }
 
 interface EndpointState {
@@ -69,12 +71,15 @@ interface EndpointState {
   consecutiveFailures: number;
   unhealthySince: number | null;
   role: RpcLaneRole;
+  emergency?: boolean;
 }
 
 let endpoints: EndpointState[] = [];
 /** Preferred index for each lane */
 let preferredPrimary = 0;
 let preferredSecondary = 0;
+let preferredUtility = -1;
+let preferredData = -1;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
@@ -109,6 +114,16 @@ function formatFailoverGrace(ms: number): string {
 }
 
 function parseRpcList(): RpcEndpoint[] {
+  try {
+    const { getUpgradeRpcInventory } =
+      require('./upgrades/rpc/inventory') as typeof import('./upgrades/rpc/inventory');
+    const alt = getUpgradeRpcInventory();
+    if (alt && alt.length > 0) {
+      return normalizeRpcEndpoints(alt, { skipPublicFallbacks: true });
+    }
+  } catch {
+    /* no RPC upgrade pack */
+  }
   const fromConfig = config.rpc?.endpoints ?? [];
   if (fromConfig.length > 0) {
     return normalizeRpcEndpoints(
@@ -138,7 +153,11 @@ function ensureEndpoints(): void {
         ? 'primary'
         : endpoint.label === 'secondary'
           ? 'secondary'
-          : 'fallback');
+          : endpoint.label === 'utility'
+            ? 'utility'
+            : endpoint.label === 'data'
+              ? 'data'
+              : 'fallback');
     return {
       endpoint: { ...endpoint, role },
       connection: new Connection(endpoint.url, {
@@ -154,6 +173,7 @@ function ensureEndpoints(): void {
       consecutiveFailures: 0,
       unhealthySince: null,
       role,
+      emergency: endpoint.emergency === true,
     };
   });
 
@@ -163,6 +183,8 @@ function ensureEndpoints(): void {
   );
   const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
   preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
+  preferredUtility = endpoints.findIndex((e) => e.role === 'utility');
+  preferredData = endpoints.findIndex((e) => e.role === 'data');
   activePrimary = preferredPrimary;
   activeSecondary = preferredSecondary;
   activeIndex = activePrimary;
@@ -223,7 +245,14 @@ export async function runWithRpcRole<T>(
 
 function preferredIndexFor(role: RpcRole): number {
   ensureEndpoints();
-  return role === 'primary' ? preferredPrimary : preferredSecondary;
+  if (role === 'primary') return preferredPrimary;
+  if (role === 'utility') {
+    return preferredUtility >= 0 ? preferredUtility : preferredSecondary;
+  }
+  if (role === 'data') {
+    return preferredData >= 0 ? preferredData : preferredSecondary;
+  }
+  return preferredSecondary;
 }
 
 function downForMs(state: EndpointState | undefined): number {
@@ -241,9 +270,12 @@ function resolveIndexForRole(role: RpcRole): number {
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
   if (pref?.healthy) {
-    if (role === 'primary') activePrimary = preferred;
-    else activeSecondary = preferred;
-    if (role === 'primary') activeIndex = preferred;
+    if (role === 'primary') {
+      activePrimary = preferred;
+      activeIndex = preferred;
+    } else if (role === 'secondary') {
+      activeSecondary = preferred;
+    }
     return preferred;
   }
 
@@ -306,6 +338,12 @@ export function getConnection(role?: RpcRole): Connection {
   return endpoints[idx].connection;
 }
 
+/** Rebuild lanes after an RPC upgrade pack is toggled. */
+export function rebuildRpcEndpoints(): void {
+  endpoints = [];
+  ensureEndpoints();
+}
+
 export function getActiveEndpointLabel(role?: RpcRole): string {
   ensureEndpoints();
   const r = role ?? currentRole();
@@ -349,14 +387,30 @@ function recordFailure(index: number, error: string): void {
 async function maybeSwitchEndpoints(): Promise<void> {
   ensureEndpoints();
   if (endpoints.length <= 1) return;
-  // Re-resolve both lanes (may piggyback after grace).
+  // Re-resolve lanes (may piggyback after grace).
   resolveIndexForRole('primary');
   resolveIndexForRole('secondary');
+  if (preferredUtility >= 0) resolveIndexForRole('utility');
+  if (preferredData >= 0) resolveIndexForRole('data');
 }
 
 async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean> {
   const state = endpoints[index];
   if (!state) return false;
+  if (state.emergency) {
+    try {
+      const { shouldSkipIdleEmergencyProbes } =
+        require('./upgrades/rpc/facade') as typeof import('./upgrades/rpc/facade');
+      if (shouldSkipIdleEmergencyProbes()) {
+        const pref = endpoints[preferredPrimary];
+        if (pref?.healthy || downForMs(pref) < failoverDownMs()) {
+          return state.healthy;
+        }
+      }
+    } catch {
+      /* core path */
+    }
+  }
 
   const start = Date.now();
   try {
@@ -408,6 +462,18 @@ export async function withRpc<T>(
     const index = order[attempt];
     const state = endpoints[index];
     if (!state) continue;
+    if (state.emergency) {
+      try {
+        const { shouldSkipIdleEmergencyProbes } =
+          require('./upgrades/rpc/facade') as typeof import('./upgrades/rpc/facade');
+        if (shouldSkipIdleEmergencyProbes()) {
+          const pref = endpoints[preferredIndexFor(r)];
+          if (pref?.healthy || downForMs(pref) < failoverDownMs()) continue;
+        }
+      } catch {
+        /* core path */
+      }
+    }
 
     // Before failover grace, stay on preferred even if flaky (first attempt only).
     const pref = preferredIndexFor(r);
@@ -553,6 +619,8 @@ export function getRpcStats(): {
       if (i === preferredPrimary) lane = 'primary';
       else if (i === preferredSecondary && preferredSecondary !== preferredPrimary)
         lane = 'secondary';
+      else if (i === preferredUtility && preferredUtility >= 0) lane = 'utility';
+      else if (i === preferredData && preferredData >= 0) lane = 'data';
       return {
         url: s.endpoint.url,
         label: s.endpoint.label,
@@ -567,6 +635,7 @@ export function getRpcStats(): {
         unhealthySince: s.unhealthySince,
         isActive: i === pIdx || i === sIdx,
         lane,
+        emergency: s.emergency === true,
       };
     }),
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
