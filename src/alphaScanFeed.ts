@@ -10,7 +10,10 @@ import {
   isRpcGateSkipError,
   isRpcSoftFailureError,
   logSoftRpcFailure,
+  runWithRpcRole,
+  hasRpcRoleContext,
 } from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
@@ -253,6 +256,13 @@ async function enrichCurves(
     }
   >
 > {
+  if (!hasRpcRoleContext()) {
+    return runWithRpcRole(
+      getRpcRoleFor('alpha_scan', Boolean(config.rpc?.shareLoad)),
+      () => enrichCurves(tokens),
+      'alpha_scan'
+    );
+  }
   const out = new Map<
     string,
     {

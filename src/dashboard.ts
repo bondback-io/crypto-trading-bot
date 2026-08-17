@@ -10990,18 +10990,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade (<code>ALCHEMY_API_KEY</code>; spill to <code>ALCHEMY_API_KEY_BACKUP3</code> before Helius)</div>
-            <div class="mb-1"><strong style="color:#a78bfa">Watchers → Alchemy backup</strong> — setup watch / arm / trigger (<code>ALCHEMY_API_KEY_BACKUP</code>)</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → BACKUP3 / public</strong> — Favourites soft-watch prefers <code>ALCHEMY_API_KEY_BACKUP3</code> when set; else public</div>
+            <div class="mb-1"><strong style="color:#34d399">Trading → ALCHEMY_API_KEY</strong> — buys/sells/MEV (exclusive)</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners (exclusive each)</strong> — BACKUP3 Market · BACKUP4 Zion · BACKUP5 Migration · BACKUP6 Alpha · BACKUP7 anti-rug</div>
+            <div class="mb-1"><strong style="color:#a78bfa">Watchers → BACKUP2</strong> — Dip/Trend/Scalper/Grad setup watches</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility</strong> — BACKUP Favourites · HELIUS Activity · HELIUS_BACKUP utility light</div>
+            <div class="mb-1"><strong style="color:#94a3b8">Emergency only</strong> — <code>RPC_URL</code> → <code>PUBLICNODE_URL</code> (never preferred)</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy; spills to <code>ALCHEMY_API_KEY_BACKUP3</code> before Helius (per-key 429 cooldown).</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Watchers</strong> — Setup watch / arm / trigger. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>. Emergency public/utility if unset — never Trading or Scanners.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Critical extra</strong> — Lazy Helius fallback target <code>ALCHEMY_API_KEY_BACKUP2</code> (not used for scanner round-robin).</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites + import + activity (Share ON). Prefers <code>ALCHEMY_API_KEY_BACKUP3</code> when set; else public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Exclusive keys</strong> — Trading=<code>ALCHEMY_API_KEY</code>; Favourites=<code>BACKUP</code>; Watches=<code>BACKUP2</code>; Market=<code>BACKUP3</code>; Zion=<code>BACKUP4</code>; Migration=<code>BACKUP5</code>; Alpha=<code>BACKUP6</code>; Anti-rug=<code>BACKUP7</code>; Activity=<code>HELIUS_API_KEY</code>; Utility light=<code>HELIUS_API_KEY_BACKUP</code>.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Emergency failover</strong> — <code>RPC_URL</code> → <code>PUBLICNODE_URL</code> only (never another service’s exclusive key).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
             <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
           </div>
@@ -37612,7 +37609,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         if (st) {
           st.textContent = data.shareLoad
-            ? 'Share RPC load ON — critical→Helius, scanners→Alchemy(+BACKUP3 spill), watchers→backup, utility→BACKUP3/public'
+            ? 'Share RPC load ON — exclusive keys (Alchemy×8 + Helius×2); emergency RPC_URL→PUBLICNODE'
             : 'Share RPC load OFF — legacy primary/secondary routing';
         }
         const shareAlloc = document.getElementById('rpc-share-alloc');

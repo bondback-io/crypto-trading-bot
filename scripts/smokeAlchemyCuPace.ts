@@ -100,25 +100,31 @@ noteAlchemyCuLimit(urlA);
 const next = pickNextAlchemyScannerUrl([urlA, urlB]);
 check('pickNext prefers non-cooling B', next === urlB, String(next));
 check(
-  'scanner capacity labels',
+  'scanner capacity labels include all alchemy-backup*',
   isAlchemyScannerCapacityLabel('alchemy') &&
+    isAlchemyScannerCapacityLabel('alchemy-backup') &&
+    isAlchemyScannerCapacityLabel('alchemy-backup2') &&
     isAlchemyScannerCapacityLabel('alchemy-backup3') &&
-    !isAlchemyScannerCapacityLabel('alchemy-backup') &&
-    !isAlchemyScannerCapacityLabel('alchemy-backup2')
+    isAlchemyScannerCapacityLabel('alchemy-backup7')
 );
 
 check(
-  'share-on migration is scanners not Trading',
-  getRpcRoleFor('migration', true) === 'secondary'
+  'migration gate role is secondary (exclusive BACKUP5)',
+  getRpcRoleFor('migration', true) === 'secondary' &&
+    getRpcRoleFor('migration', false) === 'secondary'
 );
 check(
-  'share-off migration stays primary (skip when busy)',
-  getRpcRoleFor('migration', false) === 'primary'
-);
-check(
-  'exits stay primary on share-on',
+  'trading stays primary gate on share-on',
   getRpcRoleFor('trade_exit', true) === 'primary' &&
-    getRpcRoleFor('send_tx', true) === 'primary'
+    getRpcRoleFor('send_tx', true) === 'primary' &&
+    getRpcRoleFor('trade_entry', true) === 'primary'
+);
+check(
+  'favourites utility / watches watchers / activity utility',
+  getRpcRoleFor('wallet_poll', true) === 'utility' &&
+    getRpcRoleFor('setup_watch', true) === 'watchers' &&
+    getRpcRoleFor('activity', true) === 'utility' &&
+    getRpcRoleFor('signal_safety', true) === 'secondary'
 );
 
 const gate = readSrc('src/rpcGate.ts');
@@ -182,7 +188,8 @@ check(
 );
 check(
   'serial scanner Alchemy pick in withRpc',
-  /pickNextAlchemyScannerUrl/.test(conn)
+  /RPC_EMERGENCY_LABELS/.test(conn) &&
+    /resolveExclusiveServiceIndex/.test(conn)
 );
 check(
   'withRpc soft-fails without logger.error',
@@ -226,11 +233,10 @@ check(
     !/formatSoftRpcFailBrief[\s\S]{0,800}msg\.slice\(0,\s*180\)/.test(conn)
 );
 check(
-  'secondary resolve spills scanner Alchemy before Helius piggyback',
-  /role === 'secondary'/.test(conn) &&
-    /pickNextAlchemyScannerUrl/.test(conn) &&
-    /Scanners\/Zion: rotate Alchemy capacity/.test(conn) &&
-    /prefAlchemyCooling/.test(conn)
+  'secondary exclusive resolve never piggybacks other exclusives',
+  /resolveExclusiveServiceIndex/.test(conn) &&
+    /RPC_EMERGENCY_LABELS/.test(conn) &&
+    /never another exclusive/.test(conn)
 );
 
 const scanner = readSrc('src/marketScanner.ts');
@@ -315,10 +321,31 @@ check(
     /ALCHEMY_API_KEY_BACKUP3/.test(rpcUrl)
 );
 check(
-  'utility prefers BACKUP3 when set',
-  /alchemyBackup3 = buildAlchemyBackup3RpcUrl/.test(rpcUrl) &&
-    /utilityUrl = alchemyBackup3/.test(rpcUrl) &&
-    /\(alchemy-backup3 utility\)/.test(rpcUrl)
+  'exclusive service map BACKUP4–7 + HELIUS_BACKUP + PUBLICNODE',
+  /alchemy-backup4/.test(rpcUrl) &&
+    /alchemy-backup7/.test(rpcUrl) &&
+    /buildHeliusBackupRpcUrl/.test(rpcUrl) &&
+    /resolvePublicnodeRpcUrl/.test(rpcUrl) &&
+    /Exclusive multi-RPC chain/.test(rpcUrl)
+);
+check(
+  'rpcServiceMap locks Trading to ALCHEMY_API_KEY',
+  (() => {
+    const m = readSrc('src/rpcServiceMap.ts');
+    return (
+      /trading_critical[\s\S]*ALCHEMY_API_KEY/.test(m) &&
+      /favourites_watch[\s\S]*ALCHEMY_API_KEY_BACKUP'/.test(m) &&
+      /setup_watch[\s\S]*BACKUP2/.test(m) &&
+      /zion[\s\S]*BACKUP4/.test(m) &&
+      /RPC_EMERGENCY_LABELS/.test(m)
+    );
+  })()
+);
+check(
+  'utility exclusive map present (not BACKUP3-as-utility default)',
+  /Exclusive multi-RPC chain/.test(rpcUrl) &&
+    /HELIUS_API_KEY_BACKUP/.test(readSrc('src/rpcServiceMap.ts')) &&
+    /label: 'helius-backup'/.test(readSrc('src/rpcServiceMap.ts'))
 );
 check(
   'alchemy_key_429 log format',

@@ -658,12 +658,31 @@ export async function executeBuy(
   } catch {
     /* inspector optional */
   }
-  if (!hasRpcRoleContext()) {
-    return runWithRpcRole(
-      getRpcRoleFor('trade_entry', Boolean(config.rpc?.shareLoad)),
-      () => executeBuy(mint, symbol, meta),
-      'trade_entry'
-    );
+  // Always bind Trading Critical exclusive key — even when called from Zion Place Trade.
+  try {
+    const { getCurrentRpcFeature } =
+      require('./connection') as typeof import('./connection');
+    const feat = getCurrentRpcFeature();
+    if (
+      feat !== 'trade_entry' &&
+      feat !== 'trade_exit' &&
+      feat !== 'send_tx' &&
+      feat !== 'mev_sandwich'
+    ) {
+      return runWithRpcRole(
+        getRpcRoleFor('trade_entry', Boolean(config.rpc?.shareLoad)),
+        () => executeBuy(mint, symbol, meta),
+        'trade_entry'
+      );
+    }
+  } catch {
+    if (!hasRpcRoleContext()) {
+      return runWithRpcRole(
+        getRpcRoleFor('trade_entry', Boolean(config.rpc?.shareLoad)),
+        () => executeBuy(mint, symbol, meta),
+        'trade_entry'
+      );
+    }
   }
   if (!tryAcquireExecuteBuyMint(mint)) {
     return {

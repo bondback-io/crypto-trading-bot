@@ -7,6 +7,7 @@
 import { PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { config, effectiveMinMarketCapUsd, hardFilterFloorsActive } from './config';
 import { getConnection, runWithRpcRole } from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import {
   fetchTokenMetrics,
   getCachedTokenMetrics,
@@ -1706,8 +1707,11 @@ async function detectRecentDevSells(
   mint: string,
   devWallet: string
 ): Promise<{ sold: boolean; count: number }> {
-  // Share load: holder/dev tx scans must not land on Utility public lane.
-  const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+  // Share load: holder/dev tx scans use exclusive signal_safety key (BACKUP7).
+  const role = getRpcRoleFor(
+    'signal_safety',
+    Boolean(config.rpc?.shareLoad)
+  );
   try {
     const { shouldShedPrimaryMonitoring } =
       require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');
@@ -1720,7 +1724,7 @@ async function detectRecentDevSells(
   return runWithRpcRole(
     role,
     () => detectRecentDevSellsInner(mint, devWallet),
-    'anti_rug'
+    'signal_safety'
   );
 }
 

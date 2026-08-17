@@ -14,6 +14,7 @@ import {
 } from './config';
 import { getBondingCurvePda } from './bondingCurve';
 import { getConnection, runWithRpcRole } from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta, loggedFetch } from './logger';
 import { effectiveStrictMinVolume24hUsd } from './filterEffective';
 import {
@@ -721,14 +722,12 @@ function isSecondaryLaneIdle(): boolean {
 async function fetchOnChainHolderMetrics(
   mint: string
 ): Promise<Partial<TokenMetrics>> {
-  // Share load: keep heavy holder RPCs off Utility (Favourites soft-watch).
-  // Public utility was timing out ~15s on getTokenLargestAccounts.
   try {
-    const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+    const role = getRpcRoleFor('signal_safety', Boolean(config.rpc?.shareLoad));
     return await runWithRpcRole(
       role,
       () => fetchOnChainHolderMetricsInner(mint),
-      'token_metrics'
+      'signal_safety'
     );
   } catch {
     return {};
@@ -914,7 +913,7 @@ async function fetchDevActivity(
   address: string
 ): Promise<{ count: number; active: boolean }> {
   const lookbackMs = config.tokenMetrics?.devActivityLookbackMs ?? 2 * MS_PER_DAY;
-  const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+  const role = getRpcRoleFor('signal_safety', Boolean(config.rpc?.shareLoad));
   try {
     const { shouldShedPrimaryMonitoring } =
       require('./rpcSpikeInspector') as typeof import('./rpcSpikeInspector');

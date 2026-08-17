@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.407',
+    title: 'Exclusive RPC key per major service',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Ten exclusive preferred keys: Trading→ALCHEMY_API_KEY, Favourites→BACKUP, Watches→BACKUP2, Market→BACKUP3, Zion→BACKUP4, Migration→BACKUP5, Alpha→BACKUP6, Anti-rug→BACKUP7, Activity→HELIUS, Utility light→HELIUS_BACKUP. Failover is RPC_URL→PUBLICNODE_URL only — services never share preferred keys. Place Trade buys rebind to Trading.',
+    ],
+  },
+  {
     version: '1.2.406',
     title: 'BACKUP3 utility + Zion spill before Helius',
     sections: ['execution', 'scanners'],
