@@ -124,6 +124,8 @@ export interface PersistedBotSettings {
   bondingCurve?: Record<string, unknown>;
   convergenceWindowMs?: number;
   pollIntervalMs?: number;
+  /** Isolated upgrade packs enabled after 1.2.21 restore (default none) */
+  enabledUpgrades?: string[];
   /** One-shot migrations already applied (e.g. paperSignalRelax_v2) */
   migrations?: Record<string, boolean>;
 }

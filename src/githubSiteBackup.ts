@@ -51,6 +51,11 @@ export interface GithubBackupSettings {
   lastUploadError: string | null;
   lastUploadBytes: number | null;
   lastRemoteSha: string | null;
+  /**
+   * Never auto-restore a remote backup on boot (1.2.21 restore core).
+   * Persisted true from later builds is forced off.
+   */
+  autoImportOnBoot: boolean;
 }
 
 export interface GithubBackupStatus {
@@ -99,6 +104,7 @@ function defaultSettings(): GithubBackupSettings {
     lastUploadError: null,
     lastUploadBytes: null,
     lastRemoteSha: null,
+    autoImportOnBoot: false,
   };
 }
 
@@ -149,6 +155,7 @@ export function loadGithubBackupSettings(): GithubBackupSettings {
         : null,
     lastRemoteSha:
       raw.lastRemoteSha != null ? String(raw.lastRemoteSha) : null,
+    autoImportOnBoot: false,
   };
 }
 
@@ -296,6 +303,27 @@ export async function uploadSiteBackupToGithub(opts?: {
   uploadInFlight = true;
   const reason = opts?.reason || 'manual';
   try {
+    if (reason === 'scheduled') {
+      try {
+        const { isUpgradeEnabled } =
+          require('./upgrades/registry') as typeof import('./upgrades/registry');
+        if (isUpgradeEnabled('github_backup_hardening')) {
+          const prev = loadGithubBackupSettings().lastUploadAtMs;
+          if (prev != null && Date.now() - prev < 60_000) {
+            throw new Error(
+              'GitHub backup upload skipped — hardening 60s min gap'
+            );
+          }
+        }
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          err.message.includes('hardening 60s min gap')
+        ) {
+          throw err;
+        }
+      }
+    }
     const s = loadGithubBackupSettings();
     const target = resolveGithubBackupTarget(s);
     if (!target.token) {
@@ -370,6 +398,9 @@ export async function uploadSiteBackupToGithub(opts?: {
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('hardening 60s min gap')) {
+      throw err;
+    }
     try {
       const s = loadGithubBackupSettings();
       s.lastUploadOk = false;
@@ -491,10 +522,9 @@ async function scheduledTick(): Promise<void> {
   try {
     await uploadSiteBackupToGithub({ reason: 'scheduled' });
   } catch (err) {
-    console.warn(
-      '[github-backup] scheduled upload failed:',
-      err instanceof Error ? err.message : err
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('hardening 60s min gap')) return;
+    console.warn('[github-backup] scheduled upload failed:', msg);
   }
 }
 
@@ -532,10 +562,10 @@ export function githubBackupIntervalMs(
   return INTERVAL_MS[interval];
 }
 
-/** Ensure settings file exists (boot). */
+/** Ensure settings file exists (boot). Always persist auto-import OFF. */
 export function ensureGithubBackupSettingsFile(): void {
   ensureDataDir();
-  if (!fs.existsSync(SETTINGS_FILE())) {
-    saveGithubBackupSettings(defaultSettings());
-  }
+  const s = loadGithubBackupSettings();
+  s.autoImportOnBoot = false;
+  saveGithubBackupSettings(s);
 }

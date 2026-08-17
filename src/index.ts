@@ -59,6 +59,16 @@ async function main(): Promise<void> {
   initWallets();
   paperTrader.loadPersistedState();
   resolveBootTradingMode();
+  try {
+    const { applyEnabledUpgrades } =
+      require('./upgrades/apply') as typeof import('./upgrades/apply');
+    applyEnabledUpgrades();
+  } catch (err) {
+    console.warn(
+      '[boot] Upgrades apply error:',
+      err instanceof Error ? err.message : err
+    );
+  }
 
   console.log('═══════════════════════════════════════════════════');
   console.log('  Solana Smart Money Copy Trading Bot');

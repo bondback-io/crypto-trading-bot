@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Logs / Back Up / Bot Info via settings menu)
+ * Tabbed Tailwind UI (Overview / Upgrades / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Logs / Back Up / Bot Info via settings menu)
  */
 
 import {
@@ -670,9 +670,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     #strategies-grid { align-items: start; gap: 1rem; }
     .config-panel .card,
     .backup-panel .card,
+    .upgrades-panel .card,
     .strategies-panel .card { min-width: 0; }
     .config-panel .section-title,
     .backup-panel .section-title,
+    .upgrades-panel .section-title,
     .strategies-panel .section-title { margin-bottom: .7rem; }
     .config-panel .filters-row { row-gap: .7rem; }
     .config-wide-card { grid-column: 1 / -1; }
@@ -730,6 +732,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       flex-wrap: wrap;
       gap: 0.5rem;
       align-items: center;
+    }
+    .upgrade-pack {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.65rem 0.85rem;
+      align-items: start;
+      padding: 0.75rem 0.85rem;
+      border-radius: 0.65rem;
+      border: 1px solid #334155;
+      background: #0f172a;
+    }
+    .upgrade-pack.is-pending { opacity: 0.78; }
+    .upgrade-pack .upgrade-title { color: #e2e8f0; font-weight: 650; font-size: 0.86rem; }
+    .upgrade-pack .upgrade-meta { color: #64748b; font-size: 0.7rem; margin-top: 0.12rem; }
+    .upgrade-pack .upgrade-sum { color: #94a3b8; font-size: 0.78rem; line-height: 1.4; margin: 0.2rem 0 0; }
+    .upgrade-pack .upgrade-badge {
+      font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+      padding: 0.15rem 0.45rem; border-radius: 999px; white-space: nowrap;
+    }
+    .upgrade-pack .upgrade-badge.ready { color: #a7f3d0; background: #064e3b55; border: 1px solid #065f46; }
+    .upgrade-pack .upgrade-badge.pending { color: #fde68a; background: #78350f44; border: 1px solid #92400e; }
+    .upgrade-pack .upgrade-badge.rpc { color: #fda4af; background: #4c051955; border: 1px solid #9f1239; }
+    .upgrade-groups { display: grid; gap: 0.65rem; }
+    .upgrade-group-label {
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b;
+      margin: 0.35rem 0 0.15rem;
     }
     .backup-meta {
       display: grid;
@@ -4987,6 +5015,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <!-- Tabs -->
     <nav class="nav-tabs" aria-label="Dashboard sections">
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Live ops: balance, risk, positions, signals, migrations">Overview</button>
+      <button data-tab="upgrades" onclick="showTab('upgrades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Post-1.2.21 feature packs — toggle then Save &amp; reboot. Default all off keeps the restored core stable."><span class="btn-label-short">Upg</span><span class="btn-label-full">Upgrades</span></button>
       <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn nav-tab-microbots text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
@@ -5204,6 +5233,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="mint mb-2" id="mig-live-status">WS: —</div>
           <div id="migrations" class="max-h-28 overflow-y-auto text-sm mb-2"></div>
           <div class="mint" id="rebuy-status">—</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Upgrades ========== -->
+    <section data-tab-panel="upgrades" class="upgrades-panel hidden space-y-4">
+      <div class="card">
+        <div class="section-title">Upgrades <span class="tip" tabindex="0" data-tip="Restored 1.2.21 core. Packs added after that release are listed here. All start OFF. Pending packs are catalogued until they are rebuilt as isolated modules."></span></div>
+        <p class="text-sm text-slate-400 mb-2">Baseline is <strong style="color:#a7f3d0">1.2.21</strong> (pre-1.2.22). Check one or more ready packs, then Save &amp; reboot. Turning a pack off and saving reboots without it. RPC packs stay pending so they cannot remap the restored connection manager.</p>
+        <div class="mint text-xs mb-3" id="upgrades-status">Loading…</div>
+        <div id="upgrades-list" class="upgrade-groups">Loading packs…</div>
+        <div class="mt-3 flex flex-wrap gap-2 items-center">
+          <button type="button" class="btn btn-primary" onclick="saveUpgradesAndReboot()" title="Save selected packs and restart the process">Save &amp; reboot</button>
+          <button type="button" class="btn btn-secondary" onclick="loadUpgrades()" title="Reload pack state from the server">Refresh</button>
+          <span class="mint text-xs" id="upgrades-save-msg"></span>
         </div>
       </div>
     </section>
@@ -11199,6 +11243,88 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.importStrategyModulesJson = importStrategyModulesJson;
     window.resetStrategyModulesToDefaults = resetStrategyModulesToDefaults;
 
+    let _upgradesState = { enabled: [], packs: [] };
+    function loadUpgrades() {
+      const statusEl = document.getElementById('upgrades-status');
+      const listEl = document.getElementById('upgrades-list');
+      fetch('/api/upgrades').then(function (r) { return r.json(); }).then(function (d) {
+        if (!d || !d.ok) throw new Error((d && d.error) || 'Failed to load upgrades');
+        _upgradesState = { enabled: d.enabled || [], packs: d.packs || [] };
+        const onCount = (_upgradesState.enabled || []).length;
+        if (statusEl) {
+          statusEl.textContent = 'Baseline ' + (d.baseline || '1.2.21') +
+            ' · ' + onCount + ' pack' + (onCount === 1 ? '' : 's') + ' on · pending packs cannot be enabled until rebuilt';
+        }
+        renderUpgradesList();
+      }).catch(function (err) {
+        if (statusEl) statusEl.textContent = 'Load failed: ' + (err.message || err);
+        if (listEl) listEl.textContent = 'Could not load upgrade catalog.';
+      });
+    }
+    function renderUpgradesList() {
+      const listEl = document.getElementById('upgrades-list');
+      if (!listEl) return;
+      const groups = [
+        { id: 'product', label: 'Product' },
+        { id: 'rpc', label: 'RPC (high risk)' },
+        { id: 'infra', label: 'Infra' },
+      ];
+      const enabled = new Set(_upgradesState.enabled || []);
+      let html = '';
+      groups.forEach(function (g) {
+        const packs = (_upgradesState.packs || []).filter(function (p) { return p.risk === g.id; });
+        if (!packs.length) return;
+        html += '<div class="upgrade-group-label">' + g.label + '</div>';
+        packs.forEach(function (p) {
+          const pending = p.status !== 'ready';
+          const checked = !pending && enabled.has(p.id);
+          html += '<label class="upgrade-pack' + (pending ? ' is-pending' : '') + '">' +
+            '<input type="checkbox" data-upgrade-id="' + p.id + '"' +
+            (checked ? ' checked' : '') +
+            (pending ? ' disabled' : '') +
+            ' />' +
+            '<div><div class="upgrade-title">' + p.title + '</div>' +
+            '<div class="upgrade-meta">since ' + (p.sinceVersion || '') + ' · ' + p.id + '</div>' +
+            '<p class="upgrade-sum">' + (p.summary || '') +
+            (pending ? ' Not rebuilt yet — toggle disabled.' : '') +
+            '</p></div>' +
+            '<span class="upgrade-badge ' + (pending ? 'pending' : 'ready') +
+            (p.risk === 'rpc' ? ' rpc' : '') + '">' +
+            (pending ? 'pending' : 'ready') + '</span></label>';
+        });
+      });
+      listEl.innerHTML = html || '<div class="mint">No packs in catalog.</div>';
+    }
+    function selectedUpgradeIds() {
+      return Array.from(document.querySelectorAll('[data-upgrade-id]:checked:not(:disabled)')).map(function (el) {
+        return el.getAttribute('data-upgrade-id');
+      });
+    }
+    async function saveUpgradesAndReboot() {
+      const msg = document.getElementById('upgrades-save-msg');
+      const ids = selectedUpgradeIds();
+      const ok = confirm(
+        'Reboot applies the selected upgrades and stops the process; Render will start a fresh 1.2.21 core with only those packs on.\\n\\n' +
+        (ids.length ? ('On: ' + ids.join(', ')) : 'All packs off (stable core).')
+      );
+      if (!ok) return;
+      if (msg) msg.textContent = 'Saving…';
+      try {
+        const r = await fetch('/api/upgrades/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: ids }),
+        });
+        const d = await r.json();
+        if (!d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+        if (msg) msg.textContent = 'Saved. Rebooting… refresh in a few seconds.';
+      } catch (err) {
+        if (msg) msg.textContent = 'Save failed: ' + (err.message || err);
+      }
+    }
+    window.loadUpgrades = loadUpgrades;
+    window.saveUpgradesAndReboot = saveUpgradesAndReboot;
+
     function showTab(name, btn) {
       document.querySelectorAll('[data-tab-panel]').forEach(el => {
         el.classList.toggle('hidden', el.getAttribute('data-tab-panel') !== name);
@@ -11246,6 +11372,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (name === 'zion') loadZion();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
+      if (name === 'upgrades') { try { loadUpgrades(); } catch (_) {} }
       if (name === 'botinfo') { try { syncBotInfoVersionLabels(); } catch (_) {} try { initBotInfoScrollSpy(); } catch (_) {} }
       if (name === 'overview' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
@@ -21989,7 +22116,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'signals') return 'scanner';
       return name;
     };
-    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'logs', 'backup', 'botinfo'];
+    const tabNames = ['overview', 'upgrades', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'logs', 'backup', 'botinfo'];
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
     const qsTab = normalizeTabName(qs && qs.get('tab'));
     const qsOffer = qs && qs.get('offer');

@@ -529,9 +529,54 @@ export function createServer(): express.Application {
       const { getGithubBackupStatus, ensureGithubBackupSettingsFile } =
         require('./githubSiteBackup') as typeof import('./githubSiteBackup');
       ensureGithubBackupSettingsFile();
-      res.json({ ok: true, ...getGithubBackupStatus() });
+      res.json({
+        ok: true,
+        ...getGithubBackupStatus(),
+      });
     } catch (err) {
       res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/upgrades', (_req: Request, res: Response) => {
+    try {
+      const { listUpgradePacks, getEnabledUpgradeIds } =
+        require('./upgrades/registry') as typeof import('./upgrades/registry');
+      res.json({
+        ok: true,
+        baseline: '1.2.21',
+        enabled: getEnabledUpgradeIds(),
+        packs: listUpgradePacks(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/upgrades/apply', (req: Request, res: Response) => {
+    try {
+      const { setEnabledUpgradeIds } =
+        require('./upgrades/registry') as typeof import('./upgrades/registry');
+      const { scheduleUpgradeReboot } =
+        require('./upgrades/reboot') as typeof import('./upgrades/reboot');
+      const body = (req.body ?? {}) as { enabled?: unknown };
+      const result = setEnabledUpgradeIds(body.enabled);
+      res.json({
+        ok: true,
+        enabled: result.enabled,
+        rebooting: true,
+        message:
+          'Saved. Process will exit so Render/PM2 starts a fresh 1.2.21 core with only these packs on.',
+      });
+      scheduleUpgradeReboot();
+    } catch (err) {
+      res.status(400).json({
         ok: false,
         error: err instanceof Error ? err.message : String(err),
       });

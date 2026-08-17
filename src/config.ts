@@ -2647,6 +2647,15 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     bondingCurve: { ...config.bondingCurve },
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
+    enabledUpgrades: (() => {
+      try {
+        const { getEnabledUpgradeIds } =
+          require('./upgrades/registry') as typeof import('./upgrades/registry');
+        return getEnabledUpgradeIds();
+      } catch {
+        return [] as string[];
+      }
+    })(),
     migrations: { ...settingsMigrations },
   };
 }
@@ -3185,6 +3194,13 @@ function applySettingsSnapshot(
   }
   if (typeof saved.pollIntervalMs === 'number') {
     config.pollIntervalMs = saved.pollIntervalMs;
+  }
+  try {
+    const { hydrateEnabledUpgrades } =
+      require('./upgrades/registry') as typeof import('./upgrades/registry');
+    hydrateEnabledUpgrades(saved.enabledUpgrades);
+  } catch {
+    /* upgrades registry optional during early bootstrap */
   }
 
   if (saved.strategyToggles && typeof saved.strategyToggles === 'object') {

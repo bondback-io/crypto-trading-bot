@@ -8,6 +8,7 @@ import {
   buildBotInfoSnapshot,
   type BotInfoSnapshot,
 } from './botInfoSnapshot';
+import { BOT_INFO_CHANGELOG } from './botInfoChangelog';
 
 export const BOT_INFO_CSS = `
     /* —— Bot Info manual —— */
@@ -27,6 +28,10 @@ export const BOT_INFO_CSS = `
     .botinfo-lede {
       margin: 0.35rem 0 0; font-size: 0.875rem; color: #94a3b8; line-height: 1.5; max-width: 42rem;
     }
+    .botinfo-whatsnew {
+      margin: 0.55rem 0 0; padding-left: 1.1rem; font-size: 0.78rem; color: #94a3b8; line-height: 1.45; max-width: 44rem;
+    }
+    .botinfo-whatsnew strong { color: #a7f3d0; }
     .botinfo-subnav {
       position: sticky; top: 0; z-index: 20;
       display: flex; gap: 0.35rem; overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -403,7 +408,15 @@ export function buildBotInfoPanelHtml(
         <div class="botinfo-hero">
           <div>
             <h2>Bot Info <span class="sr-only">${esc(label)}</span></h2>
-            <p class="botinfo-lede">Operator manual for this dashboard — ${snap.counts.profiles} micro-bots, ${snap.counts.modules} modules, ${snap.counts.presets} presets. Lists sync from code catalogs; use chips to jump.</p>
+            <p class="botinfo-lede">Operator manual for this dashboard — ${snap.counts.profiles} micro-bots, ${snap.counts.modules} modules, ${snap.counts.presets} presets. v1.2.422 restored the 1.2.21 core; post-1.2.21 features live under the Upgrades tab (default off). Lists sync from code catalogs; use chips to jump.</p>
+            ${BOT_INFO_CHANGELOG.slice(0, 1)
+              .map(
+                (e) =>
+                  `<ul class="botinfo-whatsnew">${e.items
+                    .map((item) => `<li><strong>${esc(e.version)}</strong> — ${esc(item)}</li>`)
+                    .join('')}</ul>`
+              )
+              .join('')}
           </div>
           <span class="botinfo-ver" id="botinfo-panel-ver">${esc(label)}</span>
         </div>
