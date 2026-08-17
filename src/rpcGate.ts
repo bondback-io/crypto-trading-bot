@@ -81,25 +81,27 @@ function laneLimits(role: RpcGateRole): {
   }
   if (role === 'secondary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
-      maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
-      maxWaitMs: 3_000,
+      // Five exclusive scanner services share this gate — keep headroom.
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 10, 1, 32),
+      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 20, 1, 120),
+      maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 16, 0, 100),
+      maxWaitMs: 4_000,
     };
   }
   if (role === 'watchers') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_WATCHERS', 3, 1, 16),
-      maxRps: envInt('RPC_LANE_RPS_WATCHERS', 6, 1, 60),
-      maxQueue: envInt('RPC_LANE_QUEUE_WATCHERS', 6, 0, 80),
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_WATCHERS', 6, 1, 24),
+      maxRps: envInt('RPC_LANE_RPS_WATCHERS', 12, 1, 80),
+      maxQueue: envInt('RPC_LANE_QUEUE_WATCHERS', 10, 0, 80),
       maxWaitMs: 3_000,
     };
   }
   return {
-    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
-    maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
-    maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
-    maxWaitMs: 2_000,
+    // Favourites + activity + utility_light share this gate.
+    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 6, 1, 24),
+    maxRps: envInt('RPC_LANE_RPS_UTILITY', 12, 1, 80),
+    maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 10, 0, 80),
+    maxWaitMs: 3_000,
   };
 }
 
@@ -475,45 +477,13 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
 }
 
 /**
- * True when Critical (primary) is busy — scanners / Favourites should yield
- * so trade entry keeps RPC headroom.
+ * Exclusive map: each service has its own paid key — do not stall scanners/
+ * Favourites because Trading's gate is briefly busy.
  */
-export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = 'scanner'): {
+export function shouldDeferBackgroundForCritical(_kind: 'scanner' | 'utility' = 'scanner'): {
   defer: boolean;
   reason: string | null;
 } {
-  const snap = getRpcGateSnapshot();
-  const p = snap.lanes.primary;
-  const u = snap.lanes.utility;
-
-  try {
-    const { getRpcLoadControlSnapshot } =
-      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-    const load = getRpcLoadControlSnapshot();
-    // ×3 shed degrades enrich (crude rank) — do not hard-drop Market/Alpha/Zion.
-  if (kind === 'utility' && load.utilitySlowFactor >= 3) {
-    return {
-      defer: true,
-      reason: `utility adaptive×${load.utilitySlowFactor}`,
-    };
-  }
-  } catch {
-    /* */
-  }
-
-  if (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1)) {
-    return {
-      defer: true,
-      reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
-    };
-  }
-  // Secondary saturation degrades enrich (crude rank) — do not drop collect.
-  if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
-    return {
-      defer: true,
-      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued}, skipped ${u.skipped})`,
-    };
-  }
   return { defer: false, reason: null };
 }
 

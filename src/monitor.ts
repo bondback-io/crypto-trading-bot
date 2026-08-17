@@ -1940,19 +1940,14 @@ function isRpcSoftBlockedError(err: unknown): boolean {
 }
 
 /**
- * Soft-throttle Favourites poll when the resolved URL is free/public OR when
- * Share ON routes wallet_poll to Utility (even after piggyback onto paid rpc-url).
- * Without this, Utility failover to a custom RPC drops the soft-watch cap and
- * floods Critical/Scanners fallbacks after ~30–60s.
+ * Soft-throttle Favourites only on true public RPCs (or RPC_SOFT_THROTTLE=1).
+ * Exclusive Alchemy/Helius service keys run at full paid pace.
  */
 function shouldSoftThrottleWalletPoll(rpcUrl: string): boolean {
-  if (isSoftThrottleRpcUrl(rpcUrl)) return true;
-  const share = Boolean(config.rpc?.shareLoad);
-  if (!share) return false;
-  return getRpcRoleFor('wallet_poll', true) === 'utility';
+  return isSoftThrottleRpcUrl(rpcUrl);
 }
 
-/** Free Helius/Alchemy/public — gentle concurrency so boot seeding cannot crash Render. */
+/** Public soft-throttle vs paid exclusive favourites key. */
 function getWalletPollThrottle(rpcUrl: string): {
   soft: boolean;
   batchSize: number;
@@ -1966,52 +1961,41 @@ function getWalletPollThrottle(rpcUrl: string): {
   cycleBudgetMs: number;
 } {
   const soft = shouldSoftThrottleWalletPoll(rpcUrl);
-  const share = Boolean(config.rpc?.shareLoad);
   const envCap = Number(process.env.RPC_WALLET_POLL_PER_CYCLE);
   const scale = utilityPollScale();
-  const weakUtil = share && isUtilityOnWeakPublic();
   const hardCycleCap = Number.isFinite(envCap)
     ? Math.max(1, Math.min(40, Math.round(envCap)))
-    : Math.max(
-        1,
-        Math.round((share ? 5 : 8) * scale.cycleCapScale * (weakUtil ? 0.6 : 1))
-      );
+    : Math.max(1, Math.round(12 * scale.cycleCapScale));
 
   if (soft) {
     const cap = resolveSoftWatchCap().effectiveCap;
-    // When cap is low, poll fewer wallets per cycle to keep Utility cool.
     const maxPerCycle =
       cap === 0
         ? 0
-        : Math.min(
-            hardCycleCap,
-            share ? (weakUtil ? 2 : 3) : 4,
-            Math.max(1, Math.ceil(cap / 5))
-          );
+        : Math.min(hardCycleCap, 4, Math.max(1, Math.ceil(cap / 5)));
     return {
       soft: true,
       batchSize: 1,
-      batchGapMs: Math.round((share ? 1_800 : 1_100) * scale.gapScale),
+      batchGapMs: Math.round(1_100 * scale.gapScale),
       sigLimit: 5,
       maxParse: 1,
       pause429Ms: 25_000,
       maxWalletsPerCycle: maxPerCycle,
       abortCycleOn429: true,
-      /** Hard stop so pollInFlight cannot block the next tick / starve /health. */
-      cycleBudgetMs: share ? (weakUtil ? 2_500 : 3_500) : 5_000,
+      cycleBudgetMs: 5_000,
     };
   }
-  // Paid / non-soft: still hard-cap + stagger — never blast every favourite at once.
+  // Exclusive Favourites key (ALCHEMY_API_KEY_BACKUP) — full pace.
   return {
     soft: false,
-    batchSize: share ? 2 : 3,
-    batchGapMs: Math.round((share ? 280 : 140) * scale.gapScale),
-    sigLimit: 12,
-    maxParse: 4,
+    batchSize: 4,
+    batchGapMs: Math.round(80 * scale.gapScale),
+    sigLimit: 15,
+    maxParse: 6,
     pause429Ms: 400,
     maxWalletsPerCycle: hardCycleCap,
     abortCycleOn429: false,
-    cycleBudgetMs: share ? 8_000 : 15_000,
+    cycleBudgetMs: 15_000,
   };
 }
 
@@ -2025,8 +2009,8 @@ export function resolveSoftWatchCap(): {
   shareLoad: boolean;
   defaultCap: number;
 } {
-  const shareLoad = Boolean(config.rpc?.shareLoad);
-  const defaultCap = shareLoad ? 8 : 16;
+  const shareLoad = false;
+  const defaultCap = 24;
   if (
     process.env.RPC_SOFT_WATCH_CAP != null &&
     process.env.RPC_SOFT_WATCH_CAP !== '' &&
@@ -2269,14 +2253,9 @@ export function startMonitor(): void {
     );
   }
 
-  // Soft-throttle RPCs (free Helius/Alchemy): wait longer so Render health passes
-  // before we seed wallets in small rotating batches.
-  const shareBoot = Boolean(config.rpc?.shareLoad);
-  const softBoot =
-    isSoftThrottleRpcUrl(getRpcUrl()) ||
-    (shareBoot && getRpcRoleFor('wallet_poll', true) === 'utility');
-  // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
-  const firstPollDelayMs = softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000;
+  // Soft-throttle only on true public RPC; exclusive Favourites key polls promptly.
+  const softBoot = isSoftThrottleRpcUrl(getRpcUrl());
+  const firstPollDelayMs = softBoot ? 15_000 : 5_000;
   setTimeout(() => {
     void pollAllWallets();
   }, firstPollDelayMs);
@@ -2312,12 +2291,8 @@ export function startMonitor(): void {
 
   activityTimer = setInterval(() => {
     if (paused || !config.filters.enableActivityFilter) return;
-    // Soft / Share Utility: activity refresh burns the same lane as Favourites — skip.
-    if (
-      isSoftThrottleRpcUrl(getRpcUrl()) ||
-      (Boolean(config.rpc?.shareLoad) &&
-        getRpcRoleFor('activity', true) === 'utility')
-    ) {
+    // Skip activity refresh only on true public soft-throttle RPCs.
+    if (isSoftThrottleRpcUrl(getRpcUrl())) {
       return;
     }
     void (async () => {

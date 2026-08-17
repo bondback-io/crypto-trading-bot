@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.409',
+    title: 'Exclusive RPC lanes: share/containment off, less lag',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Share RPC load stays OFF (UI toggles removed) — each exclusive key runs its own service without shared workload. RPC containment defaults OFF (opt-in RPC_CONTAINMENT=1 only).',
+      'Paid Alchemy/Helius exclusives are no longer soft-throttled; Favourites/Activity poll at full pace. Background work no longer defers when Trading is busy. Gate headroom raised for secondary/utility.',
+      'Exclusive keys no longer soft-failover to publicnode on mild EWMA latency. Health probes are sparse and do not inflate spike meters.',
+    ],
+  },
+  {
     version: '1.2.408',
     title: 'RPC Status page shows exclusive 10-key map',
     sections: ['execution', 'knobs'],

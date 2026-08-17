@@ -280,19 +280,19 @@ export function isPublicRpcUrl(url: string | null | undefined): boolean {
  * (Helius free, Alchemy free, public Solana). Use soft poll concurrency.
  * QuickNode is paid mid-tier — not soft-throttled unless RPC_SOFT_THROTTLE=1.
  */
+/**
+ * Soft-throttle only true public RPCs (or RPC_SOFT_THROTTLE=1).
+ * Exclusive Alchemy/Helius service keys are paid capacity — do not gentle-poll them.
+ */
 export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
+  if (process.env.RPC_SOFT_THROTTLE === '1') return true;
+  if (process.env.RPC_SOFT_THROTTLE === '0') return false;
   if (isPublicRpcUrl(url)) return true;
   const u = (url || '').toLowerCase();
   if (!u) return true;
-  if (isQuicknodeRpcUrl(u)) {
-    return process.env.RPC_SOFT_THROTTLE === '1';
-  }
-  if (u.includes('helius-rpc.com')) return true;
-  if (u.includes('g.alchemy.com')) return true;
-  // Explicit override for paid dedicated URLs that still need gentle polling
-  if (process.env.RPC_SOFT_THROTTLE === '1') return true;
-  // Paid / custom RPC_URL — allow higher concurrency unless forced soft
-  if (process.env.RPC_SOFT_THROTTLE === '0') return false;
+  // Helius / Alchemy exclusive keys — full pace.
+  if (u.includes('helius-rpc.com') || u.includes('g.alchemy.com')) return false;
+  if (isQuicknodeRpcUrl(u)) return false;
   return false;
 }
 

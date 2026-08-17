@@ -10967,13 +10967,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Ten exclusive preferred keys (one service each). Emergency failover is RPC_URL → PUBLICNODE_URL only — never another service’s key."></span></div>
-          <div class="toggle-row mb-2"><span title="Keep ON for exclusive multi-key routing (recommended on Render)">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
-          <div class="toggle-row mb-2"><span title="When ON, Watchers spikes shed enrich and Trading spikes pause new entries only. Exits stay on Trading exclusive key.">RPC containment</span><label class="switch"><input type="checkbox" id="rpc-containment" onchange="toggleRpcContainment(this.checked)" /><span class="slider"></span></label></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Ten exclusive preferred keys (one service each). Share load and containment are OFF — each key runs its own lane. Emergency failover is RPC_URL → PUBLICNODE_URL only."></span></div>
+          <p class="mint text-xs mb-2" style="color:#94a3b8">Share RPC load and RPC containment are disabled. Each service uses its own key without cross-lane shedding.</p>
           <div class="filters-row mb-3" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
-            <label class="ctl ctl-sm" title="Max Favourites wallets on soft-watch (ALCHEMY_API_KEY_BACKUP). 0 = pause. Default 12.">
+            <label class="ctl ctl-sm" title="Max Favourites wallets on soft-watch (ALCHEMY_API_KEY_BACKUP). 0 = pause. Default 24.">
               <span>Soft watch cap</span>
-              <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
+              <input type="number" id="rpc-soft-watch-cap" value="24" min="0" max="200" step="1" />
             </label>
             <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
@@ -28270,7 +28269,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const ok = xs.filter(function (s) { return s.configured; }).length;
           return ok + '/' + (xs.length || 10);
         })() +
-        ' · Share load: ' + (rpc.shareLoad ? 'ON' : 'OFF') +
         ' · Soft watch: ' + (function () {
           const sw = rpc.softWatch || {};
           if (sw.softWatchPaused) return 'PAUSED (0)';
@@ -28279,14 +28277,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         })() +
         ' · Emergency: RPC_URL → PUBLICNODE_URL' +
         ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
-      const shareToggle = document.getElementById('rpc-share-load');
-      if (shareToggle) shareToggle.checked = rpc.shareLoad === true;
-      const containToggle = document.getElementById('rpc-containment');
-      if (containToggle) {
-        containToggle.checked =
-          rpc.containmentEnabled !== false &&
-          !(rpc.spikeInspector && rpc.spikeInspector.containmentEnabled === false);
-      }
       const softCapEl = document.getElementById('rpc-soft-watch-cap');
       if (softCapEl && rpc.softWatch && rpc.softWatch.softWatchCap != null) {
         softCapEl.value = rpc.softWatch.softWatchCap;
@@ -37609,55 +37599,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (st) st.textContent = err.message || String(err);
       }
     }
-
-    async function toggleRpcShareLoad(enabled) {
-      const st = document.getElementById('rpc-diag-status');
-      if (st) st.textContent = 'Saving Share RPC load…';
-      try {
-        const data = await fetchJSON('/api/rpc/share-load', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: !!enabled }),
-        });
-        if (st) {
-          st.textContent = data.shareLoad
-            ? 'Share RPC load ON — exclusive keys (Alchemy×8 + Helius×2); emergency RPC_URL→PUBLICNODE'
-            : 'Share RPC load OFF — legacy primary/secondary routing';
-        }
-        const shareAlloc = document.getElementById('rpc-share-alloc');
-        if (shareAlloc) shareAlloc.style.display = data.shareLoad ? 'block' : 'none';
-        if (typeof refresh === 'function') refresh();
-      } catch (err) {
-        const t = document.getElementById('rpc-share-load');
-        if (t) t.checked = !enabled;
-        if (st) st.textContent = err.message || String(err);
-      }
-    }
-
-    async function toggleRpcContainment(enabled) {
-      const st = document.getElementById('rpc-diag-status');
-      if (st) st.textContent = 'Saving RPC containment…';
-      try {
-        const data = await fetchJSON('/api/rpc/containment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: !!enabled }),
-        });
-        if (st) {
-          st.textContent = data.containmentEnabled
-            ? 'Containment ON — Watchers shed on spike; Trading pauses new entries only'
-            : 'Containment OFF — detect/record only';
-        }
-        const t = document.getElementById('rpc-containment');
-        if (t) t.checked = data.containmentEnabled !== false;
-        if (typeof refresh === 'function') refresh();
-      } catch (err) {
-        const t = document.getElementById('rpc-containment');
-        if (t) t.checked = !enabled;
-        if (st) st.textContent = err.message || String(err);
-      }
-    }
-    window.toggleRpcContainment = toggleRpcContainment;
 
     function rpcSpikeChipHtml(label, lane) {
       const st = String((lane && lane.status) || 'ok');

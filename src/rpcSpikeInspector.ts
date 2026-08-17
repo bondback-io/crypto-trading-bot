@@ -163,9 +163,10 @@ function recoverThreshold(lane: RpcSpikeLane): number {
 function isContainmentOn(): boolean {
   try {
     const { config } = require('./config') as typeof import('./config');
-    return config.rpc?.containmentEnabled !== false;
+    // Opt-in only — exclusive per-service keys must not shed each other by default.
+    return config.rpc?.containmentEnabled === true;
   } catch {
-    return true;
+    return false;
   }
 }
 
