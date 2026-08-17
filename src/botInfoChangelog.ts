@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.418',
+    title: 'Utility on Alchemy BACKUP; extra Alchemy fallbacks',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Utility prefers ALCHEMY_API_KEY_BACKUP. ALCHEMY_API_KEY_BACKUP2/3/4 join rpc-url and publicnode as failover-only slots. Health probes stay on preferred/active lanes only.',
+    ],
+  },
+  {
     version: '1.2.417',
     title: 'Restore 1.2.414 classic RPC routing',
     sections: ['execution', 'knobs'],

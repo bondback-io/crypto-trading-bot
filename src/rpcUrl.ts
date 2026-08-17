@@ -291,6 +291,10 @@ export function rpcEndpointsFromEnv(
 ): NormalizedRpcEndpoint[] {
   const helius = buildHeliusRpcUrl();
   const alchemy = buildAlchemyRpcUrl();
+  const alchemyBackup = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP);
+  const alchemyBackup2 = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP2);
+  const alchemyBackup3 = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP3);
+  const alchemyBackup4 = buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP4);
   const quicknode = buildQuicknodeRpcUrl();
 
   const rpcUrlRaw = (
@@ -342,6 +346,34 @@ export function rpcEndpointsFromEnv(
     label: 'publicnode',
     role: 'fallback',
   });
+  if (alchemyBackup) {
+    pool.push({
+      url: alchemyBackup,
+      label: 'alchemy-backup',
+      role: 'fallback',
+    });
+  }
+  if (alchemyBackup2) {
+    pool.push({
+      url: alchemyBackup2,
+      label: 'alchemy-backup2',
+      role: 'fallback',
+    });
+  }
+  if (alchemyBackup3) {
+    pool.push({
+      url: alchemyBackup3,
+      label: 'alchemy-backup3',
+      role: 'fallback',
+    });
+  }
+  if (alchemyBackup4) {
+    pool.push({
+      url: alchemyBackup4,
+      label: 'alchemy-backup4',
+      role: 'fallback',
+    });
+  }
   pool.push({
     url: PUBLIC_SOLANA_RPC_OFFICIAL,
     label: 'mainnet-beta',
@@ -379,16 +411,17 @@ export function rpcEndpointsFromEnv(
     }
   }
 
-  // Utility lane prefers official mainnet-beta, then publicnode / Triton.
+  // Utility lane prefers ALCHEMY_API_KEY_BACKUP, then classic publics.
   let utilityUrl = '';
   const utilityPrefs = [
+    alchemyBackup,
     PUBLIC_SOLANA_RPC_OFFICIAL,
     rpcUrl && isOfficialMainnetBetaRpcUrl(rpcUrl) ? rpcUrl : '',
     PUBLIC_SOLANA_RPC,
     rpcUrl && isTritonMainnetRpcUrl(rpcUrl) ? rpcUrl : '',
     rpcSecondary && isTritonMainnetRpcUrl(rpcSecondary) ? rpcSecondary : '',
     rpcSecondary && !isOfficialMainnetBetaRpcUrl(rpcSecondary) ? rpcSecondary : '',
-  ].filter((u) => u && isUsableRpcUrl(u));
+  ].filter((u): u is string => Boolean(u) && isUsableRpcUrl(u));
   for (const u of utilityPrefs) {
     if (u !== primaryUrl && u !== secondaryUrl) {
       utilityUrl = u;
@@ -437,6 +470,10 @@ export function rpcEndpointsFromEnv(
     if (url === quicknode) return 'quicknode';
     if (url === rpcUrl) return 'rpc-url';
     if (url === rpcSecondary) return 'rpc-secondary';
+    if (url === alchemyBackup) return 'alchemy-backup';
+    if (url === alchemyBackup2) return 'alchemy-backup2';
+    if (url === alchemyBackup3) return 'alchemy-backup3';
+    if (url === alchemyBackup4) return 'alchemy-backup4';
     if (url === PUBLIC_SOLANA_RPC) return 'publicnode';
     if (url === PUBLIC_SOLANA_RPC_OFFICIAL) return 'mainnet-beta';
     if (isTritonMainnetRpcUrl(url)) return 'mainnet-triton';
@@ -464,7 +501,9 @@ export function rpcEndpointsFromEnv(
       (helius ? ' (Helius free primary)' : '') +
       (alchemy ? ' (Alchemy free secondary)' : '') +
       (quicknode ? ' (QuickNode mid-tier)' : '') +
-      (utilityUrl && isOfficialMainnetBetaRpcUrl(utilityUrl)
+      (utilityUrl && utilityUrl === alchemyBackup
+        ? ' (Alchemy BACKUP utility)'
+        : utilityUrl && isOfficialMainnetBetaRpcUrl(utilityUrl)
         ? ' (mainnet-beta utility)'
         : utilityUrl && isTritonMainnetRpcUrl(utilityUrl)
           ? ' (Triton api.mainnet.solana.com utility)'
@@ -500,7 +539,7 @@ export const RPC_LANE_SUPPORTS = {
     'Wallet favourites / import on-chain checks (Share ON)',
     'Wallet activity refresh / last-trade polls (Share ON)',
     'Other light non-entry polls',
-    'Preferred: official mainnet-beta → publicnode → Triton → last-resort fallbacks',
+    'Preferred: ALCHEMY_API_KEY_BACKUP → rpc-url → publicnode → BACKUP2/3/4',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
@@ -518,6 +557,6 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
   ],
   utility: [
-    'mainnet-beta — wallet buy watch (Favourites), import checks, activity refresh, light polls',
+    'ALCHEMY_API_KEY_BACKUP — wallet buy watch (Favourites), import checks, activity refresh, light polls',
   ],
 } as const;
