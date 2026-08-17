@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.415',
+    title: 'Alchemy keys for every RPC slot',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Primary uses ALCHEMY_API_KEY_BACKUP (was Helius). Utility uses ALCHEMY_API_KEY_BACKUP2 (was mainnet-beta). Emergency slots are BACKUP3 / BACKUP4 (was RPC_URL / publicnode). Scanners stay on ALCHEMY_API_KEY. Same three-lane routing — keys are not shared.',
+    ],
+  },
+  {
     version: '1.2.414',
     title: 'Classic Helius/Alchemy RPC restore + keep post-restore features',
     sections: ['execution', 'scanners', 'knobs'],
