@@ -103,12 +103,12 @@ function recompute(external?: {
   }
 
   const pLat = external?.primaryLatencyMs;
-  if (pLat != null && pLat >= 120) {
+  if (pLat != null && pLat >= 700) {
     shedBackground = true;
     scannerSlowFactor = Math.max(scannerSlowFactor, 3);
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
     reasons.push(`Critical latency ${Math.round(pLat)}ms → shed background`);
-  } else if (pLat != null && pLat >= 80) {
+  } else if (pLat != null && pLat >= 450) {
     shedBackground = true;
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
     reasons.push(`Critical latency ${Math.round(pLat)}ms → reduce scanners`);
@@ -123,22 +123,22 @@ function recompute(external?: {
   const uLat = external?.utilityLatencyMs;
   if (external?.utilityWeakPublic) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
-    reasons.push('Utility on weak public RPC → slow Favourites only');
+    reasons.push('Utility on weak public RPC → cut Favourites/activity');
   }
   if (external?.utilityFailover) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2);
     reasons.push('Utility failover → reduce utility workload');
   }
-  if (uLat != null && uLat >= 120) {
+  if (uLat != null && uLat >= 800) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 2.5);
     reasons.push(`Utility latency ${Math.round(uLat)}ms → slow polls`);
-  } else if (uLat != null && uLat >= 80) {
+  } else if (uLat != null && uLat >= 500) {
     utilitySlowFactor = Math.max(utilitySlowFactor, 1.75);
     reasons.push(`Utility latency ${Math.round(uLat)}ms → soft slowdown`);
   }
 
   const sLat = external?.secondaryLatencyMs;
-  if (sLat != null && sLat >= 80) {
+  if (sLat != null && sLat >= 600) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 2);
     reasons.push(`Scanners latency ${Math.round(sLat)}ms → slow scanners`);
   }
@@ -193,17 +193,6 @@ export function shouldSkipScannerTick(subsystem: string): {
   reason: string | null;
 } {
   const snap = getRpcLoadControlSnapshot();
-  const id = String(subsystem || '').toLowerCase();
-  // Market / Alpha / Zion must keep ticking when Utility is only on weak public.
-  // Slow Favourites via utilitySlowFactor — do not zero signal intake.
-  const intakeCritical =
-    id.includes('market') || id.includes('zion') || id.includes('alpha');
-  const utilityOnly =
-    snap.reasons.length > 0 &&
-    snap.reasons.every((r) => /utility|favourites|weak public/i.test(r));
-  if (intakeCritical && (utilityOnly || !snap.shedBackground)) {
-    return { skip: false, reason: null };
-  }
   // ×3+ means Secondary is already shedding — always skip the tick so we
   // do not keep acquiring (and re-noting skips) every 22s.
   if (snap.scannerSlowFactor >= 3) {
@@ -228,6 +217,11 @@ export function shouldSkipScannerTick(subsystem: string): {
   return { skip: false, reason: null };
 }
 
+/** Classic restore: never degrade scanner enrich via containment. */
+export function shouldDegradeScannerEnrich(): boolean {
+  return false;
+}
+
 export function utilityPollScale(): {
   cycleCapScale: number;
   gapScale: number;
@@ -239,9 +233,4 @@ export function utilityPollScale(): {
     gapScale: f,
     skipActivity: f >= 2.5,
   };
-}
-
-/** Classic: no containment-driven enrich shed. */
-export function shouldDegradeScannerEnrich(): boolean {
-  return false;
 }

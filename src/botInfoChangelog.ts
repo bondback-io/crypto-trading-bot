@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.420',
+    title: 'Classic Helius / Alchemy / public RPC',
+    sections: ['execution', 'knobs', 'scanners'],
+    items: [
+      'Restored the pre-1.2.269 three-lane stack: Critical Helius (entries, migration, send/exits), Scanners Alchemy (Market / Alpha / Zion / bonding / setup-watch), Utility public (Favourites poll + activity). Share load defaults ON when both keys exist.',
+      'Exclusive 10-key map, BACKUP assigned lanes, and containment stay off. Discovery sources unchanged: pump_stream, onchain_helius, majors, medium.',
+    ],
+  },
+  {
     version: '1.2.419',
     title: 'RPC spillover pools + 20–40ms SLO',
     sections: ['execution', 'knobs'],

@@ -1,7 +1,6 @@
 /**
- * Per-key 429 / CU/s cooldown for Alchemy and Helius.
- * Cools that key only (15–60s) so spillover can use siblings in the same pool.
- * Never skips trade exit / send. Repeat notes while cooling do not stack.
+ * Per-key 429 telemetry for Alchemy/Helius (labels only).
+ * Classic restore: never skip RPC and never steal CU slots from another lane.
  */
 
 import {
@@ -11,16 +10,6 @@ import {
 
 const COOL_MIN_MS = 15_000;
 const COOL_MAX_MS = 60_000;
-const MAX_INFLIGHT_PER_KEY = 4;
-
-const CRITICAL_FEATURES = new Set([
-  'trade_entry',
-  'trade_exit',
-  'send_tx',
-  'confirm_tx',
-  'sendRawTransaction',
-  'sendLegacy',
-]);
 
 export function isAlchemyRpcUrl(url: string | null | undefined): boolean {
   return /g\.alchemy\.com|alchemy\.com/i.test(String(url || ''));
@@ -113,11 +102,6 @@ function getOrCreate(url: string): KeyPace | null {
   return st;
 }
 
-function isCriticalFeature(feature?: string): boolean {
-  if (!feature) return false;
-  return CRITICAL_FEATURES.has(feature) || feature.startsWith('trade_');
-}
-
 export function isKeyedRpcCooling(
   url: string | null | undefined,
   now = Date.now()
@@ -127,11 +111,12 @@ export function isKeyedRpcCooling(
 }
 
 export function shouldSkipKeyedRpc(
-  feature?: string,
-  url?: string | null
+  _feature?: string,
+  _url?: string | null
 ): boolean {
-  if (isCriticalFeature(feature)) return false;
-  return isKeyedRpcCooling(url);
+  void _feature;
+  void _url;
+  return false;
 }
 
 /** Returns true if a new cooldown window started. */
@@ -159,13 +144,8 @@ export function noteKeyedRpcOk(url?: string | null): void {
 }
 
 export function listAlchemyScannerUrlsFromEnv(): string[] {
-  const urls = [
-    buildAlchemyRpcUrl(),
-    buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP2),
-    buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP3),
-    buildAlchemyRpcUrl(process.env.ALCHEMY_API_KEY_BACKUP4),
-  ].filter((u): u is string => Boolean(u));
-  return [...new Set(urls)];
+  const url = buildAlchemyRpcUrl();
+  return url ? [url] : [];
 }
 
 export function alchemyCooldownRemainingMs(now = Date.now()): number {
@@ -183,10 +163,12 @@ export function allScannerAlchemyKeysCooling(now = Date.now()): boolean {
 }
 
 export function shouldSkipAlchemyRpc(
-  feature?: string,
-  url?: string | null
+  _feature?: string,
+  _url?: string | null
 ): boolean {
-  return shouldSkipKeyedRpc(feature, url);
+  void _feature;
+  void _url;
+  return false;
 }
 
 export function noteAlchemyCuLimit(endpoint?: string): boolean {
@@ -199,30 +181,14 @@ export function noteAlchemyOk(url?: string | null): void {
 
 export function acquireAlchemyPaceSlot(
   _feature?: string,
-  url?: string | null
+  _url?: string | null
 ): {
   allowed: boolean;
   release: () => void;
 } {
-  if (isCriticalFeature(_feature)) {
-    return { allowed: true, release: () => undefined };
-  }
-  if (!url) return { allowed: true, release: () => undefined };
-  const st = getOrCreate(url);
-  if (!st) return { allowed: true, release: () => undefined };
-  if (st.inFlight >= MAX_INFLIGHT_PER_KEY) {
-    return { allowed: false, release: () => undefined };
-  }
-  st.inFlight += 1;
-  let released = false;
-  return {
-    allowed: true,
-    release: () => {
-      if (released) return;
-      released = true;
-      st.inFlight = Math.max(0, st.inFlight - 1);
-    },
-  };
+  void _feature;
+  void _url;
+  return { allowed: true, release: () => undefined };
 }
 
 export function pickNextAlchemyScannerUrl(

@@ -476,7 +476,7 @@ export async function fetchBondingCurve(
     if (hasRpcRoleContext()) return body();
     try {
       return await runWithRpcRole(
-        getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
+        getRpcRoleFor('bonding_curve', Boolean(config.rpc?.shareLoad)),
         body,
         'bonding_curve'
       );

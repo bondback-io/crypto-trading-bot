@@ -1707,7 +1707,7 @@ async function detectRecentDevSells(
   mint: string,
   devWallet: string
 ): Promise<{ sold: boolean; count: number }> {
-  // Share load: holder/dev tx scans use exclusive signal_safety key (BACKUP7).
+  // Share load: holder/dev tx scans use secondary scanners (Alchemy), not BACKUP7.
   const role = getRpcRoleFor(
     'signal_safety',
     Boolean(config.rpc?.shareLoad)

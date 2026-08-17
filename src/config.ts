@@ -1853,13 +1853,12 @@ export interface BotConfig {
     /** Prefer other lane only after preferred endpoint is unhealthy this long (ms). */
     failoverDownMs: number;
     /**
-     * When true, split workloads: Helius pool=critical, Alchemy pool=scanners,
-     * Alchemy BACKUP=utility. Publics are emergency-only.
+     * When true, split workloads: Helius=critical, Alchemy=scanners,
+     * public=utility. Default ON when both Helius and Alchemy keys exist.
      */
     shareLoad: boolean;
     /**
-     * Spike Inspector containment (default ON). Detect/record still run when
-     * OFF; shedding / entry-pause / retry-cap do not.
+     * Spike Inspector containment. Classic restore keeps this OFF.
      */
     containmentEnabled: boolean;
     /**

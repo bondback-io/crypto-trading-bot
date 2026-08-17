@@ -658,7 +658,7 @@ export async function executeBuy(
   } catch {
     /* inspector optional */
   }
-  // Always bind Trading Critical exclusive key — even when called from Zion Place Trade.
+  // Always bind Critical/Helius (trade_entry) — even when called from Zion Place Trade.
   try {
     const { getCurrentRpcFeature } =
       require('./connection') as typeof import('./connection');

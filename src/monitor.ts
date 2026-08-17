@@ -1941,13 +1941,13 @@ function isRpcSoftBlockedError(err: unknown): boolean {
 
 /**
  * Soft-throttle Favourites only on true public RPCs (or RPC_SOFT_THROTTLE=1).
- * Exclusive Alchemy/Helius service keys run at full paid pace.
+ * Paid Helius/Alchemy lanes run at full pace.
  */
 function shouldSoftThrottleWalletPoll(rpcUrl: string): boolean {
   return isSoftThrottleRpcUrl(rpcUrl);
 }
 
-/** Public soft-throttle vs paid exclusive favourites key. */
+/** Public soft-throttle vs paid Helius/Alchemy keys. */
 function getWalletPollThrottle(rpcUrl: string): {
   soft: boolean;
   batchSize: number;
@@ -2273,7 +2273,7 @@ export function startMonitor(): void {
     );
   }
 
-  // Soft-throttle only on true public RPC; exclusive Favourites key polls promptly.
+  // Soft-throttle only on true public RPC; paid lanes poll promptly.
   const softBoot = isSoftThrottleRpcUrl(getRpcUrl());
   const firstPollDelayMs = softBoot ? 15_000 : 5_000;
   setTimeout(() => {

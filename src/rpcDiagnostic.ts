@@ -106,7 +106,7 @@ function laneStressed(snap: {
 }): boolean {
   if (!snap.healthy) return true;
   if (snap.successRate != null && snap.successRate < 50) return true;
-  if (snap.latencyMs != null && snap.latencyMs > 80) return true;
+  if (snap.latencyMs != null && snap.latencyMs > 500) return true;
   return false;
 }
 
@@ -310,7 +310,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   }
 
   if (primary.failover) {
-    chokeHints.push('Primary lane is on failover/spillover (preferred not active).');
+    chokeHints.push('Primary lane is piggybacking (failover active).');
   }
   if (primary.public && !shareLoad) {
     chokeHints.push(

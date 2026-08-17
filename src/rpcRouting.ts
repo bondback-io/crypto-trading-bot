@@ -1,8 +1,8 @@
 /**
- * Feature → RPC lane routing for Share RPC load mode (classic 3-lane).
+ * Feature → RPC lane routing for Share RPC load mode.
  */
 
-import type { RpcRole } from './connection';
+import { runWithRpcRole, type RpcRole } from './connection';
 
 export type RpcFeature =
   | 'trade_entry'
@@ -24,9 +24,9 @@ export type RpcFeature =
 
 /**
  * Map a workload feature to an RPC lane.
- * Share OFF: mostly primary; Zion + activity stay secondary (legacy).
- * Share ON: critical→primary, scanners/Zion/setup→secondary, wallet/activity→utility.
- * Exclusive-era 'watchers' maps to secondary.
+ * Share OFF: mostly primary; Zion + activity + setup_watch stay secondary (legacy).
+ * Share ON: critical→primary (Helius), scanners/Zion/setup→secondary (Alchemy),
+ * wallet poll + import/activity→utility (public).
  */
 export function getRpcRoleFor(
   feature: RpcFeature,
@@ -75,16 +75,9 @@ export function shareLoadLaneTitle(role: RpcRole): string {
   return 'Utility';
 }
 
-/** Run watch/arm/trigger RPC on the secondary (classic) lane. */
+/** Run watch/arm/trigger RPC on the classic secondary (Alchemy scanners) lane. */
 export async function runSetupWatchLane<T>(
   fn: () => Promise<T> | T
 ): Promise<T> {
-  const { runWithRpcRole } =
-    require('./connection') as typeof import('./connection');
-  const { config } = require('./config') as typeof import('./config');
-  return runWithRpcRole(
-    getRpcRoleFor('setup_watch', Boolean(config.rpc?.shareLoad)),
-    fn,
-    'setup_watch'
-  );
+  return runWithRpcRole('secondary', fn, 'setup_watch');
 }
