@@ -89,7 +89,7 @@ export function buildHeliusRpcUrl(apiKey?: string | null): string | null {
   return `https://mainnet.helius-rpc.com/?api-key=${key}`;
 }
 
-/** Helius backup (utility light). Null if HELIUS_API_KEY_BACKUP unset. */
+/** Optional Helius backup URL. Null if HELIUS_API_KEY_BACKUP unset (not an exclusive preferred). */
 export function buildHeliusBackupRpcUrl(apiKey?: string | null): string | null {
   const key = (apiKey ?? process.env.HELIUS_API_KEY_BACKUP)?.trim();
   if (!isUsableApiKey(key)) return null;
@@ -457,7 +457,7 @@ export function rpcEndpointsFromEnv(
     add(url, svc.label, svc.gateRole);
   }
 
-  // Emergency fallbacks only — never assigned as exclusive preferred above.
+  // Emergency publics (rpc-url may already be Utility light preferred above).
   if (rpcUrl) add(rpcUrl, 'rpc-url', 'fallback');
   add(publicnode, 'publicnode', 'fallback');
 
@@ -532,7 +532,7 @@ export const RPC_LANE_SUPPORTS = {
   utility: [
     'Favourites soft-watch — ALCHEMY_API_KEY_BACKUP',
     'Activity refresh — HELIUS_API_KEY',
-    'Utility light — HELIUS_API_KEY_BACKUP',
+    'Utility light — RPC_URL (public)',
   ],
   watchers: [
     'Setup watches (Dip/Trend/Scalper/Grad) — ALCHEMY_API_KEY_BACKUP2 (exclusive)',
@@ -556,6 +556,6 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'ALCHEMY_API_KEY_BACKUP2 — setup watch / arm / trigger (exclusive).',
   ],
   utility: [
-    'ALCHEMY_API_KEY_BACKUP Favourites · HELIUS_API_KEY Activity · HELIUS_API_KEY_BACKUP utility light.',
+    'ALCHEMY_API_KEY_BACKUP Favourites · HELIUS_API_KEY Activity · RPC_URL utility light (public).',
   ],
 } as const;

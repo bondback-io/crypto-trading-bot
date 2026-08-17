@@ -971,7 +971,8 @@ function ensureEndpoints(): void {
     const fav = endpoints.findIndex((e) => e.endpoint.label === 'alchemy-backup');
     if (fav >= 0) return fav;
     const light = endpoints.findIndex(
-      (e) => e.endpoint.label === 'helius-backup'
+      (e) =>
+        e.endpoint.label === 'rpc-url' || e.endpoint.label === 'helius-backup'
     );
     if (light >= 0) return light;
     return pickPreferredUtilityIndex();

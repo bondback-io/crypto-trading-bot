@@ -321,12 +321,14 @@ check(
     /ALCHEMY_API_KEY_BACKUP3/.test(rpcUrl)
 );
 check(
-  'exclusive service map BACKUP4–7 + HELIUS_BACKUP + PUBLICNODE',
+  'exclusive service map BACKUP4–7 + PUBLICNODE (utility → RPC_URL)',
   /alchemy-backup4/.test(rpcUrl) &&
     /alchemy-backup7/.test(rpcUrl) &&
-    /buildHeliusBackupRpcUrl/.test(rpcUrl) &&
     /resolvePublicnodeRpcUrl/.test(rpcUrl) &&
-    /Exclusive multi-RPC chain/.test(rpcUrl)
+    /Exclusive multi-RPC chain/.test(rpcUrl) &&
+    /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(
+      readSrc('src/rpcServiceMap.ts')
+    )
 );
 check(
   'rpcServiceMap locks Trading to ALCHEMY_API_KEY',
@@ -342,10 +344,15 @@ check(
   })()
 );
 check(
-  'utility exclusive map present (not BACKUP3-as-utility default)',
-  /Exclusive multi-RPC chain/.test(rpcUrl) &&
-    /HELIUS_API_KEY_BACKUP/.test(readSrc('src/rpcServiceMap.ts')) &&
-    /label: 'helius-backup'/.test(readSrc('src/rpcServiceMap.ts'))
+  'utility exclusive map uses RPC_URL (not HELIUS_BACKUP)',
+  (() => {
+    const m = readSrc('src/rpcServiceMap.ts');
+    return (
+      /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(m) &&
+      /label: 'rpc-url'/.test(m) &&
+      !/label: 'helius-backup'/.test(m)
+    );
+  })()
 );
 check(
   'alchemy_key_429 log format',

@@ -13,6 +13,7 @@ import {
   guardRpcWebSocket,
   isLogsSubscribeDisabled,
   isLogsSubscribeUnsupportedError,
+  isWsRateLimitNoise,
   logRpcWsErrorOnce,
   shouldAttemptLogsSubscribe,
 } from '../src/rpcWsGuard';
@@ -48,6 +49,14 @@ check(
 check(
   'ignores unrelated 429',
   isLogsSubscribeUnsupportedError('429 too many requests') === false
+);
+check(
+  'detects ws error 429 noise',
+  isWsRateLimitNoise('ws error: Unexpected server response: 429')
+);
+check(
+  'ignores non-429 ws error',
+  isWsRateLimitNoise('ws error: Unexpected server response: 502') === false
 );
 
 disableLogsSubscribe('https://example-rpc.example/v1/key', 'method_not_found');
@@ -164,6 +173,17 @@ void runGuardLoopCheck()
       'HTTP connections are WS-guarded',
       connSrc.includes('createGuardedConnection') &&
         connSrc.includes('guardRpcWebSocket')
+    );
+    check(
+      'WS guard rebinds error listener + filters 429',
+      readSrc('src/rpcWsGuard.ts').includes('isWsRateLimitNoise') &&
+        readSrc('src/rpcWsGuard.ts').includes("removeAllListeners('error')")
+    );
+    check(
+      'Utility light prefers RPC_URL',
+      /utility_light[\s\S]*?envKey: 'RPC_URL'/.test(
+        readSrc('src/rpcServiceMap.ts')
+      )
     );
     check(
       'index swallows logsSubscribe unhandledRejection',

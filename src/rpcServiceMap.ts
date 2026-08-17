@@ -1,6 +1,7 @@
 /**
  * Exclusive Solana RPC service → preferred env key map.
- * Preferred keys never share; emergency failover is RPC_URL → PUBLICNODE_URL only.
+ * Preferred keys never share with each other; failover is RPC_URL → PUBLICNODE_URL
+ * (RPC_URL is also Utility light's preferred public endpoint).
  */
 
 export type RpcExclusiveService =
@@ -125,13 +126,13 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
   },
   {
     service: 'utility_light',
-    label: 'helius-backup',
-    envKey: 'HELIUS_API_KEY_BACKUP',
+    label: 'rpc-url',
+    envKey: 'RPC_URL',
     gateRole: 'utility',
     title: 'Utility light',
     intensity: 'low',
     exclusive: true,
-    blurb: 'Health probes, priority fees, ungated reads',
+    blurb: 'Health probes, priority fees, ungated reads (public RPC_URL)',
   },
 ] as const;
 
@@ -139,10 +140,10 @@ export const RPC_EMERGENCY_SERVICES = [
   {
     label: 'rpc-url',
     envKey: 'RPC_URL',
-    title: 'Emergency RPC_URL',
+    title: 'RPC_URL (Utility light + emergency)',
     intensity: 'emergency' as const,
     exclusive: false,
-    blurb: 'Last-resort failover only — never preferred',
+    blurb: 'Preferred for Utility light; emergency failover for other services',
   },
   {
     label: 'publicnode',
@@ -154,7 +155,10 @@ export const RPC_EMERGENCY_SERVICES = [
   },
 ] as const;
 
-/** Emergency-only failover labels (never preferred for exclusives). */
+/**
+ * Failover labels for non-utility exclusives.
+ * `rpc-url` is also Utility light's preferred key (shared only on emergency).
+ */
 export const RPC_EMERGENCY_LABELS = ['rpc-url', 'publicnode'] as const;
 
 const FEATURE_TO_SERVICE: Record<string, RpcExclusiveService> = {

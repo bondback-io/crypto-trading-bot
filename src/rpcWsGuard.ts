@@ -11,7 +11,9 @@ type ConnPriv = Connection & {
   _rpcWebSocket?: {
     call: (...args: unknown[]) => Promise<unknown>;
     on?: (event: string, fn: (...args: unknown[]) => void) => void;
+    removeAllListeners?: (event: string) => void;
   };
+  _rpcWebSocketConnected?: boolean;
   _wsOnError?: (err: Error) => void;
   _setSubscription?: (hash: string, next: { method?: string; state?: string }) => void;
   _subscriptionsByHash?: Record<
@@ -93,6 +95,14 @@ export function isJsonRpcMethodNotFoundNoise(text: string): boolean {
   if (!t) return false;
   if (isLogsSubscribeUnsupportedError(t)) return true;
   return /logsSubscribe/i.test(t) && /JSON-RPC error calling|not found|-32601/i.test(t);
+}
+
+/** web3.js `ws error: Unexpected server response: 429` reconnect spam. */
+export function isWsRateLimitNoise(text: string): boolean {
+  const t = String(text || '');
+  if (!t) return false;
+  if (!/ws error|unexpected server response/i.test(t)) return false;
+  return /\b429\b|too many requests|rate.?limit/i.test(t);
 }
 
 export function disableLogsSubscribe(
@@ -182,6 +192,14 @@ function installConsoleErrorFilter(): void {
       }
       return;
     }
+    if (isWsRateLimitNoise(text)) {
+      if (logRpcWsErrorOnce('rpc-ws-429', text)) {
+        origConsoleError(
+          '[rpc] WS rate-limited (429) — further ws error lines suppressed 60s'
+        );
+      }
+      return;
+    }
     origConsoleError(...(args as Parameters<typeof console.error>));
   };
 }
@@ -267,9 +285,37 @@ export function guardRpcWebSocket(
         }
         return;
       }
+      // web3.js binds the original _wsOnError at construct time, so console
+      // filter is the main 429 suppressor — still avoid double-logging here.
+      if (isWsRateLimitNoise(`ws error: ${err?.message || err}`)) {
+        c._rpcWebSocketConnected = false;
+        if (logRpcWsErrorOnce(label, err)) {
+          origConsoleError(
+            `[rpc] WS rate-limited on ${label} (429) — further logs suppressed 60s`
+          );
+        }
+        return;
+      }
       if (!logRpcWsErrorOnce(label, err)) return;
       origWsOnError(err);
     };
+    // Rebind: construct-time .bind(this) still points at the original method.
+    const ws = c._rpcWebSocket as
+      | {
+          removeAllListeners?: (event: string) => void;
+          on?: (event: string, fn: (...args: unknown[]) => void) => void;
+        }
+      | undefined;
+    if (ws?.removeAllListeners && ws?.on) {
+      try {
+        ws.removeAllListeners('error');
+        ws.on('error', (err: unknown) => {
+          c._wsOnError?.(err instanceof Error ? err : new Error(String(err)));
+        });
+      } catch {
+        /* ignore — console filter still covers noise */
+      }
+    }
   }
 }
 

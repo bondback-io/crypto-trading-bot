@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.411',
+    title: 'Utility light on public RPC_URL; quiet WS 429',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Utility light preferred key is RPC_URL (public) instead of HELIUS_API_KEY_BACKUP — stops WS/HTTP 429 when Helius backup free credits are exhausted.',
+      'web3.js `ws error: Unexpected server response: 429` reconnect spam is rate-limited (once/60s) and the WS error listener is rebound so the guard actually applies.',
+    ],
+  },
+  {
     version: '1.2.410',
     title: 'Cap Alchemy getTransaction storms on scanners',
     sections: ['execution', 'scanners'],
