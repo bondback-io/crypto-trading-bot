@@ -199,6 +199,42 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     #watchlist-admission-chip.adm-hybrid { color: #6ee7b7; border-color: #059669; }
     #watchlist-admission-chip.adm-flow { color: #93c5fd; border-color: #2563eb; }
     #watchlist-admission-chip.adm-selective { color: #F1BB72; border-color: #b45309; }
+    .header-actions #header-system-load-badge {
+      padding: 2px 7px;
+      gap: 0;
+      min-width: 0;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .header-actions #header-system-load-badge.slm-basic {
+      border-color: rgba(148, 163, 184, 0.5);
+      color: #cbd5e1;
+      background: rgba(30, 41, 59, 0.45);
+    }
+    .header-actions #header-system-load-badge.slm-premium {
+      border-color: rgba(96, 165, 250, 0.5);
+      color: #93c5fd;
+      background: rgba(30, 58, 138, 0.35);
+    }
+    .header-actions #header-system-load-badge.slm-full {
+      border-color: rgba(52, 211, 153, 0.5);
+      color: #6ee7b7;
+      background: rgba(6, 78, 59, 0.35);
+    }
+    #watchlist-system-load-chip {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 0.12rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      background: rgba(15, 23, 42, 0.55);
+    }
+    #watchlist-system-load-chip.slm-basic { color: #cbd5e1; border-color: #64748b; }
+    #watchlist-system-load-chip.slm-premium { color: #93c5fd; border-color: #2563eb; }
+    #watchlist-system-load-chip.slm-full { color: #6ee7b7; border-color: #059669; }
     @media (prefers-reduced-motion: reduce) {
       .dot-running,
       .run-status.run-running #run-status-icon,
@@ -7547,6 +7583,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span id="header-admission-mode-badge" class="badge status-badge has-tip adm-hybrid" title="Admission: Hybrid — open now if near a playbook level, otherwise watch→arm→trigger" aria-label="Admission Hybrid">
             <span id="header-admission-mode-label">Hyb</span>
           </span>
+          <span id="header-system-load-badge" class="badge status-badge has-tip slm-basic" title="System Load Mode: Basic — trade and learn only" aria-label="System Load Basic">
+            <span id="header-system-load-label">BASIC</span>
+          </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
           <span class="status-stat rpc-status rpc-pill rpc-unknown has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint and last measured latency">
@@ -8596,7 +8635,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" style="padding-bottom:0.55rem">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-0">Watchlist <span class="tip" tabindex="0" data-tip="Setup watches, market scanner / AlphaScan, and activity feeds — split into tabs so the page stays scannable. Readiness strip above stays observe-only."></span> <span id="watchlist-admission-chip" class="adm-hybrid" title="Admission / Entry Mode">Hybrid</span></div>
+            <div class="section-title !text-sm mb-0">Watchlist <span class="tip" tabindex="0" data-tip="Setup watches, market scanner / AlphaScan, and activity feeds — split into tabs so the page stays scannable. Readiness strip above stays observe-only."></span> <span id="watchlist-admission-chip" class="adm-hybrid" title="Admission / Entry Mode">Hybrid</span> <span id="watchlist-system-load-chip" class="slm-basic" title="System Load Mode">BASIC</span></div>
             <p class="text-xs text-slate-400 mb-0">Setups are the armed watch inventory. Scanner configures the live universe. Activity shows Pump / signals / re-entry.</p>
           </div>
           <div class="flex flex-wrap gap-2 items-center" style="flex-shrink:0">
@@ -10150,6 +10189,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('settings')">Edit in Settings</button></p>
       </div>
 
+      <div class="config-section-label">System / ops <span>Load mode + RPC footprint</span></div>
+      <div class="card">
+        <div class="section-title">System Load Mode <span class="tip" tabindex="0" data-tip="Basic runs only what is required to trade and learn. Premium adds monitoring. Full enables Zion and all background services. Trading/arming/learning stay on in every mode."></span></div>
+        <p class="text-xs text-slate-400 mb-2">Basic runs only what is required to trade and learn. Premium adds monitoring. Full enables Zion and all background services. Trading/arming/learning stay on in every mode.</p>
+        <div class="flex flex-wrap gap-2 items-center mb-2" id="system-load-mode-toggle">
+          <button type="button" class="btn btn-primary text-xs sm:text-sm" id="system-load-mode-basic" onclick="setSystemLoadMode('basic')" title="Stable trading machine — scanner, watch/arm, exits, learning">Basic</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="system-load-mode-premium" onclick="setSystemLoadMode('premium')" title="Trading fleet plus ops visibility — no Zion">Premium</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="system-load-mode-full" onclick="setSystemLoadMode('full')" title="Everything including Zion">Full</button>
+          <span class="mint self-center text-xs" id="system-load-mode-label">Basic</span>
+        </div>
+        <div class="text-xs text-slate-400 mb-2" style="line-height:1.45">
+          <div><strong style="color:#cbd5e1">Basic</strong> — trade + learn. Extra feeds, Zion, emails, and heavy backups off. RPC: Trading BACKUP / Scanner BACKUP2 / Watcher Helius / Emergency BACKUP3 idle.</div>
+          <div><strong style="color:#93c5fd">Premium</strong> — Basic plus stats, diagnostics, moderate backup. Zion still off. Two emergency keys when set.</div>
+          <div><strong style="color:#6ee7b7">Full</strong> — Zion and all optional scanners/feeds. Three emergency keys when set.</div>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <button type="button" class="btn btn-secondary text-xs" onclick="applySystemLoadModeTimers()" title="Restart optional timers without closing trades">Apply &amp; restart soft timers</button>
+          <span class="mint text-xs" id="system-load-mode-status">—</span>
+        </div>
+      </div>
+
       <div class="config-section-label">Sizing &amp; exits <span>Trade size, TP/SL, tiered profit</span></div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
@@ -10967,8 +11027,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
-          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="System Load Mode inventory: Trading (Alchemy BACKUP), Data/Scanner (BACKUP2), Watcher (Helius). Emergency BACKUP3+ stay idle until failover. Set mode on Config."></span></div>
+          <div class="toggle-row mb-2" style="display:none"><span title="Legacy share-load toggle — routing always follows System Load Mode">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" checked disabled /><span class="slider"></span></label></div>
           <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
             <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
               <span>Soft watch cap</span>
@@ -10977,18 +11037,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
-          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
+          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8">
+            <div class="mb-1"><strong style="color:#34d399">Trading → Alchemy BACKUP</strong> — entries, migration, send/exits</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Data/Scanner → Alchemy BACKUP2</strong> — Market Scanner, Alpha, bonding, metrics</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Watcher → Helius</strong> — watch/arm ticks + Favourites signature poll</div>
+            <div class="mb-1"><strong style="color:#94a3b8">Emergency</strong> — BACKUP3 (Basic) / +BACKUP4 (Premium) / +BACKUP5 (Full). Idle until failover.</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Assigned keys only</strong> — unused BACKUP slots and publics are not probed. Missing env keys skip that slot.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Trading</strong> — Entries + migration + send. Prefers <code>ALCHEMY_API_KEY_BACKUP</code>.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / bonding. Prefers <code>ALCHEMY_API_KEY_BACKUP2</code>.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility / Watcher</strong> — Setup-watch + Favourites poll. Prefers <code>HELIUS_API_KEY</code>.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before emergency. Exits stay on Trading.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -16941,6 +17002,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function loadMicroBotPerformance() {
+      const slm = normalizeSystemLoadMode(_lastConfig && _lastConfig.systemLoadMode);
+      if (slm === 'basic') {
+        const last = Number(window._mbpLastAt) || 0;
+        if (last && Date.now() - last < 30_000) return;
+        window._mbpLastAt = Date.now();
+      }
       syncMicroBotPerfWindowButtons();
       const win = window._mbpWindow || '7d';
       try {
@@ -21756,6 +21823,79 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.updateAdmissionModeUi = updateAdmissionModeUi;
+
+    const SYSTEM_LOAD_MODES = ['basic', 'premium', 'full'];
+    const SYSTEM_LOAD_LABELS = { basic: 'Basic', premium: 'Premium', full: 'Full' };
+    const SYSTEM_LOAD_TIPS = {
+      basic: 'System Load Mode: Basic — trade and learn only',
+      premium: 'System Load Mode: Premium — trade + ops visibility, Zion off',
+      full: 'System Load Mode: Full — Zion and all background services',
+    };
+    function normalizeSystemLoadMode(v) {
+      const s = String(v || '').toLowerCase();
+      return SYSTEM_LOAD_MODES.indexOf(s) >= 0 ? s : 'basic';
+    }
+    function updateSystemLoadModeUi(src) {
+      const mode = normalizeSystemLoadMode(src && src.systemLoadMode);
+      SYSTEM_LOAD_MODES.forEach(function (id) {
+        const btn = document.getElementById('system-load-mode-' + id);
+        if (!btn) return;
+        if (id === mode) {
+          btn.className = 'btn btn-primary text-xs sm:text-sm';
+        } else {
+          btn.className = 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
+        }
+      });
+      const lab = document.getElementById('system-load-mode-label');
+      if (lab) lab.textContent = SYSTEM_LOAD_LABELS[mode] || 'Basic';
+      const header = document.getElementById('header-system-load-badge');
+      const headerLabel = document.getElementById('header-system-load-label');
+      if (headerLabel) headerLabel.textContent = String(mode || 'basic').toUpperCase();
+      if (header) {
+        header.classList.remove('slm-basic', 'slm-premium', 'slm-full');
+        header.classList.add('slm-' + mode);
+        header.title = SYSTEM_LOAD_TIPS[mode] || SYSTEM_LOAD_TIPS.basic;
+        header.setAttribute('aria-label', 'System Load ' + (SYSTEM_LOAD_LABELS[mode] || 'Basic'));
+      }
+      const chip = document.getElementById('watchlist-system-load-chip');
+      if (chip) {
+        chip.classList.remove('slm-basic', 'slm-premium', 'slm-full');
+        chip.classList.add('slm-' + mode);
+        chip.textContent = String(mode || 'basic').toUpperCase();
+        chip.title = SYSTEM_LOAD_TIPS[mode] || SYSTEM_LOAD_TIPS.basic;
+      }
+    }
+    window.updateSystemLoadModeUi = updateSystemLoadModeUi;
+
+    async function setSystemLoadMode(mode, restartTimers) {
+      const st = document.getElementById('system-load-mode-status');
+      if (st) st.textContent = 'Saving…';
+      try {
+        const data = await fetchJSON('/api/config/system-load-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: normalizeSystemLoadMode(mode),
+            restartTimers: restartTimers !== false,
+          }),
+        });
+        if (_lastConfig && typeof _lastConfig === 'object') {
+          _lastConfig.systemLoadMode = data.mode;
+        }
+        updateSystemLoadModeUi({ systemLoadMode: data.mode });
+        if (st) st.textContent = (SYSTEM_LOAD_LABELS[data.mode] || data.mode) + ' saved';
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+    window.setSystemLoadMode = setSystemLoadMode;
+
+    async function applySystemLoadModeTimers() {
+      const mode = normalizeSystemLoadMode(_lastConfig && _lastConfig.systemLoadMode);
+      await setSystemLoadMode(mode, true);
+    }
+    window.applySystemLoadModeTimers = applySystemLoadModeTimers;
 
     function onFastArmProximityInput(v) {
       const n = Math.min(20, Math.max(5, Math.round(Number(v) || 12)));
@@ -27754,6 +27894,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const positionsGenAtStart = window._openPositionsGen || 0;
       try {
       const lastSnap = window._lastRefreshSnap || {};
+      const slmNow = normalizeSystemLoadMode(
+        (_lastConfig && _lastConfig.systemLoadMode) ||
+          (lastSnap.cfg && lastSnap.cfg.systemLoadMode)
+      );
+      const zionPanel = document.querySelector('[data-tab-panel="zion"]');
+      const zionTabOpen = zionPanel && !zionPanel.classList.contains('hidden');
+      const zionReq =
+        slmNow === 'full' || zionTabOpen
+          ? fetchJSON('/api/zion').catch(function () { return null; })
+          : Promise.resolve(null);
       const posReq = window._openPosFastInFlight
         ? Promise.resolve(lastSnap.positions || { open: [], closed: [] })
         : fetchJSON('/api/positions').catch(function () { return lastSnap.positions || { open: [], closed: [] }; });
@@ -27769,7 +27919,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
         fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
         fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
-        fetchJSON('/api/zion').catch(() => null),
+        zionReq,
       ]);
       const statusFailed = !statusRes || statusRes.ok === false;
       const status = (statusRes && statusRes.d) || lastSnap.status || {};
@@ -27816,6 +27966,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         if (typeof updateAdmissionModeUi === 'function') {
           updateAdmissionModeUi(cfg);
+        }
+        if (typeof updateSystemLoadModeUi === 'function') {
+          updateSystemLoadModeUi(cfg);
         }
         if (typeof updateLiveModeLearningUi === 'function') {
           updateLiveModeLearningUi(cfg.learning || null);
@@ -28286,13 +28439,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const s = rpc.secondary || {};
         const u = rpc.utility || {};
         laneSt.textContent =
-          'Critical: ' + (p.label || '—') +
+          'Trading: ' + (p.label || '—') +
           (p.failover ? ' (FAILOVER)' : '') +
             (p.healthy === false ? ' · preferred DOWN' : '') +
           ' · Scanners: ' + (s.label || '—') +
           (s.failover ? ' (FAILOVER)' : '') +
           (s.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Utility: ' + (u.label || '—') +
+          ' · Watcher: ' + (u.label || '—') +
           (u.failover ? ' (FAILOVER)' : '') +
           (u.healthy === false ? ' · preferred DOWN' : '') +
           (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
@@ -28387,7 +28540,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '</tr>';
             }).join('');
       }
-      try { paintRpcSpikeInspector(rpc); } catch (_spikePaint) {}
+      try {
+        const slmPaint = normalizeSystemLoadMode(
+          (_lastConfig && _lastConfig.systemLoadMode) ||
+            (rpc && rpc.systemLoadMode)
+        );
+        if (slmPaint !== 'basic') paintRpcSpikeInspector(rpc);
+      } catch (_spikePaint) {}
       const jito = status.jito || {};
       const mev = status.mev || {};
       const js = mev.jitoStats || {};
@@ -37288,6 +37447,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       try {
         if (typeof document !== 'undefined' && document.hidden) return;
         if (_zionChatBusy) return;
+        const slm = normalizeSystemLoadMode(_lastConfig && _lastConfig.systemLoadMode);
+        if (slm !== 'full') return;
         if (typeof loadZionAgent === 'function') loadZionAgent();
       } catch (_) {}
     }, 75_000);

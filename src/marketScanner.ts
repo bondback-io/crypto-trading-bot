@@ -1309,6 +1309,15 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
   }
 
   if (cfg.pumpStreamEnabled !== false) {
+    let pumpOk = true;
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      pumpOk = isLoadServiceEnabled('pump_stream');
+    } catch {
+      pumpOk = true;
+    }
+    if (pumpOk) {
     try {
       const { getPumpStreamLaunchEvents } =
         require('./pumpPortalStream') as typeof import('./pumpPortalStream');
@@ -1318,9 +1327,19 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
     } catch {
       /* optional */
     }
+    }
   }
 
   if (cfg.graduatingFeedEnabled !== false) {
+    let gradOk = true;
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      gradOk = isLoadServiceEnabled('graduating_feed');
+    } catch {
+      gradOk = true;
+    }
+    if (gradOk) {
     try {
       const { getGraduatingLaunchEvents, refreshGraduatingFeed } =
         require('./graduatingFeed') as typeof import('./graduatingFeed');
@@ -1331,9 +1350,19 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
     } catch {
       /* optional */
     }
+    }
   }
 
   if (cfg.heliusOnchainDiscoveryEnabled === true) {
+    let onchainOk = true;
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      onchainOk = isLoadServiceEnabled('onchain_helius');
+    } catch {
+      onchainOk = true;
+    }
+    if (onchainOk) {
     try {
       const { getRecentMigrations } =
         require('./migrationListener') as typeof import('./migrationListener');
@@ -1364,6 +1393,9 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
         );
       }
     } catch {
+      lastOnchainEventsPerMin = 0;
+    }
+    } else {
       lastOnchainEventsPerMin = 0;
     }
   } else {
@@ -2262,11 +2294,15 @@ export async function runScannerPollOnce(): Promise<number> {
       }
     }
     try {
-      const { runProfileSpecialtyFeedPass } =
-        require('./profileSpecialtyFeeds') as typeof import('./profileSpecialtyFeeds');
-      const fed = await runProfileSpecialtyFeedPass();
-      if (fed > 0) {
-        console.log(`[marketScanner] specialty feed handed ${fed} candidate(s)`);
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('specialty_feeds')) {
+        const { runProfileSpecialtyFeedPass } =
+          require('./profileSpecialtyFeeds') as typeof import('./profileSpecialtyFeeds');
+        const fed = await runProfileSpecialtyFeedPass();
+        if (fed > 0) {
+          console.log(`[marketScanner] specialty feed handed ${fed} candidate(s)`);
+        }
       }
     } catch (err) {
       if (isRpcSoftFailureError(err)) {
@@ -2280,13 +2316,17 @@ export async function runScannerPollOnce(): Promise<number> {
       }
     }
     try {
-      const { runMajorsUniversePass } =
-        require('./majorsUniverse') as typeof import('./majorsUniverse');
-      const majors = await runMajorsUniversePass();
-      if (majors > 0) {
-        console.log(
-          `[marketScanner] majors feed offered ${majors} → dip-watch`
-        );
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('majors_medium')) {
+        const { runMajorsUniversePass } =
+          require('./majorsUniverse') as typeof import('./majorsUniverse');
+        const majors = await runMajorsUniversePass();
+        if (majors > 0) {
+          console.log(
+            `[marketScanner] majors feed offered ${majors} → dip-watch`
+          );
+        }
       }
     } catch (err) {
       if (isRpcSoftFailureError(err)) {
@@ -2300,11 +2340,15 @@ export async function runScannerPollOnce(): Promise<number> {
       }
     }
     try {
-      const { runAlphaScanFeedPass } =
-        require('./alphaScanFeed') as typeof import('./alphaScanFeed');
-      const alpha = await runAlphaScanFeedPass();
-      if (alpha > 0) {
-        console.log(`[marketScanner] AlphaScan feed handed ${alpha} candidate(s)`);
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('alpha_scan')) {
+        const { runAlphaScanFeedPass } =
+          require('./alphaScanFeed') as typeof import('./alphaScanFeed');
+        const alpha = await runAlphaScanFeedPass();
+        if (alpha > 0) {
+          console.log(`[marketScanner] AlphaScan feed handed ${alpha} candidate(s)`);
+        }
       }
     } catch (err) {
       if (isRpcSoftFailureError(err)) {
@@ -2498,9 +2542,15 @@ export function startMarketScanner(): void {
   const cfg = scannerCfg();
   if (cfg.pumpStreamEnabled !== false) {
     try {
-      const { startPumpPortalStream } =
-        require('./pumpPortalStream') as typeof import('./pumpPortalStream');
-      startPumpPortalStream();
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (!isLoadServiceEnabled('pump_stream')) {
+        /* Basic: no extra pump WS */
+      } else {
+        const { startPumpPortalStream } =
+          require('./pumpPortalStream') as typeof import('./pumpPortalStream');
+        startPumpPortalStream();
+      }
     } catch {
       /* optional */
     }

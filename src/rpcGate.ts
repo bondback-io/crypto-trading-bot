@@ -64,6 +64,15 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
+/** Basic = 2 in-flight per provider; Premium = 4; Full = env defaults. */
+let loadModeMaxConcurrent: number | null = null;
+
+export function applyRpcGateLoadMode(mode: 'basic' | 'premium' | 'full'): void {
+  if (mode === 'basic') loadModeMaxConcurrent = 2;
+  else if (mode === 'premium') loadModeMaxConcurrent = 4;
+  else loadModeMaxConcurrent = null;
+}
+
 function laneLimits(role: RpcGateRole): {
   maxConcurrent: number;
   maxRps: number;
@@ -71,9 +80,11 @@ function laneLimits(role: RpcGateRole): {
   /** Non-critical wait budget before skip (ms). Critical waits longer. */
   maxWaitMs: number;
 } {
+  const cap = (n: number) =>
+    loadModeMaxConcurrent != null ? Math.min(n, loadModeMaxConcurrent) : n;
   if (role === 'primary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_PRIMARY', 8, 1, 32),
+      maxConcurrent: cap(envInt('RPC_LANE_CONCURRENCY_PRIMARY', 8, 1, 32)),
       maxRps: envInt('RPC_LANE_RPS_PRIMARY', 20, 1, 120),
       maxQueue: envInt('RPC_LANE_QUEUE_PRIMARY', 24, 0, 200),
       maxWaitMs: 8_000,
@@ -81,14 +92,14 @@ function laneLimits(role: RpcGateRole): {
   }
   if (role === 'secondary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
+      maxConcurrent: cap(envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24)),
       maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
       maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
       maxWaitMs: 3_000,
     };
   }
   return {
-    maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
+    maxConcurrent: cap(envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12)),
     maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
     maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
     maxWaitMs: 2_000,

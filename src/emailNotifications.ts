@@ -245,6 +245,13 @@ async function sendMail(opts: {
   html?: string;
   kind: NotificationKind;
 }): Promise<boolean> {
+  try {
+    const { isLoadServiceEnabled } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    if (!isLoadServiceEnabled('email_alerts')) return false;
+  } catch {
+    /* optional */
+  }
   if (!kindEnabled(opts.kind)) return false;
   if (underCooldown(opts.kind)) {
     logger.info('Notify', `Skip email (${opts.kind}) — cooldown`, {
@@ -528,6 +535,13 @@ export async function notifyZionTradeOffer(offer: {
   reasons?: string[];
   kolWallets?: Array<{ name: string; address: string }>;
 }): Promise<void> {
+  try {
+    const { isLoadServiceEnabled } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    if (!isLoadServiceEnabled('zion_offer_email')) return;
+  } catch {
+    /* optional */
+  }
   const { dashboardBaseUrl } =
     require('./zion') as typeof import('./zion');
   const label = offer.symbol || offer.name || offer.mint.slice(0, 8);

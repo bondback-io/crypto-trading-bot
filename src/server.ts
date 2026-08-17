@@ -4143,6 +4143,59 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/config/system-load-mode', (_req: Request, res: Response) => {
+    try {
+      const { parseSystemLoadMode, getLoadServiceFlags } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      const { config } = require('./config') as typeof import('./config');
+      const mode = parseSystemLoadMode(config.systemLoadMode);
+      res.json({ ok: true, mode, flags: getLoadServiceFlags(mode) });
+    } catch (err) {
+      sendApiError(res, err);
+    }
+  });
+
+  app.post('/api/config/system-load-mode', (req: Request, res: Response) => {
+    try {
+      const { isSystemLoadMode, getLoadServiceFlags } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      const { setSystemLoadMode, config } =
+        require('./config') as typeof import('./config');
+      const body = (req.body ?? {}) as {
+        mode?: unknown;
+        restartTimers?: unknown;
+      };
+      if (body.mode !== undefined && !isSystemLoadMode(body.mode)) {
+        res.status(400).json({
+          ok: false,
+          error: 'mode must be basic | premium | full',
+        });
+        return;
+      }
+      const restartTimers = body.restartTimers !== false;
+      const mode = setSystemLoadMode(
+        (body.mode as 'basic' | 'premium' | 'full') || config.systemLoadMode,
+        { restartTimers }
+      );
+      let rpc: unknown = null;
+      try {
+        const { getRpcStats } =
+          require('./connection') as typeof import('./connection');
+        rpc = getRpcStats();
+      } catch {
+        rpc = null;
+      }
+      res.json({
+        ok: true,
+        mode,
+        flags: getLoadServiceFlags(mode),
+        rpc,
+      });
+    } catch (err) {
+      sendApiError(res, err);
+    }
+  });
+
   /** Admission Baseline — v235 observe-only expectancy vs governed throttles. */
   app.get('/api/config/admission-baseline', (_req: Request, res: Response) => {
     try {
@@ -8677,7 +8730,15 @@ export function startServer(port?: number, host?: string): void {
       startGithubSiteBackupScheduler,
     } = require('./githubSiteBackup') as typeof import('./githubSiteBackup');
     ensureGithubBackupSettingsFile();
-    startGithubSiteBackupScheduler();
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('github_backup')) {
+        startGithubSiteBackupScheduler();
+      }
+    } catch {
+      startGithubSiteBackupScheduler();
+    }
   } catch (err) {
     console.warn(
       '[server] GitHub site-backup scheduler failed to start:',
@@ -8690,7 +8751,15 @@ export function startServer(port?: number, host?: string): void {
       startBotPerfEmailScheduler,
     } = require('./botPerformanceEmail') as typeof import('./botPerformanceEmail');
     ensureBotPerfEmailSettingsFile();
-    startBotPerfEmailScheduler();
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('email_botperf')) {
+        startBotPerfEmailScheduler();
+      }
+    } catch {
+      startBotPerfEmailScheduler();
+    }
   } catch (err) {
     console.warn(
       '[server] Bot performance email scheduler failed to start:',
@@ -8700,7 +8769,15 @@ export function startServer(port?: number, host?: string): void {
   try {
     const { startProfitEmailScheduler } =
       require('./profitEmail') as typeof import('./profitEmail');
-    startProfitEmailScheduler();
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('email_profit')) {
+        startProfitEmailScheduler();
+      }
+    } catch {
+      startProfitEmailScheduler();
+    }
   } catch (err) {
     console.warn(
       '[server] Profit email scheduler failed to start:',
@@ -8723,9 +8800,13 @@ export function startServer(port?: number, host?: string): void {
     console.log(`[server] Health    → http://${listenHost === '0.0.0.0' ? 'localhost' : listenHost}:${listenPort}/health`);
 
     try {
-      const { startZionSupervisionScheduler } =
-        require('./zionSupervision') as typeof import('./zionSupervision');
-      startZionSupervisionScheduler();
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('zion_supervision')) {
+        const { startZionSupervisionScheduler } =
+          require('./zionSupervision') as typeof import('./zionSupervision');
+        startZionSupervisionScheduler();
+      }
     } catch (err) {
       console.warn(
         '[zion-supervision] scheduler start failed:',
@@ -8734,10 +8815,14 @@ export function startServer(port?: number, host?: string): void {
     }
 
     try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
       const { startZionLearningScheduler, ingestBotInfoGrowthNotes } =
         require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
       ingestBotInfoGrowthNotes(false);
-      startZionLearningScheduler();
+      if (isLoadServiceEnabled('zion_self_update')) {
+        startZionLearningScheduler();
+      }
     } catch (err) {
       console.warn(
         '[zion-learning] scheduler start failed:',
@@ -8746,9 +8831,13 @@ export function startServer(port?: number, host?: string): void {
     }
 
     try {
-      const { startZionAmbientNudgeScheduler } =
-        require('./zionAmbientNudges') as typeof import('./zionAmbientNudges');
-      startZionAmbientNudgeScheduler();
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (isLoadServiceEnabled('zion_ambient')) {
+        const { startZionAmbientNudgeScheduler } =
+          require('./zionAmbientNudges') as typeof import('./zionAmbientNudges');
+        startZionAmbientNudgeScheduler();
+      }
     } catch (err) {
       console.warn(
         '[zion-nudges] scheduler start failed:',

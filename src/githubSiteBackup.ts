@@ -804,12 +804,30 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
 }
 
 async function scheduledTick(): Promise<void> {
+  try {
+    const { isLoadServiceEnabled } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    if (!isLoadServiceEnabled('github_backup')) return;
+  } catch {
+    /* optional */
+  }
   const s = loadGithubBackupSettings();
   if (s.interval === 'none') return;
   const target = resolveGithubBackupTarget(s);
   if (!target.token || !target.owner || !target.repo) return;
   const due = nextDueAtMs(s);
   if (due == null || Date.now() < due) return;
+  try {
+    const { parseSystemLoadMode } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    const { config } = require('./config') as typeof import('./config');
+    if (parseSystemLoadMode(config.systemLoadMode) === 'premium') {
+      const last = Number(s.lastUploadAtMs) || 0;
+      if (last && Date.now() - last < 12 * 60 * 60 * 1000) return;
+    }
+  } catch {
+    /* optional */
+  }
   if (uploadInFlight) return;
   try {
     await uploadSiteBackupToGithub({ reason: 'scheduled' });

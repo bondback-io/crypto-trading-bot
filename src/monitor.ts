@@ -2286,6 +2286,13 @@ export function startMonitor(): void {
     await new Promise((r) => setTimeout(r, softBoot ? 180_000 : 30_000));
     if (!running || paused) return;
     if (!config.filters.enableActivityFilter) return;
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (!isLoadServiceEnabled('monitor_activity')) return;
+    } catch {
+      /* optional */
+    }
     if (softBoot) {
       console.log(
         '[monitor] Soft RPC — skipping heavy activity refresh for all wallets ' +
@@ -2311,6 +2318,13 @@ export function startMonitor(): void {
 
   activityTimer = setInterval(() => {
     if (paused || !config.filters.enableActivityFilter) return;
+    try {
+      const { isLoadServiceEnabled } =
+        require('./systemLoadMode') as typeof import('./systemLoadMode');
+      if (!isLoadServiceEnabled('monitor_activity')) return;
+    } catch {
+      /* optional */
+    }
     // Skip activity refresh only on true public soft-throttle RPCs.
     if (isSoftThrottleRpcUrl(getRpcUrl())) {
       return;

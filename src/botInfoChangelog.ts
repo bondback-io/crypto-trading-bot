@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.421',
+    title: 'System Load Mode: Basic / Premium / Full',
+    sections: ['execution', 'knobs', 'scanners'],
+    items: [
+      'Config → System Load Mode picks the operator footprint. Basic is the stable trading machine (scanner, watch/arm, exits, learning). Premium adds ops/stats. Full turns Zion and extra feeds on. Trading never drops arming, triggering, or self-learn.',
+      'RPC roles: Trading ALCHEMY_API_KEY_BACKUP, Scanner BACKUP2, Watcher Helius. Emergency BACKUP3/4/5 stay idle until failover and are not probed. Overview and Watchlist show a BASIC/PREMIUM/FULL badge.',
+    ],
+  },
+  {
     version: '1.2.420',
     title: 'Classic Helius / Alchemy / public RPC',
     sections: ['execution', 'knobs', 'scanners'],

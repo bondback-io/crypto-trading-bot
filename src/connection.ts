@@ -33,6 +33,7 @@ import {
   getRpcGateSnapshot,
   isRpcGateSkipError,
 } from './rpcGate';
+import { guardRpcWebSocket } from './rpcWsGuard';
 
 dotenv.config();
 
@@ -47,6 +48,7 @@ export interface RpcEndpoint {
   /** Optional dedicated websocket URL */
   wsUrl?: string;
   role?: RpcLaneRole;
+  emergency?: boolean;
 }
 
 export interface RpcEndpointStats {
@@ -66,6 +68,7 @@ export interface RpcEndpointStats {
   isActive: boolean;
   /** Preferred endpoint for primary, secondary, or utility lane */
   lane?: RpcRole | null;
+  emergency?: boolean;
 }
 
 interface EndpointState {
@@ -497,6 +500,7 @@ function parseRpcList(): RpcEndpoint[] {
         label: e.label || `rpc-${i + 1}`,
         wsUrl: e.wsUrl,
         role: (e as { role?: RpcLaneRole }).role,
+        emergency: (e as { emergency?: boolean }).emergency === true,
       }))
     );
   }
@@ -523,12 +527,23 @@ function ensureEndpoints(): void {
             : 'fallback');
     return {
       endpoint: { ...endpoint, role },
-      connection: new Connection(endpoint.url, {
-        commitment: 'confirmed',
-        wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
-        disableRetryOnRateLimit: true,
-        fetch: meteredFetch(endpoint.label || `rpc`),
-      }),
+      connection: (() => {
+        const conn = new Connection(endpoint.url, {
+          commitment: 'confirmed',
+          wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
+          disableRetryOnRateLimit: true,
+          fetch: meteredFetch(endpoint.label || `rpc`),
+        });
+        try {
+          guardRpcWebSocket(conn, {
+            url: endpoint.url,
+            label: endpoint.label,
+          });
+        } catch {
+          /* optional */
+        }
+        return conn;
+      })(),
       healthy: true,
       latencyMs: null,
       lastCallLatencyMs: null,
@@ -596,6 +611,20 @@ function ensureEndpoints(): void {
         'Set a distinct RPC_SECONDARY (must differ from RPC_URL).'
     );
   }
+}
+
+/** Rebuild lane inventory after System Load Mode change (keeps health monitor). */
+export function rebuildRpcEndpoints(): void {
+  endpoints = [];
+  preferredPrimary = 0;
+  preferredSecondary = 0;
+  preferredUtility = 0;
+  preferredQuicknode = -1;
+  activePrimary = 0;
+  activeSecondary = 0;
+  activeUtility = 0;
+  activeIndex = 0;
+  ensureEndpoints();
 }
 
 function maskUrlForLog(url: string | undefined): string {
@@ -1399,6 +1428,7 @@ export function getRpcStats(): {
     downForMs: number;
   };
   shareLoad: boolean;
+  systemLoadMode: 'basic' | 'premium' | 'full';
   shareSupports: typeof RPC_SHARE_LOAD_SUPPORTS;
   failoverDownMs: number;
   /** True when primary and secondary prefer the same endpoint (Zion shares CU with copy). */
@@ -1558,6 +1588,17 @@ export function getRpcStats(): {
       downForMs: downForMs(uPref),
     },
     shareLoad,
+    systemLoadMode: (() => {
+      try {
+        const { parseSystemLoadMode } =
+          require('./systemLoadMode') as typeof import('./systemLoadMode');
+        return parseSystemLoadMode(
+          (config as { systemLoadMode?: unknown }).systemLoadMode
+        );
+      } catch {
+        return 'basic' as const;
+      }
+    })(),
     shareSupports: RPC_SHARE_LOAD_SUPPORTS,
     failoverDownMs: failoverDownMs(),
     lanesShareEndpoint: share,
@@ -1592,6 +1633,7 @@ export function getRpcStats(): {
         unhealthySince: s.unhealthySince,
         isActive: i === pIdx || i === sIdx || i === uIdx,
         lane,
+        emergency: s.endpoint.emergency === true,
       };
     }),
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
@@ -1921,64 +1963,34 @@ export function startRpcHealthMonitor(): void {
   );
   let healthCycle = 0;
 
-  /** Share load: keep public/utility hot for diagnostics; probe paid lanes sparsely. */
+  /** Share load: probe preferred/active only; emergency idle until failover. */
   function shouldProbeIndex(index: number, cycle: number): boolean {
-    if (!Boolean(config.rpc?.shareLoad)) {
-      // Non-share: never probe while quarantined (window must elapse first).
-      const st = endpoints[index];
-      if (st && isEndpointHardFailed(st)) return false;
-      return true;
-    }
     const state = endpoints[index];
     if (!state) return false;
-    // Quarantine: no probes until cooldown elapses (prevents retry storms).
     if (isEndpointHardFailed(state)) return false;
-    const isPublic = isPublicRpcUrl(state.endpoint.url);
-    const isUtil = index === preferredUtility;
-    const isPrimary = index === preferredPrimary;
-    const isSecondary =
-      index === preferredSecondary && preferredSecondary !== preferredPrimary;
-    // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
-    // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
-    if (isUtil || index === activeUtility) {
-      // Preferred Utility already soft-failed elsewhere: probe it rarely so slow
-      // Triton/rpc-url getSlot samples do not keep painting the Multi-RPC row.
-      if (
-        isUtil &&
-        index !== activeUtility &&
-        state.latencyStressedSince != null &&
-        state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
-      ) {
-        return cycle % 4 === 0;
-      }
-      if (
-        state.latencyStressedSince != null &&
-        state.latencyMs != null &&
-        state.latencyMs >= LATENCY_STRESS_MS
-      ) {
-        return cycle % 2 === 0;
-      }
-      return true;
-    }
-    if (isPublic) {
-      return cycle % 5 === 0;
-    }
-    // Helius (critical): every 3rd cycle (~135s at 45s interval)
-    if (isPrimary) return cycle % 3 === 0;
-    // Alchemy (scanners): every 2nd cycle (~90s)
-    if (isSecondary) return cycle % 2 === 0;
-    // QuickNode: rare when failing; otherwise every 4th (~180s) — avoid retry storms
-    if (
-      index === preferredQuicknode ||
-      state.endpoint.label === 'quicknode' ||
-      isQuicknodeRpcUrl(state.endpoint.url)
-    ) {
-      if (!state.healthy) return cycle % 8 === 0;
+    const isEmergency =
+      state.endpoint.emergency === true || state.role === 'fallback';
+    const isPreferred =
+      index === preferredPrimary ||
+      index === preferredSecondary ||
+      index === preferredUtility;
+    const isActive =
+      index === activePrimary ||
+      index === activeSecondary ||
+      index === activeUtility;
+    if (isEmergency && !isPreferred && !isActive) {
+      const pref = endpoints[preferredPrimary];
+      const needFailover =
+        !pref ||
+        pref.healthy === false ||
+        isEndpointRateLimited(pref) ||
+        isEndpointHardFailed(pref);
+      if (!needFailover) return false;
       return cycle % 4 === 0;
     }
-    // Inactive fallback: rare
-    return cycle % 5 === 0;
+    if (!isPreferred && !isActive) return false;
+    if (index === preferredPrimary || index === activePrimary) return true;
+    return cycle % 2 === 0;
   }
 
   // Boot: probe utility/public first, then preferred paid lanes once (not all fallbacks).
@@ -1988,15 +2000,13 @@ export function startRpcHealthMonitor(): void {
       if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
     };
     if (Boolean(config.rpc?.shareLoad)) {
-      push(preferredUtility);
-      for (let i = 0; i < endpoints.length; i++) {
-        if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) push(i);
-      }
       push(preferredPrimary);
       push(preferredSecondary);
-      push(preferredQuicknode);
+      push(preferredUtility);
     } else {
-      for (let i = 0; i < endpoints.length; i++) push(i);
+      push(preferredPrimary);
+      push(preferredSecondary);
+      push(preferredUtility);
     }
     for (const i of order) {
       await probeEndpoint(i);

@@ -2059,7 +2059,18 @@ export async function suggestConsistentScalpers(
 
 /** Warm GMGN rank cache on an interval so discovery stays fresh */
 export function startDiscoveryAutoRefresh(): void {
-  const ms = config.gmgn?.discovery?.autoRefreshMs ?? 0;
+  let ms = config.gmgn?.discovery?.autoRefreshMs ?? 0;
+  try {
+    const { isLoadServiceEnabled, parseSystemLoadMode } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    if (!isLoadServiceEnabled('gmgn_discovery')) {
+      ms = 0;
+    } else if (parseSystemLoadMode(config.systemLoadMode) === 'premium' && ms > 0) {
+      ms = Math.max(ms, 30 * 60_000);
+    }
+  } catch {
+    /* optional */
+  }
   discoveryStatus.autoRefreshMs = ms;
   if (discoveryTimer) {
     clearInterval(discoveryTimer);

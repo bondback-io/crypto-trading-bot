@@ -1,5 +1,7 @@
 /**
- * Feature → RPC lane routing for Share RPC load mode.
+ * Feature → RPC lane routing for System Load Mode inventory.
+ * Trading=primary (Alchemy BACKUP), Scanner=secondary (BACKUP2),
+ * Watcher=utility (Helius). shareLoad is ignored (always split).
  */
 
 import { runWithRpcRole, type RpcRole } from './connection';
@@ -24,25 +26,13 @@ export type RpcFeature =
 
 /**
  * Map a workload feature to an RPC lane.
- * Share OFF: mostly primary; Zion + activity + setup_watch stay secondary (legacy).
- * Share ON: critical→primary (Helius), scanners/Zion/setup→secondary (Alchemy),
- * wallet poll + import/activity→utility (public).
+ * Trading never shares a preferred key with Scanner or Watcher.
  */
 export function getRpcRoleFor(
   feature: RpcFeature,
-  shareLoad: boolean
+  _shareLoad?: boolean
 ): RpcRole {
-  if (!shareLoad) {
-    if (
-      feature === 'zion' ||
-      feature === 'activity' ||
-      feature === 'setup_watch'
-    ) {
-      return 'secondary';
-    }
-    return 'primary';
-  }
-
+  void _shareLoad;
   switch (feature) {
     case 'trade_entry':
     case 'trade_exit':
@@ -52,12 +42,12 @@ export function getRpcRoleFor(
     case 'market_scanner':
     case 'alpha_scan':
     case 'zion':
-    case 'setup_watch':
     case 'signal_safety':
     case 'anti_rug':
     case 'token_metrics':
     case 'bonding_curve':
       return 'secondary';
+    case 'setup_watch':
     case 'wallet_poll':
     case 'wallet_import':
     case 'activity':
@@ -68,16 +58,16 @@ export function getRpcRoleFor(
   }
 }
 
-/** Human labels for Config → RPC share chips. */
+/** Human labels for Stats → RPC chips. */
 export function shareLoadLaneTitle(role: RpcRole): string {
-  if (role === 'primary') return 'Critical';
+  if (role === 'primary') return 'Trading';
   if (role === 'secondary') return 'Scanners';
-  return 'Utility';
+  return 'Watcher';
 }
 
-/** Run watch/arm/trigger RPC on the classic secondary (Alchemy scanners) lane. */
+/** Run watch/arm/trigger RPC on the Watcher (Helius) lane. */
 export async function runSetupWatchLane<T>(
   fn: () => Promise<T> | T
 ): Promise<T> {
-  return runWithRpcRole('secondary', fn, 'setup_watch');
+  return runWithRpcRole('utility', fn, 'setup_watch');
 }

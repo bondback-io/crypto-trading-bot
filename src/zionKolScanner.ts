@@ -866,8 +866,18 @@ export function stopZionKolScanner(): void {
 
 /** Start or stop based on current config (no strategy toggle side effects). */
 export function syncZionKolScannerLifecycle(): void {
+  let modeOk = true;
+  try {
+    const { isLoadServiceEnabled } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    modeOk = isLoadServiceEnabled('zion_kol_scanner');
+  } catch {
+    modeOk = true;
+  }
   const want =
-    zionCfg()?.enabled === true && zionCfg().scanner?.enabled !== false;
+    modeOk &&
+    zionCfg()?.enabled === true &&
+    zionCfg().scanner?.enabled !== false;
   if (want && !running) startZionKolScanner();
   else if (!want && running) stopZionKolScanner();
   else if (want && running) {

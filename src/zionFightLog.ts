@@ -64,6 +64,13 @@ function pick(lines: string[]): string {
 }
 
 function shouldComment(): boolean {
+  try {
+    const { isLoadServiceEnabled } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    if (!isLoadServiceEnabled('zion_fight_log')) return false;
+  } catch {
+    /* optional */
+  }
   if (config.zionAgent?.fightLogCommentsEnabled === false) return false;
   if (config.zionAgent?.personalityEnabled === false) return false;
   fightsSinceComment += 1;

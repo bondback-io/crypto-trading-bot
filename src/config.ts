@@ -34,6 +34,7 @@ import {
 import { resetAllPersistedData } from './dataDir';
 import { clearDashboardStateCache } from './dashboardState';
 import { rpcEndpointsFromEnv } from './rpcUrl';
+import type { SystemLoadMode } from './systemLoadMode';
 
 export type { SmartWallet, TradingWalletSlot, TradingWalletRole };
 export { hasPersistedSettings };
@@ -1660,6 +1661,8 @@ export interface ZionConfig {
 
 export interface BotConfig {
   mode: TradingMode;
+  /** Operator footprint: Basic = trade+learn; Premium = +ops; Full = +Zion. */
+  systemLoadMode: SystemLoadMode;
   /** Overall aggression preset — drives recommended trade/filter/risk knobs */
   riskLevel: RiskLevel;
   smartWallets: SmartWallet[];
@@ -2216,6 +2219,7 @@ export interface BotConfig {
 
 export const config: BotConfig = {
   mode: 'liveSimulation',
+  systemLoadMode: 'basic',
   riskLevel: 'on',
   smartWallets: [],
   tradingWallets: [],
@@ -2741,17 +2745,7 @@ export const config: BotConfig = {
     healthIntervalMs: 12_000,
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
-    shareLoad:
-      process.env.RPC_SHARE_LOAD === '0' ||
-      process.env.RPC_SHARE_LOAD === 'false'
-        ? false
-        : process.env.RPC_SHARE_LOAD === '1' ||
-          process.env.RPC_SHARE_LOAD === 'true' ||
-          // Classic: ON when Helius + Alchemy exist (Critical / Scanners / Utility).
-          Boolean(
-            process.env.HELIUS_API_KEY?.trim() &&
-              process.env.ALCHEMY_API_KEY?.trim()
-          ),
+    shareLoad: true,
     containmentEnabled: false,
     softWatchCap:
       process.env.RPC_SOFT_WATCH_CAP != null &&
@@ -3173,7 +3167,11 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     bondingCurve: { ...config.bondingCurve },
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
-    rpcShareLoad: Boolean(config.rpc.shareLoad),
+    systemLoadMode:
+      config.systemLoadMode === 'premium' || config.systemLoadMode === 'full'
+        ? config.systemLoadMode
+        : 'basic',
+    rpcShareLoad: true,
     rpcContainmentEnabled: false,
     rpcSoftWatchCap:
       config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
@@ -3951,9 +3949,17 @@ function applySettingsSnapshot(
   if (typeof saved.pollIntervalMs === 'number') {
     config.pollIntervalMs = saved.pollIntervalMs;
   }
-  if (typeof saved.rpcShareLoad === 'boolean') {
-    config.rpc.shareLoad = saved.rpcShareLoad;
+  if (
+    saved.systemLoadMode === 'premium' ||
+    saved.systemLoadMode === 'full' ||
+    saved.systemLoadMode === 'basic'
+  ) {
+    config.systemLoadMode = saved.systemLoadMode;
+  } else {
+    config.systemLoadMode = 'basic';
   }
+  config.rpc.shareLoad = true;
+  config.rpc.endpoints = rpcEndpointsFromEnv();
   // Containment stays OFF after classic restore (no spike soft-pause control plane).
   config.rpc.containmentEnabled = false;
   if (typeof saved.rpcHeliusExtraFallbackEnabled === 'boolean') {
@@ -5681,6 +5687,17 @@ export function initWallets(): void {
 
   initTradingWallets();
   applyPersistedSettings();
+  try {
+    const { applyRpcGateLoadMode } =
+      require('./rpcGate') as typeof import('./rpcGate');
+    applyRpcGateLoadMode(
+      config.systemLoadMode === 'premium' || config.systemLoadMode === 'full'
+        ? config.systemLoadMode
+        : 'basic'
+    );
+  } catch {
+    /* optional */
+  }
   // Ship baked strategy module + Trade Profile defaults on first boot / when
   // defaultsId changes in src/defaults/strategyModulesDefault.json (new deploy).
   try {
@@ -6011,16 +6028,10 @@ export function updateConfig(partial: Partial<BotConfig>): void {
 }
 
 /** Enable/disable Share RPC load mode (Helius/Alchemy/public workload split). */
-export function setRpcShareLoad(enabled: boolean): boolean {
-  config.rpc.shareLoad = Boolean(enabled);
+export function setRpcShareLoad(_enabled: boolean): boolean {
+  config.rpc.shareLoad = true;
   persistUserSettings();
-  console.log(
-    `[rpc] Share RPC load ${config.rpc.shareLoad ? 'ON' : 'OFF'} — ` +
-      (config.rpc.shareLoad
-        ? 'critical→Helius, scanners/Zion→Alchemy, wallet-watch+utility→public'
-        : 'legacy primary/secondary routing')
-  );
-  return config.rpc.shareLoad;
+  return true;
 }
 
 /** Spike containment disabled on classic restore (always OFF). */
@@ -6029,6 +6040,19 @@ export function setRpcContainmentEnabled(_enabled: boolean): boolean {
   persistUserSettings();
   console.log('[rpc] Containment stays OFF — classic three-lane restore');
   return false;
+}
+
+export function setSystemLoadMode(
+  mode: SystemLoadMode,
+  opts?: { restartTimers?: boolean }
+): SystemLoadMode {
+  const { parseSystemLoadMode, applySystemLoadMode } =
+    require('./systemLoadMode') as typeof import('./systemLoadMode');
+  config.systemLoadMode = parseSystemLoadMode(mode);
+  config.rpc.shareLoad = true;
+  persistUserSettings();
+  applySystemLoadMode({ restartTimers: opts?.restartTimers !== false });
+  return config.systemLoadMode;
 }
 
 export function setHeliusExtraFallback(
@@ -6705,6 +6729,10 @@ export function randomTakeProfitPct(): number {
 export function getConfigSnapshot() {
   return {
     mode: config.mode,
+    systemLoadMode:
+      config.systemLoadMode === 'premium' || config.systemLoadMode === 'full'
+        ? config.systemLoadMode
+        : 'basic',
     riskLevel: normalizeRiskLevel(config.riskLevel),
     riskLevelSummary: getRiskLevelSummary(),
     trade: { ...config.trade },
@@ -6834,7 +6862,7 @@ export function getConfigSnapshot() {
       jitoEnabled: config.rpc.jito.enabled,
       healthIntervalMs: config.rpc.healthIntervalMs,
       failoverDownMs: config.rpc.failoverDownMs,
-      shareLoad: Boolean(config.rpc.shareLoad),
+      shareLoad: true,
       containmentEnabled: false,
       heliusExtraFallbackEnabled: Boolean(
         config.rpc.heliusExtraFallbackEnabled

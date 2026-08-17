@@ -787,6 +787,15 @@ export function influencerMirrorPrereqsOk(): {
   smartMoneyCopy?: boolean;
   smartMoneyMirror?: boolean;
 } {
+  try {
+    const { isLoadServiceEnabled } =
+      require('./systemLoadMode') as typeof import('./systemLoadMode');
+    if (!isLoadServiceEnabled('influencer_mirror')) {
+      return { ok: false, reason: 'system load mode' };
+    }
+  } catch {
+    /* optional */
+  }
   let smartMoneyCopy = true;
   let smartMoneyMirror = true;
   try {
