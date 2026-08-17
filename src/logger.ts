@@ -155,8 +155,9 @@ function consoleMirror(entry: LogEntry): void {
     if (extra) console.error(prefix, extra);
     else console.error(prefix);
   } else if (entry.level === 'warn') {
-    if (extra) console.warn(prefix, extra);
-    else console.warn(prefix);
+    // stdout — Node console.warn is stderr and Render tags it as level:error
+    if (extra) console.log(prefix, extra);
+    else console.log(prefix);
   } else {
     if (extra) console.log(prefix, extra);
     else console.log(prefix);

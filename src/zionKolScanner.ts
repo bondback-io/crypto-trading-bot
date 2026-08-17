@@ -119,15 +119,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRpcRateLimitError(err: unknown): boolean {
-  const msg =
-    err instanceof Error
-      ? `${err.message} ${err.name}`
-      : String(err ?? '');
-  return (
-    /\b429\b/i.test(msg) ||
-    /too many requests/i.test(msg) ||
-    /rate.?limit/i.test(msg)
-  );
+  return isRpcSoftFailureError(err);
 }
 
 function noteRpcRateLimit(err: unknown): void {
@@ -135,12 +127,7 @@ function noteRpcRateLimit(err: unknown): void {
   rpcCooldownUntil = now + rpcCooldownMs;
   throttleBatchAfter429 = true;
   lastError = err instanceof Error ? err.message : String(err);
-  logger.warn(
-    'ZionScanner',
-    `RPC 429 — cooling down ${Math.round(rpcCooldownMs / 1000)}s ` +
-      `(sharedLane=${lanesShareEndpoint()}, nextBatch=throttled)`,
-    errorToMeta(err)
-  );
+  logSoftRpcFailure('ZionScanner', err);
   rpcCooldownMs = Math.min(RPC_COOLDOWN_MAX_MS, Math.max(rpcCooldownMs * 2, RPC_COOLDOWN_MIN_MS));
 }
 
@@ -465,7 +452,7 @@ async function pollUniverseBatch(): Promise<number> {
       }
       if (lastOk) lastSignature.set(wallet.address, lastOk);
     } catch (err) {
-      if (isRpcRateLimitError(err)) {
+      if (isRpcRateLimitError(err) || isRpcSoftFailureError(err)) {
         noteRpcRateLimit(err);
         // Abort rest of batch — further parses would only burn more CU
         break;
@@ -775,8 +762,7 @@ export async function runZionScannerPollOnce(): Promise<void> {
     }
   } catch (err) {
     if (isRpcRateLimitError(err) || isRpcSoftFailureError(err)) {
-      if (isRpcRateLimitError(err)) noteRpcRateLimit(err);
-      else logSoftRpcFailure('ZionScanner', err);
+      noteRpcRateLimit(err);
     } else {
       lastError = err instanceof Error ? err.message : String(err);
       logger.warn('ZionScanner', 'Poll failed', errorToMeta(err));

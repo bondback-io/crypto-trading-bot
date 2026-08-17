@@ -161,7 +161,7 @@ function noteMigrationBusySkip(err: unknown): void {
   const msg = err instanceof Error ? err.message : String(err);
   // stdout so Render level:error filters do not treat this as an error
   console.log(
-    `[migration] poll skipped (lane busy) — retrying on scanners/watchers, not an error (${msg.slice(0, 120)})`
+    `[migration] poll skipped (lane busy) — retrying on scanners/watchers, expected skip (${msg.slice(0, 120)})`
   );
 }
 

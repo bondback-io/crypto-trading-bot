@@ -2098,10 +2098,14 @@ export function handOffScannerCandidate(
         skipReason: err instanceof Error ? err.message : 'handler error',
       });
       markScannerCooldown(c.mint, false);
-      logger.warn('MarketScanner', 'Candidate handler failed', {
-        mint: c.mint,
-        ...errorToMeta(err),
-      });
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn('MarketScanner', 'Candidate handler failed', {
+          mint: c.mint,
+          ...errorToMeta(err),
+        });
+      }
     });
   return true;
 }
@@ -2217,10 +2221,14 @@ export async function runScannerPollOnce(): Promise<number> {
             skipReason: err instanceof Error ? err.message : 'handler error',
           });
           markScannerCooldown(c.mint, false);
-          logger.warn('MarketScanner', 'Candidate handler failed', {
-            mint: c.mint,
-            ...errorToMeta(err),
-          });
+          if (isRpcSoftFailureError(err)) {
+            logSoftRpcFailure('MarketScanner', err);
+          } else {
+            logger.warn('MarketScanner', 'Candidate handler failed', {
+              mint: c.mint,
+              ...errorToMeta(err),
+            });
+          }
         });
     }
     lastPollAt = Date.now();
@@ -2242,11 +2250,15 @@ export async function runScannerPollOnce(): Promise<number> {
           );
         }
       } catch (err) {
-        logger.warn(
-          'MarketScanner',
-          'Grad watch curve-first pass failed',
-          errorToMeta(err)
-        );
+        if (isRpcSoftFailureError(err)) {
+          logSoftRpcFailure('MarketScanner', err);
+        } else {
+          logger.warn(
+            'MarketScanner',
+            'Grad watch curve-first pass failed',
+            errorToMeta(err)
+          );
+        }
       }
     }
     try {
@@ -2257,11 +2269,15 @@ export async function runScannerPollOnce(): Promise<number> {
         console.log(`[marketScanner] specialty feed handed ${fed} candidate(s)`);
       }
     } catch (err) {
-      logger.warn(
-        'MarketScanner',
-        'Specialty feed pass failed',
-        errorToMeta(err)
-      );
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn(
+          'MarketScanner',
+          'Specialty feed pass failed',
+          errorToMeta(err)
+        );
+      }
     }
     try {
       const { runMajorsUniversePass } =
@@ -2273,11 +2289,15 @@ export async function runScannerPollOnce(): Promise<number> {
         );
       }
     } catch (err) {
-      logger.warn(
-        'MarketScanner',
-        'Majors universe pass failed',
-        errorToMeta(err)
-      );
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn(
+          'MarketScanner',
+          'Majors universe pass failed',
+          errorToMeta(err)
+        );
+      }
     }
     try {
       const { runAlphaScanFeedPass } =
@@ -2287,11 +2307,15 @@ export async function runScannerPollOnce(): Promise<number> {
         console.log(`[marketScanner] AlphaScan feed handed ${alpha} candidate(s)`);
       }
     } catch (err) {
-      logger.warn(
-        'MarketScanner',
-        'AlphaScan feed pass failed',
-        errorToMeta(err)
-      );
+      if (isRpcSoftFailureError(err)) {
+        logSoftRpcFailure('MarketScanner', err);
+      } else {
+        logger.warn(
+          'MarketScanner',
+          'AlphaScan feed pass failed',
+          errorToMeta(err)
+        );
+      }
     }
     try {
       const {

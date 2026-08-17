@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.405',
+    title: 'Render level:error no longer treats soft warns as errors',
+    sections: ['execution', 'scanners'],
+    items: [
+      'logger.warn mirrors to stdout so Render level:error only shows true logger.error (exit/send hard fails). Zion 429 cooldown and remaining MarketScanner soft catches no longer dump errorToMeta stacks; migration busy skip wording avoids the word error.',
+    ],
+  },
+  {
     version: '1.2.404',
     title: 'Scanner soft 429 no longer dumps stacks to Render',
     sections: ['execution', 'scanners'],

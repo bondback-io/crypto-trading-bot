@@ -150,6 +150,8 @@ check(
   'migration busy skip uses console.log (stdout)',
   /console\.log\(/.test(mig) &&
     /poll skipped \(lane busy\)/.test(mig) &&
+    /expected skip/.test(mig) &&
+    !/not an error/.test(mig) &&
     !/console\.warn\(\s*\n?\s*`\[migration\] poll skipped/.test(mig)
 );
 check(
@@ -257,6 +259,37 @@ check(
   'errorToMeta optional stack:false',
   /opts\?: \{ stack\?: boolean \}/.test(loggerSrc) &&
     /withStack = opts\?\.stack !== false/.test(loggerSrc)
+);
+check(
+  'logger.warn mirrors to console.log stdout',
+  /entry\.level === 'warn'/.test(loggerSrc) &&
+    /\/\/ stdout — Node console\.warn is stderr/.test(loggerSrc) &&
+    /if \(extra\) console\.log\(prefix, extra\);/.test(loggerSrc) &&
+    !/entry\.level === 'warn'[\s\S]{0,120}console\.warn\(prefix/.test(loggerSrc)
+);
+
+check(
+  'MarketScanner soft-catches Candidate handler failed',
+  /Candidate handler failed[\s\S]{0,200}isRpcSoftFailureError\(err\)/.test(
+    scanner
+  ) ||
+    /isRpcSoftFailureError\(err\)[\s\S]{0,120}Candidate handler failed/.test(
+      scanner
+    )
+);
+
+check(
+  'Zion noteRpcRateLimit uses logSoftRpcFailure not errorToMeta',
+  /function noteRpcRateLimit[\s\S]{0,400}logSoftRpcFailure\('ZionScanner'/.test(
+    zion
+  ) &&
+    !/function noteRpcRateLimit[\s\S]{0,500}errorToMeta\(err\)/.test(zion)
+);
+check(
+  'Zion isRpcRateLimitError delegates to soft failure',
+  /function isRpcRateLimitError[\s\S]{0,80}isRpcSoftFailureError\(err\)/.test(
+    zion
+  )
 );
 
 const rpcUrl = readSrc('src/rpcUrl.ts');
