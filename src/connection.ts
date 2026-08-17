@@ -69,6 +69,8 @@ import {
 import {
   exclusiveServiceForFeature,
   RPC_EMERGENCY_LABELS,
+  RPC_EXCLUSIVE_SERVICES,
+  RPC_EMERGENCY_SERVICES,
 } from './rpcServiceMap';
 
 const softRpcFailLog = new QuietLogGate(60_000);
@@ -105,6 +107,9 @@ export interface RpcEndpointStats {
   isActive: boolean;
   /** Preferred endpoint for primary, secondary, or utility lane */
   lane?: RpcRole | null;
+  serviceTitle?: string | null;
+  intensity?: string | null;
+  exclusive?: boolean;
 }
 
 interface EndpointState {
@@ -1777,6 +1782,31 @@ export function getRpcStats(): {
     downForMs: number;
     configured: boolean;
   };
+  exclusiveServices: Array<{
+    service: string;
+    title: string;
+    intensity: 'high' | 'med' | 'low';
+    exclusive: true;
+    envKey: string;
+    label: string;
+    gateRole: string;
+    blurb: string;
+    configured: boolean;
+    healthy: boolean;
+    latencyMs: number | null;
+    cooling: boolean;
+  }>;
+  emergencyFallbacks: Array<{
+    title: string;
+    intensity: 'emergency';
+    exclusive: false;
+    envKey: string;
+    label: string;
+    blurb: string;
+    configured: boolean;
+    healthy: boolean;
+    latencyMs: number | null;
+  }>;
   shareLoad: boolean;
   heliusExtraFallbackEnabled: boolean;
   heliusExtraFallbackTarget: 'backup2' | 'public';
@@ -1813,18 +1843,19 @@ export function getRpcStats(): {
   spikeInspector: ReturnType<typeof getSpikeInspectorSnapshot> | null;
 } {
   ensureEndpoints();
-  const pIdx = resolveIndexForRole('primary');
-  const sIdx = resolveIndexForRole('secondary');
-  const uIdx = resolveIndexForRole('utility');
-  const wIdx = resolveIndexForRole('watchers');
+  // Preferred sticky indices — do NOT resolveIndex without a feature (ungated → utility_light).
   const pPref = endpoints[preferredPrimary];
   const sPref = endpoints[preferredSecondary];
   const uPref = endpoints[preferredUtility];
   const wPref = endpoints[preferredWatchers];
-  const pActive = endpoints[pIdx];
-  const sActive = endpoints[sIdx];
-  const uActive = endpoints[uIdx];
-  const wActive = endpoints[wIdx];
+  const pActive = pPref;
+  const sActive = sPref;
+  const uActive = uPref;
+  const wActive = wPref;
+  const pIdx = preferredPrimary;
+  const sIdx = preferredSecondary;
+  const uIdx = preferredUtility;
+  const wIdx = preferredWatchers;
   const anyHealthy = endpoints.some(
     (e) => e.healthy && !isEndpointRateLimited(e)
   );
@@ -1833,32 +1864,24 @@ export function getRpcStats(): {
   let warning: string | null = null;
   if (!anyHealthy) {
     warning =
-      'All RPC endpoints unhealthy â€” wallet buy detection is paused until RPC recovers. ' +
-      'Set a real Helius/QuickNode RPC_URL on Render (not a placeholder).';
+      'All RPC endpoints unhealthy — wallet buy detection is paused until RPC recovers. ' +
+      'Set exclusive Alchemy/Helius keys on Render (plus RPC_URL / PUBLICNODE_URL emergency).';
   } else if (
     /mainnet-beta\.solana\.com|publicnode\.com/i.test(pActive?.endpoint.url || '')
   ) {
     warning =
-      'Using a public Solana RPC on the primary lane â€” fine for paper, but rate limits can miss buys. Set HELIUS_API_KEY (+ ALCHEMY_API_KEY) for free faster failover.';
-  } else if (pIdx !== preferredPrimary) {
-    warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
-  } else if (
-    preferredSecondary !== preferredPrimary &&
-    sIdx !== preferredSecondary
-  ) {
-    warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
+      'Trading preferred is on a public RPC — set ALCHEMY_API_KEY for exclusive Trading Critical.';
   } else if (share) {
     warning =
-      'Primary and secondary resolve to the same RPC â€” Zion KOL shares CU with copy/signals. Set a distinct RPC_SECONDARY.';
+      'Multiple services resolve to the same preferred URL — check exclusive env keys are distinct.';
   }
 
   const gate = getRpcGateSnapshot();
   if (!warning && gate.stressed) {
     warning =
-      'RPC lane gate stressed â€” background work is being queued/skipped to protect Critical. ' +
+      'RPC lane gate stressed — background work is being queued/skipped to protect Trading. ' +
       `Utility queue ${gate.lanes.utility.queued}, skipped ${gate.lanes.utility.skipped}.`;
   }
-  // Lifetime skip counter is diagnostic only â€” do not warn/slow from it.
 
   const quarantine = endpoints
     .filter((e) => isEndpointHardFailed(e))
@@ -1882,12 +1905,11 @@ export function getRpcStats(): {
       secondaryLatencyMs: sActive?.latencyMs ?? null,
       utilityLatencyMs: uActive?.latencyMs ?? null,
       utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
-      utilityFailover: uIdx !== preferredUtility,
+      utilityFailover: false,
       primaryQueued: gate.lanes.primary.queued,
       secondaryIdle:
         gate.lanes.secondary.inFlight === 0 &&
         gate.lanes.secondary.queued === 0,
-      // Do NOT pass lifetime gate.skipped â€” it never resets and locked adaptive Ã—3.
     });
     loadControl = getRpcLoadControlSnapshot();
     if (
@@ -1897,7 +1919,7 @@ export function getRpcStats(): {
       loadControl.secondarySkipsRecent >= 6
     ) {
       warning =
-        `Scanners lane high skips (${loadControl.secondarySkipsRecent}/60s) â€” Market/Alpha/Zion auto-slowed.`;
+        `Scanners lane high skips (${loadControl.secondarySkipsRecent}/60s) — Market/Alpha/Zion auto-slowed.`;
     }
   } catch {
     /* */
@@ -1920,46 +1942,82 @@ export function getRpcStats(): {
     }
   };
 
+  const exclusiveServices = RPC_EXCLUSIVE_SERVICES.map((svc) => {
+    const idx = endpoints.findIndex((e) => e.endpoint.label === svc.label);
+    const ep = idx >= 0 ? endpoints[idx] : null;
+    return {
+      service: svc.service,
+      title: svc.title,
+      intensity: svc.intensity,
+      exclusive: true as const,
+      envKey: svc.envKey,
+      label: svc.label,
+      gateRole: svc.gateRole,
+      blurb: svc.blurb,
+      configured: idx >= 0,
+      healthy: Boolean(ep?.healthy && !isEndpointRateLimited(ep)),
+      latencyMs: ep?.latencyMs ?? null,
+      cooling: Boolean(
+        ep &&
+          isAlchemyRpcUrl(ep.endpoint.url) &&
+          shouldSkipAlchemyRpc(svc.service, ep.endpoint.url)
+      ),
+    };
+  });
+
+  const emergencyFallbacks = RPC_EMERGENCY_SERVICES.map((svc) => {
+    const idx = endpoints.findIndex((e) => e.endpoint.label === svc.label);
+    const ep = idx >= 0 ? endpoints[idx] : null;
+    return {
+      title: svc.title,
+      intensity: svc.intensity,
+      exclusive: false as const,
+      envKey: svc.envKey,
+      label: svc.label,
+      blurb: svc.blurb,
+      configured: idx >= 0,
+      healthy: Boolean(ep?.healthy && !isEndpointRateLimited(ep)),
+      latencyMs: ep?.latencyMs ?? null,
+    };
+  });
+
   const stats = {
-    active: getActiveEndpointLabel('primary'),
-    activeUrl: maskUrl(getRpcUrl('primary')),
+    active: pPref?.endpoint.label || '—',
+    activeUrl: maskUrl(pPref?.endpoint.url || ''),
     primary: {
-      label: pActive?.endpoint.label || 'primary',
-      url: maskUrl(pActive?.endpoint.url || ''),
+      label: pPref?.endpoint.label || 'alchemy',
+      url: maskUrl(pPref?.endpoint.url || ''),
       healthy: Boolean(pPref?.healthy),
-      failover: pIdx !== preferredPrimary,
+      failover: false,
       downForMs: downForMs(pPref),
     },
     secondary: {
-      label: sActive?.endpoint.label || 'secondary',
-      url: maskUrl(sActive?.endpoint.url || ''),
+      label: sPref?.endpoint.label || 'alchemy-backup3',
+      url: maskUrl(sPref?.endpoint.url || ''),
       healthy: Boolean(sPref?.healthy),
-      failover: sIdx !== preferredSecondary,
+      failover: false,
       downForMs: downForMs(sPref),
     },
     utility: {
-      label: uActive?.endpoint.label || 'utility',
-      url: maskUrl(uActive?.endpoint.url || ''),
+      label: uPref?.endpoint.label || 'alchemy-backup',
+      url: maskUrl(uPref?.endpoint.url || ''),
       healthy: Boolean(uPref?.healthy),
-      failover: uIdx !== preferredUtility,
+      failover: false,
       downForMs: downForMs(uPref),
     },
     watchers: {
-      label: wActive?.endpoint.label || 'watchers',
-      url: maskUrl(wActive?.endpoint.url || ''),
+      label: wPref?.endpoint.label || 'alchemy-backup2',
+      url: maskUrl(wPref?.endpoint.url || ''),
       healthy: Boolean(wPref?.healthy),
-      failover: wIdx !== preferredWatchers,
+      failover: false,
       downForMs: downForMs(wPref),
-      configured: preferredWatchers !== preferredUtility ||
-        Boolean(endpoints[preferredWatchers]?.endpoint.label === 'alchemy-backup'),
+      configured: preferredWatchers >= 0,
     },
+    exclusiveServices,
+    emergencyFallbacks,
     shareLoad,
-    heliusExtraFallbackEnabled:
-      config.rpc?.heliusExtraFallbackEnabled === true,
-    heliusExtraFallbackTarget: (config.rpc?.heliusExtraFallbackTarget ===
-    'public'
-      ? 'public'
-      : 'backup2') as 'backup2' | 'public',
+    heliusExtraFallbackEnabled: false,
+    heliusExtraFallbackTarget: 'backup2' as const,
     alchemyPace: getAlchemyPaceStatus(),
     shareSupports: RPC_SHARE_LOAD_SUPPORTS,
     failoverDownMs: failoverDownMs(),
@@ -1967,30 +2025,27 @@ export function getRpcStats(): {
     supports: RPC_LANE_SUPPORTS,
     endpoints: endpoints.map((s, i) => {
       const total = s.successCount + s.failureCount;
-      let lane: RpcRole | null = null;
-      if (i === preferredPrimary) lane = 'primary';
-      else if (
-        i === preferredSecondary &&
-        preferredSecondary !== preferredPrimary
-      )
-        lane = 'secondary';
-      else if (
-        i === preferredUtility &&
-        preferredUtility !== preferredPrimary &&
-        preferredUtility !== preferredSecondary
-      )
-        lane = 'utility';
-      else if (
-        i === preferredWatchers &&
-        preferredWatchers !== preferredPrimary &&
-        preferredWatchers !== preferredSecondary &&
-        preferredWatchers !== preferredUtility
-      )
-        lane = 'watchers';
+      const svc = RPC_EXCLUSIVE_SERVICES.find(
+        (x) => x.label === s.endpoint.label
+      );
+      const emerg = RPC_EMERGENCY_SERVICES.find(
+        (x) => x.label === s.endpoint.label
+      );
+      let lane: RpcRole | null = svc?.gateRole ?? null;
+      if (!lane && emerg) lane = null;
+      else if (!lane) {
+        if (i === preferredPrimary) lane = 'primary';
+        else if (i === preferredSecondary) lane = 'secondary';
+        else if (i === preferredUtility) lane = 'utility';
+        else if (i === preferredWatchers) lane = 'watchers';
+      }
       return {
         url: maskUrl(s.endpoint.url),
         label: s.endpoint.label,
         role: s.role,
+        serviceTitle: svc?.title || emerg?.title || null,
+        intensity: svc?.intensity || emerg?.intensity || null,
+        exclusive: Boolean(svc?.exclusive),
         healthy: s.healthy,
         latencyMs: s.latencyMs,
         lastCallLatencyMs: s.lastCallLatencyMs,

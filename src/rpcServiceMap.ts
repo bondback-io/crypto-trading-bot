@@ -24,6 +24,11 @@ export type RpcExclusiveServiceDef = {
   /** Gate lane for concurrency (legacy 4-lane gate) */
   gateRole: 'primary' | 'secondary' | 'utility' | 'watchers';
   title: string;
+  /** Relative CU pressure */
+  intensity: 'high' | 'med' | 'low';
+  /** Preferred key is never shared with another service */
+  exclusive: true;
+  blurb: string;
 };
 
 /** Locked Render assignment — one preferred key per service. */
@@ -34,6 +39,9 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'ALCHEMY_API_KEY',
     gateRole: 'primary',
     title: 'Trading Critical + MEV',
+    intensity: 'high',
+    exclusive: true,
+    blurb: 'Buys, sells, confirms, sandwich check',
   },
   {
     service: 'favourites_watch',
@@ -41,6 +49,9 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'ALCHEMY_API_KEY_BACKUP',
     gateRole: 'utility',
     title: 'Favourites soft-watch',
+    intensity: 'high',
+    exclusive: true,
+    blurb: 'Wallet signature poll → copy signals',
   },
   {
     service: 'setup_watch',
@@ -48,6 +59,9 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'ALCHEMY_API_KEY_BACKUP2',
     gateRole: 'watchers',
     title: 'Setup watches',
+    intensity: 'high',
+    exclusive: true,
+    blurb: 'Dip / Trend / Scalper / Grad arm + trigger',
   },
   {
     service: 'market_scanner',
@@ -55,6 +69,9 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'ALCHEMY_API_KEY_BACKUP3',
     gateRole: 'secondary',
     title: 'Market Scanner',
+    intensity: 'high',
+    exclusive: true,
+    blurb: 'Universe + bonding-curve enrich',
   },
   {
     service: 'zion',
@@ -62,6 +79,9 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'ALCHEMY_API_KEY_BACKUP4',
     gateRole: 'secondary',
     title: 'Zion KOL Scanner',
+    intensity: 'med',
+    exclusive: true,
+    blurb: 'KOL signature rotate + parse buys',
   },
   {
     service: 'migration',
@@ -69,6 +89,9 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'ALCHEMY_API_KEY_BACKUP5',
     gateRole: 'secondary',
     title: 'Migration listener',
+    intensity: 'med',
+    exclusive: true,
+    blurb: 'Program sig polls / graduation parses',
   },
   {
     service: 'alpha_scan',
@@ -76,13 +99,19 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'ALCHEMY_API_KEY_BACKUP6',
     gateRole: 'secondary',
     title: 'AlphaScan',
+    intensity: 'med',
+    exclusive: true,
+    blurb: 'Jupiter recent + curve enrich',
   },
   {
     service: 'signal_safety',
     label: 'alchemy-backup7',
     envKey: 'ALCHEMY_API_KEY_BACKUP7',
     gateRole: 'secondary',
-    title: 'Signal safety (anti-rug / holders)',
+    title: 'Signal safety',
+    intensity: 'med',
+    exclusive: true,
+    blurb: 'Anti-rug / holders / on-chain metrics',
   },
   {
     service: 'activity',
@@ -90,6 +119,9 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'HELIUS_API_KEY',
     gateRole: 'utility',
     title: 'Activity refresh',
+    intensity: 'med',
+    exclusive: true,
+    blurb: 'Periodic wallet activity (not soft-watch)',
   },
   {
     service: 'utility_light',
@@ -97,6 +129,28 @@ export const RPC_EXCLUSIVE_SERVICES: readonly RpcExclusiveServiceDef[] = [
     envKey: 'HELIUS_API_KEY_BACKUP',
     gateRole: 'utility',
     title: 'Utility light',
+    intensity: 'low',
+    exclusive: true,
+    blurb: 'Health probes, priority fees, ungated reads',
+  },
+] as const;
+
+export const RPC_EMERGENCY_SERVICES = [
+  {
+    label: 'rpc-url',
+    envKey: 'RPC_URL',
+    title: 'Emergency RPC_URL',
+    intensity: 'emergency' as const,
+    exclusive: false,
+    blurb: 'Last-resort failover only — never preferred',
+  },
+  {
+    label: 'publicnode',
+    envKey: 'PUBLICNODE_URL',
+    title: 'Emergency PUBLICNODE',
+    intensity: 'emergency' as const,
+    exclusive: false,
+    blurb: 'Last-resort public failover after RPC_URL',
   },
 ] as const;
 

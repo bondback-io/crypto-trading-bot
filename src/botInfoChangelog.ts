@@ -43,6 +43,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.408',
+    title: 'RPC Status page shows exclusive 10-key map',
+    sections: ['execution', 'knobs'],
+    items: [
+      'Bot Perf → RPC lists each exclusive service with intensity, preferred env key, exclusive badge, and health. Emergency RPC_URL / PUBLICNODE rows are separate. Removed obsolete Helius extra-fallback controls (failover is emergency publics only).',
+    ],
+  },
+  {
     version: '1.2.407',
     title: 'Exclusive RPC key per major service',
     sections: ['execution', 'scanners'],

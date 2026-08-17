@@ -10967,49 +10967,61 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="botperf-panel space-y-4" id="botperf-panel-rpc" data-botperf-panel="rpc" role="tabpanel" aria-labelledby="botperf-tab-rpc">
         <div class="card">
-          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
-          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
-          <div class="toggle-row mb-2"><span title="When ON, Watchers spikes shed enrich and Trading spikes pause new entries only. Exits stay on Critical. Detect/record still run when OFF.">RPC containment</span><label class="switch"><input type="checkbox" id="rpc-containment" onchange="toggleRpcContainment(this.checked)" /><span class="slider"></span></label></div>
-          <div class="toggle-row mb-2"><span title="Extra Critical failover after Helius → Alchemy (scanners) → QuickNode. OFF by default. Does not probe BACKUP2 until Helius is actually failing.">Helius extra fallback</span><label class="switch"><input type="checkbox" id="rpc-helius-extra" onchange="toggleHeliusExtraFallback(this.checked)" /><span class="slider"></span></label></div>
-          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
-            <label class="ctl ctl-md" title="BACKUP2 preferred for live. Public is paper/emergency only (rate limits miss buys).">
-              <span>Extra fallback target</span>
-              <select id="rpc-helius-extra-target" onchange="toggleHeliusExtraFallback(document.getElementById('rpc-helius-extra').checked)">
-                <option value="backup2">ALCHEMY_API_KEY_BACKUP2</option>
-                <option value="public">Public RPC (paper/emergency)</option>
-              </select>
-            </label>
-            <span class="mint text-xs" id="rpc-helius-extra-status">OFF — lane map unchanged</span>
-          </div>
-          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
-            <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
+          <div class="section-title">RPC Status <span class="tip" tabindex="0" data-tip="Ten exclusive preferred keys (one service each). Emergency failover is RPC_URL → PUBLICNODE_URL only — never another service’s key."></span></div>
+          <div class="toggle-row mb-2"><span title="Keep ON for exclusive multi-key routing (recommended on Render)">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="toggle-row mb-2"><span title="When ON, Watchers spikes shed enrich and Trading spikes pause new entries only. Exits stay on Trading exclusive key.">RPC containment</span><label class="switch"><input type="checkbox" id="rpc-containment" onchange="toggleRpcContainment(this.checked)" /><span class="slider"></span></label></div>
+          <div class="filters-row mb-3" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-sm" title="Max Favourites wallets on soft-watch (ALCHEMY_API_KEY_BACKUP). 0 = pause. Default 12.">
               <span>Soft watch cap</span>
               <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
             </label>
             <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
             <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
           </div>
-          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Trading → ALCHEMY_API_KEY</strong> — buys/sells/MEV (exclusive)</div>
-            <div class="mb-1"><strong style="color:#38bdf8">Scanners (exclusive each)</strong> — BACKUP3 Market · BACKUP4 Zion · BACKUP5 Migration · BACKUP6 Alpha · BACKUP7 anti-rug</div>
-            <div class="mb-1"><strong style="color:#a78bfa">Watchers → BACKUP2</strong> — Dip/Trend/Scalper/Grad setup watches</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility</strong> — BACKUP Favourites · HELIUS Activity · HELIUS_BACKUP utility light</div>
-            <div class="mb-1"><strong style="color:#94a3b8">Emergency only</strong> — <code>RPC_URL</code> → <code>PUBLICNODE_URL</code> (never preferred)</div>
+
+          <div class="section-title" style="margin-bottom:0.4rem;font-size:0.95rem">Exclusive services (10)</div>
+          <p class="mint text-xs mb-2" style="color:#94a3b8">Each row has its own preferred RPC key. Keys do not share. On CU/unhealthy → <code>RPC_URL</code> then <code>PUBLICNODE_URL</code> only.</p>
+          <div class="overflow-x-auto mb-3">
+            <table id="rpc-services-table">
+              <thead>
+                <tr>
+                  <th>Service</th>
+                  <th>Intensity</th>
+                  <th>Preferred RPC</th>
+                  <th>Share</th>
+                  <th>Status</th>
+                  <th>Latency</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
-          <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Exclusive keys</strong> — Trading=<code>ALCHEMY_API_KEY</code>; Favourites=<code>BACKUP</code>; Watches=<code>BACKUP2</code>; Market=<code>BACKUP3</code>; Zion=<code>BACKUP4</code>; Migration=<code>BACKUP5</code>; Alpha=<code>BACKUP6</code>; Anti-rug=<code>BACKUP7</code>; Activity=<code>HELIUS_API_KEY</code>; Utility light=<code>HELIUS_API_KEY_BACKUP</code>.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Emergency failover</strong> — <code>RPC_URL</code> → <code>PUBLICNODE_URL</code> only (never another service’s exclusive key).</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
+
+          <div class="section-title" style="margin-bottom:0.4rem;font-size:0.95rem">Emergency fallbacks</div>
+          <div class="overflow-x-auto mb-3">
+            <table id="rpc-emergency-table">
+              <thead>
+                <tr>
+                  <th>Fallback</th>
+                  <th>Env</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Latency</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
+
           <div id="rpc-summary" class="mint mb-2">—</div>
-          <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
           <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
-          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
+
+          <div class="section-title" style="margin-bottom:0.4rem;font-size:0.95rem">Endpoint health</div>
+          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Service</th><th>OK</th><th>Latency</th><th>Success</th><th>Preferred</th></tr></thead><tbody></tbody></table></div>
           <div id="rpc-spike-inspector" class="mt-4">
             <div class="section-title" style="margin-bottom:0.4rem">Spike Inspector</div>
-            <p class="mint text-xs mb-2">Trading / Helius and Watchers / Alchemy — labels only, no URLs. Last 10 spikes. Generate Diagnosis stays on this page.</p>
+            <p class="mint text-xs mb-2">Trading / Watchers gate spikes — labels only, no URLs. Last 10 spikes.</p>
             <div id="rpc-spike-chips" class="flex flex-wrap gap-2 mb-2"></div>
             <p class="mint text-xs mb-2" id="rpc-spike-meta" style="color:#94a3b8">—</p>
             <div class="overflow-x-auto mb-2"><table id="rpc-spike-table"><thead><tr><th>Lane</th><th>Class</th><th>Duration</th><th>Recovered</th></tr></thead><tbody></tbody></table></div>
@@ -11022,7 +11034,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <pre id="rpc-spike-viewer" class="mint text-xs" style="max-height:min(50vh,24rem);overflow:auto;white-space:pre-wrap;word-break:break-word;padding:0.75rem;border:1px solid rgba(148,163,184,0.25);border-radius:0.5rem;background:rgba(15,23,42,0.45);margin:0">Click Generate Diagnosis to build a Cursor package…</pre>
           </div>
           <div class="mt-3 flex flex-wrap gap-2 items-center">
-            <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
+            <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan load and recommend Poll (ms) changes">Run RPC diagnostic</button>
             <span class="mint text-xs" id="rpc-diag-status">—</span>
           </div>
           <div id="rpc-diag-panel" class="mint text-xs mt-2" style="display:none;line-height:1.5;color:#94a3b8"></div>
@@ -28252,18 +28264,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         rpcLatEl.classList.toggle('is-bad', ms != null && ms >= 1200);
       }
       document.getElementById('rpc-summary').textContent =
-        'Primary active: ' + (rpc.active || '—') +
-        ' · Endpoints: ' + ((rpc.endpoints || []).length) +
-        ' · Alchemy keys: ' + (function () {
-          const ap = rpc.alchemyPace || {};
-          if (ap.keysConfigured == null) return '—';
-          return String(ap.keysConfigured) +
-            ' (' + (ap.keysHealthy != null ? ap.keysHealthy : '—') + ' healthy' +
-            (ap.scannerConfigured != null
-              ? '; scanners ' + (ap.scannerHealthy != null ? ap.scannerHealthy : '—') +
-                '/' + ap.scannerConfigured
-              : '') +
-            ')';
+        'Exclusive map: 10 services · Endpoints: ' + ((rpc.endpoints || []).length) +
+        ' · Configured exclusive: ' + (function () {
+          const xs = rpc.exclusiveServices || [];
+          const ok = xs.filter(function (s) { return s.configured; }).length;
+          return ok + '/' + (xs.length || 10);
         })() +
         ' · Share load: ' + (rpc.shareLoad ? 'ON' : 'OFF') +
         ' · Soft watch: ' + (function () {
@@ -28272,11 +28277,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           if (sw.softWatchCap != null) return String(sw.softWatchCap) + ' pool ' + (sw.watchPool != null ? sw.watchPool : '—');
           return '—';
         })() +
-        ' · Failover after: ' + (rpc.failoverDownMs != null
-          ? (Number(rpc.failoverDownMs) < 60000
-              ? Math.round(Number(rpc.failoverDownMs) / 1000) + 's'
-              : Math.round(Number(rpc.failoverDownMs) / 60000) + 'm')
-          : '30s') +
+        ' · Emergency: RPC_URL → PUBLICNODE_URL' +
         ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
       const shareToggle = document.getElementById('rpc-share-load');
       if (shareToggle) shareToggle.checked = rpc.shareLoad === true;
@@ -28286,24 +28287,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           rpc.containmentEnabled !== false &&
           !(rpc.spikeInspector && rpc.spikeInspector.containmentEnabled === false);
       }
-      const extraToggle = document.getElementById('rpc-helius-extra');
-      if (extraToggle) extraToggle.checked = rpc.heliusExtraFallbackEnabled === true;
-      const extraTarget = document.getElementById('rpc-helius-extra-target');
-      if (extraTarget) {
-        extraTarget.value =
-          rpc.heliusExtraFallbackTarget === 'public' ? 'public' : 'backup2';
-      }
-      const extraSt = document.getElementById('rpc-helius-extra-status');
-      if (extraSt) {
-        extraSt.textContent = rpc.heliusExtraFallbackEnabled
-          ? 'ON · lazy until Helius fails → ' +
-            (rpc.heliusExtraFallbackTarget === 'public'
-              ? 'public'
-              : 'BACKUP2')
-          : 'OFF — lane map unchanged';
-      }
-      const shareAlloc = document.getElementById('rpc-share-alloc');
-      if (shareAlloc) shareAlloc.style.display = rpc.shareLoad ? 'block' : 'none';
       const softCapEl = document.getElementById('rpc-soft-watch-cap');
       if (softCapEl && rpc.softWatch && rpc.softWatch.softWatchCap != null) {
         softCapEl.value = rpc.softWatch.softWatchCap;
@@ -28325,27 +28308,54 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ? ' · last poll ' + rpc.softWatch.lastPollElapsedMs + 'ms'
               : '');
       }
-      const laneSt = document.getElementById('rpc-lane-status');
-      if (laneSt) {
-        const p = rpc.primary || {};
-        const s = rpc.secondary || {};
-        const u = rpc.utility || {};
-        const w = rpc.watchers || {};
-        laneSt.textContent =
-          'Critical: ' + (p.label || '—') +
-          (p.failover ? ' (FAILOVER)' : '') +
-          (p.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Scanners: ' + (s.label || '—') +
-          (s.failover ? ' (FAILOVER)' : '') +
-          (s.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Watchers: ' + (w.label || '—') +
-          (w.configured === false ? ' (utility fallback)' : '') +
-          (w.failover ? ' (FAILOVER)' : '') +
-          (w.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Utility: ' + (u.label || '—') +
-          (u.failover ? ' (FAILOVER)' : '') +
-          (u.healthy === false ? ' · preferred DOWN' : '') +
-          (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
+      const svcBody = document.querySelector('#rpc-services-table tbody');
+      if (svcBody) {
+        const rows = rpc.exclusiveServices || [];
+        const intenColor = function (i) {
+          if (i === 'high') return '#f87171';
+          if (i === 'med') return '#fbbf24';
+          return '#34d399';
+        };
+        svcBody.innerHTML = rows.length === 0
+          ? '<tr><td colspan="6" style="color:var(--muted)">No exclusive services</td></tr>'
+          : rows.map(function (s) {
+              const st = !s.configured
+                ? 'UNSET'
+                : s.cooling
+                  ? 'COOLING'
+                  : s.healthy
+                    ? 'OK'
+                    : 'DOWN';
+              const stColor = st === 'OK' ? '#34d399' : st === 'COOLING' ? '#fbbf24' : '#f87171';
+              return '<tr>' +
+                '<td title="' + String(s.blurb || '').replace(/"/g, '&quot;') + '"><strong style="color:#e2e8f0">' +
+                String(s.title || s.service) + '</strong></td>' +
+                '<td style="color:' + intenColor(s.intensity) + ';font-weight:600">' +
+                String(s.intensity || '—').toUpperCase() + '</td>' +
+                '<td><code style="color:#94a3b8">' + String(s.envKey || '') + '</code>' +
+                '<div class="mint text-xs" style="color:#64748b">' + String(s.label || '') + '</div></td>' +
+                '<td style="color:#38bdf8">exclusive</td>' +
+                '<td style="color:' + stColor + '">' + st + '</td>' +
+                '<td>' + (s.latencyMs != null ? Math.round(s.latencyMs) + 'ms' : '—') + '</td>' +
+                '</tr>';
+            }).join('');
+      }
+      const emergBody = document.querySelector('#rpc-emergency-table tbody');
+      if (emergBody) {
+        const erows = rpc.emergencyFallbacks || [];
+        emergBody.innerHTML = erows.length === 0
+          ? '<tr><td colspan="5" style="color:var(--muted)">No emergency fallbacks</td></tr>'
+          : erows.map(function (s) {
+              const st = !s.configured ? 'UNSET' : s.healthy ? 'OK' : 'DOWN';
+              return '<tr>' +
+                '<td><strong style="color:#e2e8f0">' + String(s.title || s.label) + '</strong>' +
+                '<div class="mint text-xs" style="color:#64748b">' + String(s.blurb || '') + '</div></td>' +
+                '<td><code style="color:#94a3b8">' + String(s.envKey || '') + '</code></td>' +
+                '<td style="color:#94a3b8">emergency only</td>' +
+                '<td style="color:' + (st === 'OK' ? '#34d399' : '#f87171') + '">' + st + '</td>' +
+                '<td>' + (s.latencyMs != null ? Math.round(s.latencyMs) + 'ms' : '—') + '</td>' +
+                '</tr>';
+            }).join('');
       }
       const gateEl = document.getElementById('rpc-gate-status');
       if (gateEl) {
@@ -28423,15 +28433,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (rpcBody) {
         rpcBody.innerHTML = (rpc.endpoints || []).length === 0
           ? '<tr><td colspan="6" style="color:var(--muted)">No RPC endpoints configured</td></tr>'
-          : rpc.endpoints.map(e => \`
-            <tr>
-              <td title="\${e.url}">\${e.label}</td>
-              <td>\${e.lane || e.role || '—'}</td>
-              <td>\${e.healthy ? '✅' : '❌'}</td>
-              <td>\${e.latencyMs != null ? e.latencyMs + 'ms' : '—'}</td>
-              <td>\${e.successRate != null ? Number(e.successRate).toFixed(0) : '—'}% (\${e.successCount || 0}/\${(e.successCount || 0) + (e.failureCount || 0)})</td>
-              <td>\${e.isActive ? '●' : ''}</td>
-            </tr>\`).join('');
+          : rpc.endpoints.map(function (e) {
+              return '<tr>' +
+                '<td title="' + String(e.url || '').replace(/"/g, '&quot;') + '">' + String(e.label || '') + '</td>' +
+                '<td>' + String(e.serviceTitle || (e.exclusive ? 'exclusive' : e.lane || e.role || '—')) + '</td>' +
+                '<td>' + (e.healthy ? '✅' : '❌') + '</td>' +
+                '<td>' + (e.latencyMs != null ? e.latencyMs + 'ms' : '—') + '</td>' +
+                '<td>' + (e.successRate != null ? Number(e.successRate).toFixed(0) : '—') +
+                '% (' + (e.successCount || 0) + '/' + ((e.successCount || 0) + (e.failureCount || 0)) + ')</td>' +
+                '<td>' + (e.exclusive ? '●' : (e.label === 'rpc-url' || e.label === 'publicnode' ? 'emergency' : '')) + '</td>' +
+                '</tr>';
+            }).join('');
       }
       try { paintRpcSpikeInspector(rpc); } catch (_spikePaint) {}
       const jito = status.jito || {};
